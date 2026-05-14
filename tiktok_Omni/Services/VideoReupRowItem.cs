@@ -1,0 +1,73 @@
+using System.ComponentModel;
+
+namespace tiktok_Omni.Services
+{
+    /// <summary>Hàng làm việc cho tab «Video reup» (nguồn Săn Affiliate; SRT; remix FFmpeg + Lyria).</summary>
+    public class VideoReupRowItem
+    {
+        [Browsable(false)]
+        public string SourceKeyword { get; set; } = string.Empty;
+
+        public string ProductName { get; set; } = string.Empty;
+
+        [Browsable(false)]
+        public string Price { get; set; } = string.Empty;
+
+        public string VideoUrl { get; set; } = string.Empty;
+
+        [Browsable(false)]
+        public string ImageUrl { get; set; } = string.Empty;
+
+        public string Hashtags { get; set; } = string.Empty;
+        public string VideoScript { get; set; } = string.Empty;
+
+        /// <summary>Đường dẫn file .srt xuất gần nhất (chữ / caption).</summary>
+        [Browsable(false)]
+        public string LastCaptionSrtPath { get; set; } = string.Empty;
+
+        /// <summary>Câu hook thoại (Gemini / chỉnh tay) trước khi Lyria đọc.</summary>
+        [Browsable(false)]
+        public string ReupHookDraft { get; set; } = string.Empty;
+
+        /// <summary>Gemini gợi ý tên file .mp3 (có thể chọn trong Combo).</summary>
+        [Browsable(false)]
+        public string ReupSuggestedMusicFile { get; set; } = string.Empty;
+
+        /// <summary>File nhạc nền đã chọn (tên file trong VideoReup\Music).</summary>
+        [Browsable(false)]
+        public string ReupSelectedMusicFile { get; set; } = string.Empty;
+
+        /// <summary>Thư mục làm việc bền cho từng video (tải nguồn, hook Lyria, wav).</summary>
+        [Browsable(false)]
+        public string ReupStageFolder { get; set; } = string.Empty;
+
+        /// <summary>Đường dẫn file video nguồn đã tải (thường …\source.mp4 trong stage).</summary>
+        [Browsable(false)]
+        public string ReupDownloadedVideoPath { get; set; } = string.Empty;
+
+        /// <summary>File WAV hook đã chuẩn hóa (sau Lyria + FFmpeg), dùng khi render.</summary>
+        [Browsable(false)]
+        public string ReupHookAudioPath { get; set; } = string.Empty;
+
+        /// <summary>File MP4 remix gần nhất (cắt, lật, hook Lyria + nhạc).</summary>
+        public string LastRemixOutputPath { get; set; } = string.Empty;
+
+        /// <summary>Thời lượng video nguồn đã tải (giây) — set sau remix thành công.</summary>
+        [Browsable(false)]
+        public double? LastSourceVideoDurationSec { get; set; }
+
+        /// <summary>Thời lượng MP4 remix (giây) — ưu tiên dùng cho xuất SRT.</summary>
+        [Browsable(false)]
+        public double? LastRemixOutputVideoDurationSec { get; set; }
+
+        /// <summary>Độ dài hook thoại đã dùng (giây).</summary>
+        [Browsable(false)]
+        public double? LastHookDurationUsedSec { get; set; }
+
+        /// <summary>Trạng thái remix gần nhất (ví dụ: Đang xử lý, Xong, Lỗi).</summary>
+        public string RemixStatus { get; set; } = string.Empty;
+
+        /// <summary>Thông báo lỗi remix gần nhất (nếu có).</summary>
+        public string RemixLastError { get; set; } = string.Empty;
+    }
+}

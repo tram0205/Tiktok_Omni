@@ -1,0 +1,2 @@
+"""Philosophy video generation module."""
+

@@ -1,0 +1,55 @@
+# --- Build & IDE (đừng đồng bộ / đừng commit) ---
+[Bb]in/
+# Thư mục output build tạm (tên không phải "bin" nên không bị rule trên)
+bin_temp_verify/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+project.lock.json
+
+# Thư mục build tạm (CI / agent)
+_build*/
+_build_out*/
+
+# --- Logs & tạm chạy app ---
+*.log
+[Ll]ogs/
+temp_downloads/
+generated_videos/
+
+# --- Video reup / affiliate output trong repo (tái tạo được) ---
+VideoReup/Stages/
+VideoReup/Output/
+**/VideoReup/**/Captions/
+
+# --- Playwright / báo cáo ---
+playwright-report/
+test-results/
+**/playwright/.cache/
+
+# --- Python (philosophy_video_module) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# --- NuGet ---
+*.nupkg
+**/packages/
+
+# --- OS ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Bảo mật (nếu sau này có file cấu hình cạnh source) ---
+*.pfx
+secrets.json
+appsettings.*.local.json

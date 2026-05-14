@@ -1,0 +1,63 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "tiktok_Omni", "tiktok_Omni\tiktok_Omni.csproj", "{D00AE4B0-1653-4438-8251-FD25D508DB5C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "philosophy_video_module", "philosophy_video_module", "{90AA2A7A-6AAB-47D3-9E08-5AF14158D5CE}"
+	ProjectSection(SolutionItems) = preProject
+		philosophy_video_module\__init__.py = philosophy_video_module\__init__.py
+		philosophy_video_module\background_generator.py = philosophy_video_module\background_generator.py
+		philosophy_video_module\clients.py = philosophy_video_module\clients.py
+		philosophy_video_module\config.py = philosophy_video_module\config.py
+		philosophy_video_module\content_processor.py = philosophy_video_module\content_processor.py
+		philosophy_video_module\main.py = philosophy_video_module\main.py
+		philosophy_video_module\pipeline.py = philosophy_video_module\pipeline.py
+		philosophy_video_module\README.md = philosophy_video_module\README.md
+		philosophy_video_module\requirements.txt = philosophy_video_module\requirements.txt
+		philosophy_video_module\video_renderer.py = philosophy_video_module\video_renderer.py
+		philosophy_video_module\voice_generator.py = philosophy_video_module\voice_generator.py
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "tiktok_Omni.Tests", "tiktok_Omni.Tests\tiktok_Omni.Tests.csproj", "{30A8505B-FA19-428F-85BD-E3EF7678B691}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Debug|x64.Build.0 = Debug|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Debug|x86.Build.0 = Debug|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Release|x64.ActiveCfg = Release|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Release|x64.Build.0 = Release|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Release|x86.ActiveCfg = Release|Any CPU
+		{D00AE4B0-1653-4438-8251-FD25D508DB5C}.Release|x86.Build.0 = Release|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Debug|x64.Build.0 = Debug|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Debug|x86.Build.0 = Debug|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Release|Any CPU.Build.0 = Release|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Release|x64.ActiveCfg = Release|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Release|x64.Build.0 = Release|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Release|x86.ActiveCfg = Release|Any CPU
+		{30A8505B-FA19-428F-85BD-E3EF7678B691}.Release|x86.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
