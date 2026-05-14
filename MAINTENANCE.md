@@ -10,6 +10,13 @@
   - `dotnet build`
   - Với Playwright: trong thư mục project test/app, chạy `pwsh bin/Debug/net472/playwright.ps1 install` (hoặc theo hướng dẫn package Microsoft.Playwright) nếu build báo thiếu browser.
 - **Khởi tạo Git lần đầu** (máy đã cài [Git for Windows](https://git-scm.com/download/win)): có thể chạy `tiktok_Omni\tools\setup-git-repo.cmd` (tự `git init` + `git add -A` + `git status` tại thư mục solution), sau đó `git commit` và `git remote add` theo repo GitHub/GitLab của bạn.
+- **Nếu gõ `git` mà PowerShell báo không nhận**: đóng mở lại Cursor/VS/terminal, hoặc dùng **Git Bash**, hoặc gọi đầy đủ `"%ProgramFiles%\Git\cmd\git.exe"`.
+- **Đẩy mã lên GitHub** (sau khi đã có commit cục bộ):
+  1. Trên GitHub: **New repository** → tạo repo **trống** (không tick README nếu muốn tránh merge không cần thiết).
+  2. Trong thư mục có `tiktok_Omni.sln`:
+     - `git remote add origin https://github.com/TÊN_BẠN/TÊN_REPO.git`
+     - `git push -u origin main`
+  3. Đăng nhập GitHub (trình duyệt hoặc **Git Credential Manager**) khi được hỏi.
 - **Cấu hình & key**: `appsettings.json` nằm **cạnh file .exe** sau khi build (không commit được nhờ `.gitignore`); trên máy mới, chạy app một lần hoặc nhập lại tab **Cài đặt** (DPAPI gắn với user Windows — xem mục dưới).
 
 ## TikTok Web / Playwright
