@@ -1,0 +1,61 @@
+================================================================================
+  TẠO REPO GITHUB VÀ ĐẨY CODE tiktok_Omni (làm một lần)
+================================================================================
+
+Bạn ĐÃ có Git trên máy và project ĐÃ có sẵn commit (nhánh "main").
+Việc còn lại: tạo một "chỗ trống" trên GitHub rồi đẩy code lên.
+
+--------------------------------------------------------------------------------
+BƯỚC 1 — Tạo repo trên trang GitHub
+--------------------------------------------------------------------------------
+
+  • Double-click file:  github-mo-trang-tao-repo.cmd
+    → Trình duyệt mở trang tạo repo mới.
+
+  Hoặc tự mở: https://github.com/new  (cần đăng nhập GitHub)
+
+  Trên trang đó:
+    1) Repository name: gõ  tiktok_Omni  (hoặc tên khác)
+    2) Chọn Public hoặc Private
+    3) KHÔNG tick "Add a README" / "Add .gitignore" (vì máy bạn đã có code)
+    4) Bấm  Create repository
+
+--------------------------------------------------------------------------------
+BƯỚC 2 — Copy đường link repo
+--------------------------------------------------------------------------------
+
+  Sau khi tạo xong, GitHub hiện trang hướng dẫn.
+  Copy dòng HTTPS dạng:
+
+    https://github.com/TÊN_BẠN/tiktok_Omni.git
+
+--------------------------------------------------------------------------------
+BƯỚC 3 — Gắn link và đẩy code (push)
+--------------------------------------------------------------------------------
+
+  • Double-click file:  github-gan-remote-va-push.cmd
+
+  Khi được hỏi, DÁN nguyên URL vừa copy (chuột phải → Paste → Enter).
+
+  Lần đầu có thể hiện cửa sổ đăng nhập GitHub — đăng nhập và cho phép.
+
+--------------------------------------------------------------------------------
+Nếu báo lỗi "remote origin already exists"
+--------------------------------------------------------------------------------
+
+  Mở Command Prompt trong thư mục có file  tiktok_Omni.sln  rồi chạy:
+
+    "C:\Program Files\Git\cmd\git.exe" remote remove origin
+
+  Sau đó chạy lại  github-gan-remote-va-push.cmd
+
+--------------------------------------------------------------------------------
+Đổi tên / email hiện trên commit (tùy chọn)
+--------------------------------------------------------------------------------
+
+  (Thay đường dẫn cho đúng máy bạn — thư mục có file tiktok_Omni.sln)
+
+    "C:\Program Files\Git\cmd\git.exe" -C "C:\đường\dẫn\tiktok_Omni" config user.name "Tên của bạn"
+    "C:\Program Files\Git\cmd\git.exe" -C "C:\đường\dẫn\tiktok_Omni" config user.email "email@example.com"
+
+================================================================================
