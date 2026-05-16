@@ -2,7 +2,7 @@ using System.ComponentModel;
 
 namespace tiktok_Omni.Services
 {
-    /// <summary>Hàng làm việc cho tab «Video reup» (nguồn Săn Affiliate; SRT; remix FFmpeg + Lyria).</summary>
+    /// <summary>Hàng làm việc cho tab «Video reup» (nguồn Săn Affiliate; remix FFmpeg + Lyria; phụ đề hook trong render).</summary>
     public class VideoReupRowItem
     {
         [Browsable(false)]
@@ -21,12 +21,7 @@ namespace tiktok_Omni.Services
         public string Hashtags { get; set; } = string.Empty;
         public string VideoScript { get; set; } = string.Empty;
 
-        /// <summary>Đường dẫn file .srt xuất gần nhất (chữ / caption).</summary>
-        [Browsable(false)]
-        public string LastCaptionSrtPath { get; set; } = string.Empty;
-
-        /// <summary>Câu hook thoại (Gemini / chỉnh tay) trước khi Lyria đọc.</summary>
-        [Browsable(false)]
+        /// <summary>Câu hook thoại (Gemini / chỉnh tay) trước khi Lyria đọc — hiển thị/sửa trong bảng Video reup.</summary>
         public string ReupHookDraft { get; set; } = string.Empty;
 
         /// <summary>Gemini gợi ý tên file .mp3 (có thể chọn trong Combo).</summary>
@@ -36,6 +31,10 @@ namespace tiktok_Omni.Services
         /// <summary>File nhạc nền đã chọn (tên file trong VideoReup\Music).</summary>
         [Browsable(false)]
         public string ReupSelectedMusicFile { get; set; } = string.Empty;
+
+        /// <summary>Sau hook: nhạc nền hay giữ tiếng gốc video (chế độ phim).</summary>
+        [Browsable(false)]
+        public VideoReupAudioMode ReupAudioMode { get; set; } = VideoReupAudioMode.AffiliateBed;
 
         /// <summary>Thư mục làm việc bền cho từng video (tải nguồn, hook Lyria, wav).</summary>
         [Browsable(false)]
@@ -56,7 +55,7 @@ namespace tiktok_Omni.Services
         [Browsable(false)]
         public double? LastSourceVideoDurationSec { get; set; }
 
-        /// <summary>Thời lượng MP4 remix (giây) — ưu tiên dùng cho xuất SRT.</summary>
+        /// <summary>Thời lượng MP4 remix (giây).</summary>
         [Browsable(false)]
         public double? LastRemixOutputVideoDurationSec { get; set; }
 

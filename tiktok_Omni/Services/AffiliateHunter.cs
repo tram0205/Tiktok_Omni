@@ -1155,86 +1155,15 @@ namespace tiktok_Omni.Services
 
         private static string ResolveFfmpegExecutablePath(AppSettings settings, Action<string> logAction)
         {
-            static void AddUnique(List<string> list, string path)
+            if (FfmpegToolkitService.TryResolve(settings, out var toolkit, out _))
             {
-                if (string.IsNullOrWhiteSpace(path))
-                {
-                    return;
-                }
-                var t = path.Trim();
-                if (list.Exists(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase)))
-                {
-                    return;
-                }
-                list.Add(t);
+                logAction?.Invoke("[DeepDive] Dùng FFmpeg: " + toolkit.FfmpegExe);
+                return toolkit.FfmpegExe;
             }
 
-            var candidates = new List<string>();
-            AddUnique(candidates, settings?.FfmpegPath);
-
-            try
-            {
-                var main = Process.GetCurrentProcess().MainModule?.FileName;
-                if (!string.IsNullOrEmpty(main))
-                {
-                    var dir = Path.GetDirectoryName(main);
-                    AddUnique(candidates, Path.Combine(dir ?? string.Empty, "ffmpeg.exe"));
-                }
-            }
-            catch
-            {
-                // ignored
-            }
-
-            AddUnique(candidates, Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "ffmpeg.exe"));
-
-            try
-            {
-                var loc = Assembly.GetExecutingAssembly().Location;
-                if (!string.IsNullOrEmpty(loc))
-                {
-                    var dir = Path.GetDirectoryName(loc);
-                    AddUnique(candidates, Path.Combine(dir ?? string.Empty, "ffmpeg.exe"));
-                }
-            }
-            catch
-            {
-                // ignored
-            }
-
-            foreach (var c in candidates)
-            {
-                if (!string.IsNullOrWhiteSpace(c) && File.Exists(c))
-                {
-                    logAction?.Invoke("[DeepDive] Dùng FFmpeg: " + c);
-                    return c;
-                }
-            }
-
-            string dirExe;
-            try
-            {
-                dirExe = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty);
-            }
-            catch
-            {
-                dirExe = string.Empty;
-            }
-            if (string.IsNullOrWhiteSpace(dirExe))
-            {
-                dirExe = AppDomain.CurrentDomain.BaseDirectory ?? ".";
-            }
-
-            var tried = string.Join("\r\n  - ", candidates.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase));
             throw new InvalidOperationException(
-                "Chưa tìm thấy ffmpeg.exe.\r\n\r\n" +
-                "Cách xử lý:\r\n" +
-                "• Tab «Cài đặt» → ô «FFmpeg Path (optional)» → Browse chọn file ffmpeg.exe\r\n" +
-                "  (thường nằm trong thư mục bin của bản build Windows).\r\n" +
-                "• Hoặc đặt ffmpeg.exe vào thư mục chạy app:\r\n  " + dirExe + "\r\n\r\n" +
-                "Gợi ý tải build sẵn (Windows): https://www.gyan.dev/ffmpeg/builds/\r\n" +
-                "(tìm «ffmpeg-release-essentials.zip», giải nén → chọn …\\bin\\ffmpeg.exe).\r\n\r\n" +
-                "Đã thử các đường dẫn:\r\n  - " + tried);
+                "Chưa tìm thấy ffmpeg.exe — app sẽ tự tải vào Tools\\ffmpeg khi chạy Video reup hoặc bấm «⬇ Tải FFmpeg» trong Cài đặt.\r\n" +
+                "Dự kiến: " + FfmpegToolkitService.GetBundledFfmpegPath());
         }
 
         public async Task ExportCsvAsync(IList<AffiliateCandidate> candidates, string filePath, CancellationToken cancellationToken)

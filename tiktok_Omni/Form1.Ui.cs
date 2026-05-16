@@ -1507,16 +1507,26 @@ namespace tiktok_Omni
             tabAiModeAffiliateDeep.Controls.Add(lblAffiliateDeepHint);
             tabAiModeAffiliateDeep.Controls.Add(btnRunAffiliateDeepVideo);
 
+            var lblPhilosophyTitle = new Label
+            {
+                Text = "Video Triết lý / Quote — Gemini + Lyria + Veo/FFmpeg (Cài đặt chung)",
+                AutoSize = true,
+                Location = new Point(18, 12 + aiTabProgressReserve),
+                ForeColor = Color.WhiteSmoke,
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point)
+            };
             var lblPhilosophyHint = new Label
             {
-                Text = "Quote hoặc link bài / video",
-                AutoSize = true,
-                Location = new Point(18, 16 + aiTabProgressReserve)
+                Text = "Nhập quote hoặc link bài → «Tạo video Triết lý». Cần AI Key + Lyria; Veo tùy chọn (không có thì nền gradient).",
+                Location = new Point(18, 36 + aiTabProgressReserve),
+                Size = new Size(980, 36),
+                AutoSize = false,
+                ForeColor = Color.FromArgb(180, 185, 198)
             };
             txtPhilosophyInput = new TextBox
             {
                 Name = "txtPhilosophyInput",
-                Location = new Point(18, 40 + aiTabProgressReserve),
+                Location = new Point(18, 76 + aiTabProgressReserve),
                 Size = new Size(980, 30),
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(45, 49, 60),
@@ -1526,20 +1536,88 @@ namespace tiktok_Omni
             btnRunPhilosophyVideo = new Button
             {
                 Name = "btnRunPhilosophyVideo",
-                Text = "Chạy video Triết lý/Quote",
-                Location = new Point(18, 82 + aiTabProgressReserve),
-                Size = new Size(280, 36),
+                Text = "Tạo video Triết lý",
+                Location = new Point(18, 114 + aiTabProgressReserve),
+                Size = new Size(220, 36),
                 BackColor = Color.FromArgb(92, 118, 204),
                 FlatStyle = FlatStyle.Flat,
                 ForeColor = Color.White
             };
             btnRunPhilosophyVideo.FlatAppearance.BorderSize = 0;
             btnRunPhilosophyVideo.Click += btnRunPhilosophyVideo_Click;
+
+            pnlPhilosophyStatus = new Panel
+            {
+                Name = "pnlPhilosophyStatus",
+                Location = new Point(18, 158 + aiTabProgressReserve),
+                Size = new Size(980, 132),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+                BackColor = Color.FromArgb(24, 26, 32),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            lblPhilosophyProgress = new Label
+            {
+                Name = "lblPhilosophyProgress",
+                Text = "Tiến trình: sẵn sàng",
+                Dock = DockStyle.Top,
+                Height = 20,
+                ForeColor = Color.FromArgb(200, 204, 214)
+            };
+            pbPhilosophyProgress = new ProgressBar
+            {
+                Name = "pbPhilosophyProgress",
+                Dock = DockStyle.Top,
+                Height = 12,
+                Style = ProgressBarStyle.Continuous
+            };
+            btnPhilosophyClearLog = new Button
+            {
+                Name = "btnPhilosophyClearLog",
+                Text = "Xóa log",
+                Size = new Size(72, 24),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.FromArgb(60, 64, 77),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.WhiteSmoke
+            };
+            btnPhilosophyClearLog.FlatAppearance.BorderSize = 0;
+            btnPhilosophyClearLog.Click += btnPhilosophyClearLog_Click;
+            rtbPhilosophyLog = new RichTextBox
+            {
+                Name = "rtbPhilosophyLog",
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                BackColor = Color.FromArgb(20, 22, 28),
+                ForeColor = Color.LightGray,
+                BorderStyle = BorderStyle.None,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                Font = new Font("Consolas", 8.25F, FontStyle.Regular, GraphicsUnit.Point)
+            };
+            pnlPhilosophyStatus.Controls.Add(rtbPhilosophyLog);
+            pnlPhilosophyStatus.Controls.Add(pbPhilosophyProgress);
+            pnlPhilosophyStatus.Controls.Add(lblPhilosophyProgress);
+            pnlPhilosophyStatus.Controls.Add(btnPhilosophyClearLog);
+            pnlPhilosophyStatus.Resize += (_, __) =>
+            {
+                if (btnPhilosophyClearLog != null)
+                {
+                    btnPhilosophyClearLog.Location = new Point(
+                        Math.Max(8, pnlPhilosophyStatus.ClientSize.Width - btnPhilosophyClearLog.Width - 8),
+                        4);
+                }
+            };
+
+            tabAiModePhilosophy.Controls.Add(lblPhilosophyTitle);
             tabAiModePhilosophy.Controls.Add(lblPhilosophyHint);
             tabAiModePhilosophy.Controls.Add(txtPhilosophyInput);
             tabAiModePhilosophy.Controls.Add(btnRunPhilosophyVideo);
+            tabAiModePhilosophy.Controls.Add(pnlPhilosophyStatus);
+            tabAiModePhilosophy.AutoScrollMinSize = new Size(0, 158 + aiTabProgressReserve + 150);
 
             const int vrTop = 12 + aiTabProgressReserve;
+            const int vrBtnRowY = vrTop + 22;
+            const int vrGridHintY = vrBtnRowY + 36 + 8;
+            const int vrGridTop = vrGridHintY + 22 + 6;
             var lblVideoReupTitle = new Label
             {
                 Text = "Video reup — tạo phiên bản mới từ video / dữ liệu affiliate",
@@ -1548,21 +1626,86 @@ namespace tiktok_Omni
                 ForeColor = Color.WhiteSmoke,
                 Font = new Font("Segoe UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point)
             };
-            var lblVideoReupHint = new Label
+            lblVideoReupHint = new Label
             {
-                Text = "1) URL: chọn dòng → dán link TikTok vào ô «URL video» → Tab/click ra ngoài để tự tải; hoặc «Nhập từ Săn Affiliate» (cũng tự tải khi có URL).\r\n" +
-                       "2) «Thêm dòng» nếu muốn nhập link tay không qua affiliate.\r\n" +
-                       "3) Gemini hook → chỉnh câu → Lyria → chọn nhạc → «Render video». Xóa dòng: chọn → Delete.\r\n" +
-                       "4) SRT sau khi render. Cần FFmpeg, Lyria, AI Key, .mp3 trong VideoReup\\Music; tải video qua TikWM.",
-                Location = new Point(18, vrTop + 26),
-                Size = new Size(980, 78),
-                ForeColor = Color.FromArgb(180, 185, 198)
+                Name = "lblVideoReupHint",
+                Text = "Thêm dòng + URL TikTok → «Tạo video thành phẩm» (4 bước) hoặc «Gemini: tạo hook» riêng. Cột «Remix»/«Lỗi» + tiến trình & log bên dưới.",
+                Dock = DockStyle.Bottom,
+                Height = 36,
+                AutoSize = false,
+                ForeColor = Color.FromArgb(180, 185, 198),
+                Padding = new Padding(18, 4, 18, 4),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            pnlVideoReupStatus = new Panel
+            {
+                Name = "pnlVideoReupStatus",
+                Dock = DockStyle.Bottom,
+                Height = 132,
+                BackColor = Color.FromArgb(24, 26, 32),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(8, 6, 8, 6)
+            };
+            lblVideoReupProgress = new Label
+            {
+                Name = "lblVideoReupProgress",
+                Text = "Tiến trình: sẵn sàng",
+                Dock = DockStyle.Top,
+                Height = 20,
+                ForeColor = Color.FromArgb(200, 204, 214),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+            pbVideoReupProgress = new ProgressBar
+            {
+                Name = "pbVideoReupProgress",
+                Dock = DockStyle.Top,
+                Height = 12,
+                Minimum = 0,
+                Maximum = 100,
+                Value = 0,
+                Style = ProgressBarStyle.Continuous
+            };
+            btnVideoReupClearLog = new Button
+            {
+                Name = "btnVideoReupClearLog",
+                Text = "Xóa log",
+                Size = new Size(72, 24),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.FromArgb(60, 64, 77),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.WhiteSmoke
+            };
+            btnVideoReupClearLog.FlatAppearance.BorderSize = 0;
+            btnVideoReupClearLog.Click += btnVideoReupClearLog_Click;
+            rtbVideoReupLog = new RichTextBox
+            {
+                Name = "rtbVideoReupLog",
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                BackColor = Color.FromArgb(20, 22, 28),
+                ForeColor = Color.LightGray,
+                BorderStyle = BorderStyle.None,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                Font = new Font("Consolas", 8.25F, FontStyle.Regular, GraphicsUnit.Point)
+            };
+            pnlVideoReupStatus.Controls.Add(rtbVideoReupLog);
+            pnlVideoReupStatus.Controls.Add(pbVideoReupProgress);
+            pnlVideoReupStatus.Controls.Add(lblVideoReupProgress);
+            pnlVideoReupStatus.Controls.Add(btnVideoReupClearLog);
+            pnlVideoReupStatus.Resize += (_, __) =>
+            {
+                if (btnVideoReupClearLog != null)
+                {
+                    btnVideoReupClearLog.Location = new Point(
+                        Math.Max(8, pnlVideoReupStatus.ClientSize.Width - btnVideoReupClearLog.Width - 8),
+                        4);
+                }
             };
             btnPushSelectionToVideoReup = new Button
             {
                 Name = "btnPushSelectionToVideoReup",
                 Text = "Nhập từ Săn Affiliate",
-                Location = new Point(18, vrTop + 112),
+                Location = new Point(18, vrBtnRowY),
                 Size = new Size(280, 36),
                 BackColor = Color.FromArgb(76, 110, 245),
                 FlatStyle = FlatStyle.Flat,
@@ -1574,7 +1717,7 @@ namespace tiktok_Omni
             {
                 Name = "btnVideoReupAddManualRow",
                 Text = "Thêm dòng (nhập URL)",
-                Location = new Point(306, vrTop + 112),
+                Location = new Point(306, vrBtnRowY),
                 Size = new Size(220, 36),
                 BackColor = Color.FromArgb(55, 95, 160),
                 FlatStyle = FlatStyle.Flat,
@@ -1582,47 +1725,83 @@ namespace tiktok_Omni
             };
             btnVideoReupAddManualRow.FlatAppearance.BorderSize = 0;
             btnVideoReupAddManualRow.Click += btnVideoReupAddManualRow_Click;
+            const int vrGridH = 270;
+            var lblVideoReupGridHint = new Label
+            {
+                Text = "Danh sách — chọn dòng (Ctrl+click nhiều dòng cho render lô).",
+                Location = new Point(18, vrGridHintY),
+                Size = new Size(980, 22),
+                ForeColor = Color.FromArgb(170, 175, 188)
+            };
+            _videoReupBindingList = new BindingList<VideoReupRowItem>();
+            dgvVideoReupInput = new DataGridView
+            {
+                Name = "dgvVideoReupInput",
+                Location = new Point(18, vrGridTop),
+                Size = new Size(980, vrGridH),
+                AutoGenerateColumns = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                ReadOnly = false,
+                EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = true,
+                BackgroundColor = Color.FromArgb(20, 22, 28),
+                BorderStyle = BorderStyle.FixedSingle,
+                GridColor = Color.FromArgb(60, 64, 77),
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
+                ScrollBars = ScrollBars.Both,
+                DataSource = _videoReupBindingList,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            dgvVideoReupInput.DefaultCellStyle.BackColor = Color.FromArgb(31, 34, 42);
+            dgvVideoReupInput.DefaultCellStyle.ForeColor = Color.Gainsboro;
+            dgvVideoReupInput.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
+            dgvVideoReupInput.DefaultCellStyle.SelectionBackColor = Color.FromArgb(76, 110, 245);
+            dgvVideoReupInput.DefaultCellStyle.SelectionForeColor = Color.White;
+            dgvVideoReupInput.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(45, 49, 60);
+            dgvVideoReupInput.ColumnHeadersDefaultCellStyle.ForeColor = Color.WhiteSmoke;
+            dgvVideoReupInput.EnableHeadersVisualStyles = false;
+            dgvVideoReupInput.DataBindingComplete += DgvVideoReupInput_DataBindingComplete;
+            dgvVideoReupInput.CellBeginEdit += DgvVideoReupInput_CellBeginEdit;
+            dgvVideoReupInput.CellEndEdit += DgvVideoReupInput_CellEndEdit;
+            dgvVideoReupInput.KeyDown += dgvVideoReupInput_KeyDown;
+            dgvVideoReupInput.SelectionChanged += dgvVideoReupInput_SelectionChanged;
+            const int vrPanelTop = vrGridTop + vrGridH + 10;
             lblVideoReupVideoUrl = new Label
             {
-                Text = "URL video (TikTok — rời ô để tải nguồn về máy)",
+                Text = "URL video — dòng đang chọn (có thể sửa luôn cột «URL video» trong bảng; rời ô hoặc Enter để tải)",
                 AutoSize = true,
-                Location = new Point(18, vrTop + 156),
+                Location = new Point(18, vrPanelTop),
                 ForeColor = Color.FromArgb(200, 204, 214)
             };
             txtVideoReupVideoUrl = new TextBox
             {
                 Name = "txtVideoReupVideoUrl",
-                Location = new Point(18, vrTop + 176),
+                Location = new Point(18, vrPanelTop + 20),
                 Size = new Size(980, 28),
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(28, 30, 38),
                 ForeColor = Color.Gainsboro
             };
             txtVideoReupVideoUrl.Leave += txtVideoReupVideoUrl_Leave;
-            var lblVideoReupHook = new Label
+            lblVideoReupHook = new Label
             {
-                Text = "Câu hook (Gemini / chỉnh tay, 4–7s đọc)",
-                AutoSize = true,
-                Location = new Point(18, vrTop + 214),
-                ForeColor = Color.FromArgb(200, 204, 214)
+                Name = "lblVideoReupHook",
+                Text = "Hook thoại (4–7s): sửa trong cột «Hook» của bảng. Khi «Render video», chữ karaoke (đoạn đầu = độ dài hook Lyria) được nhúng vào MP4 — timeline do Gemini ước lượng theo giọng đọc nếu có AI Key; không key thì chia theo câu tự động.",
+                Location = new Point(18, vrPanelTop + 52),
+                Size = new Size(980, 38),
+                AutoSize = false,
+                ForeColor = Color.FromArgb(200, 204, 214),
+                TextAlign = ContentAlignment.TopLeft
             };
-            txtVideoReupHookDraft = new TextBox
-            {
-                Name = "txtVideoReupHookDraft",
-                Location = new Point(18, vrTop + 234),
-                Size = new Size(980, 44),
-                Multiline = true,
-                ScrollBars = ScrollBars.Vertical,
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.FromArgb(28, 30, 38),
-                ForeColor = Color.Gainsboro
-            };
-            txtVideoReupHookDraft.Leave += txtVideoReupHookDraft_Leave;
             btnVideoReupHookGemini = new Button
             {
                 Name = "btnVideoReupHookGemini",
                 Text = "Gemini: tạo hook",
-                Location = new Point(18, vrTop + 288),
+                Location = new Point(18, vrPanelTop + 94),
                 Size = new Size(160, 32),
                 BackColor = Color.FromArgb(76, 110, 245),
                 FlatStyle = FlatStyle.Flat,
@@ -1634,7 +1813,7 @@ namespace tiktok_Omni
             {
                 Name = "btnVideoReupHookRegen",
                 Text = "Tạo lại hook",
-                Location = new Point(186, vrTop + 288),
+                Location = new Point(186, vrPanelTop + 94),
                 Size = new Size(140, 32),
                 BackColor = Color.FromArgb(60, 100, 200),
                 FlatStyle = FlatStyle.Flat,
@@ -1646,7 +1825,7 @@ namespace tiktok_Omni
             {
                 Name = "btnVideoReupLyriaHook",
                 Text = "Lyria: đọc hook → âm thanh",
-                Location = new Point(334, vrTop + 288),
+                Location = new Point(334, vrPanelTop + 94),
                 Size = new Size(220, 32),
                 BackColor = Color.FromArgb(120, 70, 160),
                 FlatStyle = FlatStyle.Flat,
@@ -1654,111 +1833,136 @@ namespace tiktok_Omni
             };
             btnVideoReupLyriaHook.FlatAppearance.BorderSize = 0;
             btnVideoReupLyriaHook.Click += btnVideoReupLyriaHook_Click;
+            const int vrAudioModeTop = vrPanelTop + 128;
+            grpVideoReupAudioMode = new GroupBox
+            {
+                Name = "grpVideoReupAudioMode",
+                Text = "Âm thanh sau hook",
+                Location = new Point(18, vrAudioModeTop),
+                Size = new Size(980, 50),
+                ForeColor = Color.FromArgb(200, 204, 214),
+                FlatStyle = FlatStyle.Flat
+            };
+            rbVideoReupAudioAffiliate = new RadioButton
+            {
+                Name = "rbVideoReupAudioAffiliate",
+                Text = "Affiliate: hook + nhạc nền (.mp3)",
+                Location = new Point(12, 20),
+                AutoSize = true,
+                ForeColor = Color.Gainsboro,
+                Checked = true
+            };
+            rbVideoReupAudioFilm = new RadioButton
+            {
+                Name = "rbVideoReupAudioFilm",
+                Text = "Phim: hook + giữ tiếng gốc video (không nhạc nền)",
+                Location = new Point(420, 20),
+                AutoSize = true,
+                ForeColor = Color.Gainsboro
+            };
+            rbVideoReupAudioAffiliate.CheckedChanged += VideoReupAudioModeRadio_CheckedChanged;
+            rbVideoReupAudioFilm.CheckedChanged += VideoReupAudioModeRadio_CheckedChanged;
+            grpVideoReupAudioMode.Controls.Add(rbVideoReupAudioAffiliate);
+            grpVideoReupAudioMode.Controls.Add(rbVideoReupAudioFilm);
             lblVideoReupMusicPick = new Label
             {
-                Text = "Nhạc nền (.mp3)",
+                Text = "Nhạc nền (.mp3) — sau khi copy bài vào thư mục, bấm «Làm mới danh sách»",
                 AutoSize = true,
-                Location = new Point(18, vrTop + 328),
+                Location = new Point(18, vrAudioModeTop + 58),
                 ForeColor = Color.FromArgb(200, 204, 214)
             };
             cbVideoReupMusic = new ComboBox
             {
                 Name = "cbVideoReupMusic",
-                Location = new Point(140, vrTop + 324),
-                Size = new Size(420, 28),
+                Location = new Point(140, vrAudioModeTop + 54),
+                Size = new Size(320, 28),
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.WhiteSmoke
             };
             cbVideoReupMusic.SelectedIndexChanged += cbVideoReupMusic_SelectedIndexChanged;
+            btnVideoReupOpenMusicFolder = new Button
+            {
+                Name = "btnVideoReupOpenMusicFolder",
+                Text = "Mở thư mục nhạc",
+                Location = new Point(468, vrAudioModeTop + 52),
+                Size = new Size(138, 30),
+                BackColor = Color.FromArgb(55, 100, 140),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.White
+            };
+            btnVideoReupOpenMusicFolder.FlatAppearance.BorderSize = 0;
+            btnVideoReupOpenMusicFolder.Click += btnVideoReupOpenMusicFolder_Click;
+            btnVideoReupRefreshMusicList = new Button
+            {
+                Name = "btnVideoReupRefreshMusicList",
+                Text = "Làm mới danh sách",
+                Location = new Point(612, vrAudioModeTop + 52),
+                Size = new Size(138, 30),
+                BackColor = Color.FromArgb(50, 120, 90),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.White
+            };
+            btnVideoReupRefreshMusicList.FlatAppearance.BorderSize = 0;
+            btnVideoReupRefreshMusicList.Click += btnVideoReupRefreshMusicList_Click;
+            lblVideoReupMusicPathHint = new Label
+            {
+                Name = "lblVideoReupMusicPathHint",
+                Text = string.Empty,
+                Location = new Point(18, vrAudioModeTop + 86),
+                Size = new Size(980, 44),
+                AutoSize = false,
+                AutoEllipsis = true,
+                ForeColor = Color.FromArgb(160, 168, 182),
+                TextAlign = ContentAlignment.TopLeft
+            };
+            const int vrReupBtnRowY = vrAudioModeTop + 138;
             btnVideoReupRenderVideo = new Button
             {
                 Name = "btnVideoReupRenderVideo",
-                Text = "Render video (ghép + chỉnh)",
-                Location = new Point(572, vrTop + 320),
-                Size = new Size(220, 36),
+                Text = "Tạo video thành phẩm",
+                Location = new Point(572, vrReupBtnRowY),
+                Size = new Size(200, 36),
                 BackColor = Color.FromArgb(160, 90, 60),
                 FlatStyle = FlatStyle.Flat,
                 ForeColor = Color.White
             };
             btnVideoReupRenderVideo.FlatAppearance.BorderSize = 0;
             btnVideoReupRenderVideo.Click += btnVideoReupRenderVideo_Click;
-            btnVideoReupExportSrtHeuristic = new Button
+            btnVideoReupRenderBatch = new Button
             {
-                Name = "btnVideoReupExportSrtHeuristic",
-                Text = "Xuất SRT (chia theo câu)",
-                Location = new Point(18, vrTop + 368),
-                Size = new Size(210, 34),
-                BackColor = Color.FromArgb(60, 120, 90),
+                Name = "btnVideoReupRenderBatch",
+                Text = "Tạo video thành phẩm (lô)",
+                Location = new Point(780, vrReupBtnRowY),
+                Size = new Size(218, 36),
+                BackColor = Color.FromArgb(130, 75, 45),
                 FlatStyle = FlatStyle.Flat,
                 ForeColor = Color.White
             };
-            btnVideoReupExportSrtHeuristic.FlatAppearance.BorderSize = 0;
-            btnVideoReupExportSrtHeuristic.Click += btnVideoReupExportSrtHeuristic_Click;
-            btnVideoReupExportSrtGemini = new Button
-            {
-                Name = "btnVideoReupExportSrtGemini",
-                Text = "Gemini → timeline → SRT",
-                Location = new Point(236, vrTop + 368),
-                Size = new Size(220, 34),
-                BackColor = Color.FromArgb(76, 110, 245),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.White
-            };
-            btnVideoReupExportSrtGemini.FlatAppearance.BorderSize = 0;
-            btnVideoReupExportSrtGemini.Click += btnVideoReupExportSrtGemini_Click;
-            _videoReupBindingList = new BindingList<VideoReupRowItem>();
-            const int vrReupGridTop = vrTop + 412;
-            dgvVideoReupInput = new DataGridView
-            {
-                Name = "dgvVideoReupInput",
-                Location = new Point(18, vrReupGridTop),
-                Size = new Size(980, 300),
-                AutoGenerateColumns = true,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                ReadOnly = true,
-                RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = true,
-                BackgroundColor = Color.FromArgb(20, 22, 28),
-                BorderStyle = BorderStyle.FixedSingle,
-                GridColor = Color.FromArgb(60, 64, 77),
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
-                ScrollBars = ScrollBars.Both,
-                DataSource = _videoReupBindingList,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
-            };
-            dgvVideoReupInput.DefaultCellStyle.BackColor = Color.FromArgb(31, 34, 42);
-            dgvVideoReupInput.DefaultCellStyle.ForeColor = Color.Gainsboro;
-            dgvVideoReupInput.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
-            dgvVideoReupInput.DefaultCellStyle.SelectionBackColor = Color.FromArgb(76, 110, 245);
-            dgvVideoReupInput.DefaultCellStyle.SelectionForeColor = Color.White;
-            dgvVideoReupInput.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(45, 49, 60);
-            dgvVideoReupInput.ColumnHeadersDefaultCellStyle.ForeColor = Color.WhiteSmoke;
-            dgvVideoReupInput.EnableHeadersVisualStyles = false;
-            dgvVideoReupInput.DataBindingComplete += DgvVideoReupInput_DataBindingComplete;
-            dgvVideoReupInput.KeyDown += dgvVideoReupInput_KeyDown;
-            dgvVideoReupInput.SelectionChanged += dgvVideoReupInput_SelectionChanged;
+            btnVideoReupRenderBatch.FlatAppearance.BorderSize = 0;
+            btnVideoReupRenderBatch.Click += btnVideoReupRenderBatch_Click;
             tabAiModeVideoReup.Controls.Add(lblVideoReupTitle);
-            tabAiModeVideoReup.Controls.Add(lblVideoReupHint);
             tabAiModeVideoReup.Controls.Add(btnPushSelectionToVideoReup);
             tabAiModeVideoReup.Controls.Add(btnVideoReupAddManualRow);
+            tabAiModeVideoReup.Controls.Add(lblVideoReupGridHint);
+            tabAiModeVideoReup.Controls.Add(dgvVideoReupInput);
             tabAiModeVideoReup.Controls.Add(lblVideoReupVideoUrl);
             tabAiModeVideoReup.Controls.Add(txtVideoReupVideoUrl);
             tabAiModeVideoReup.Controls.Add(lblVideoReupHook);
-            tabAiModeVideoReup.Controls.Add(txtVideoReupHookDraft);
             tabAiModeVideoReup.Controls.Add(btnVideoReupHookGemini);
             tabAiModeVideoReup.Controls.Add(btnVideoReupHookRegen);
             tabAiModeVideoReup.Controls.Add(btnVideoReupLyriaHook);
+            tabAiModeVideoReup.Controls.Add(grpVideoReupAudioMode);
             tabAiModeVideoReup.Controls.Add(lblVideoReupMusicPick);
             tabAiModeVideoReup.Controls.Add(cbVideoReupMusic);
+            tabAiModeVideoReup.Controls.Add(btnVideoReupOpenMusicFolder);
+            tabAiModeVideoReup.Controls.Add(btnVideoReupRefreshMusicList);
+            tabAiModeVideoReup.Controls.Add(lblVideoReupMusicPathHint);
             tabAiModeVideoReup.Controls.Add(btnVideoReupRenderVideo);
-            tabAiModeVideoReup.Controls.Add(btnVideoReupExportSrtHeuristic);
-            tabAiModeVideoReup.Controls.Add(btnVideoReupExportSrtGemini);
-            tabAiModeVideoReup.Controls.Add(dgvVideoReupInput);
-            tabAiModeVideoReup.AutoScrollMinSize = new Size(0, vrReupGridTop + 280 + 36);
+            tabAiModeVideoReup.Controls.Add(btnVideoReupRenderBatch);
+            tabAiModeVideoReup.Controls.Add(lblVideoReupHint);
+            tabAiModeVideoReup.Controls.Add(pnlVideoReupStatus);
+            tabAiModeVideoReup.AutoScrollMinSize = new Size(0, vrAudioModeTop + 188);
             RefreshVideoReupMusicCombo();
 
             var lblMascotTheme = new Label
@@ -2556,7 +2760,7 @@ namespace tiktok_Omni
                 Parent = grpBehavior
             };
 
-            var grpMedia = CreateSettingsGroup(ref rightY, colRightX, colW, "Veo / Lyria / FFmpeg / yt-dlp — video, nhạc, xử lý file", 384);
+            var grpMedia = CreateSettingsGroup(ref rightY, colRightX, colW, "Veo / Lyria / FFmpeg / yt-dlp / Video reup nhạc — video, nhạc, xử lý file", 448);
             var lblVeoApiKey = CreateSettingLabel("Veo API Key", xField, 26);
             lblVeoApiKey.Parent = grpMedia;
             txtVeoApiKey = CreateSettingTextBox("txtVeoApiKey", xField, 48, tbSecret, true);
@@ -2589,7 +2793,7 @@ namespace tiktok_Omni
             txtLyriaEndpoint = CreateSettingTextBox("txtLyriaEndpoint", xField, 216, tbFull);
             txtLyriaEndpoint.Parent = grpMedia;
 
-            var lblFfmpegPath = CreateSettingLabel("FFmpeg Path (optional)", xField, 250);
+            var lblFfmpegPath = CreateSettingLabel("FFmpeg (tự động — Tools\\ffmpeg, tùy chọn ghi đè)", xField, 250);
             lblFfmpegPath.Parent = grpMedia;
             txtFfmpegPath = CreateSettingTextBox("txtFfmpegPath", xField, 272, tbPath);
             txtFfmpegPath.Parent = grpMedia;
@@ -2606,6 +2810,19 @@ namespace tiktok_Omni
             };
             btnBrowseFfmpegPath.FlatAppearance.BorderSize = 0;
             btnBrowseFfmpegPath.Click += btnBrowseFfmpegPath_Click;
+            btnDownloadFfmpeg = new Button
+            {
+                Name = "btnDownloadFfmpeg",
+                Text = "⬇ Tải FFmpeg",
+                Location = new Point(xDownloadYt, 272),
+                Size = new Size(110, 30),
+                BackColor = Color.FromArgb(20, 60, 140),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.White,
+                Parent = grpMedia
+            };
+            btnDownloadFfmpeg.FlatAppearance.BorderSize = 0;
+            btnDownloadFfmpeg.Click += btnDownloadFfmpeg_Click;
 
             var lblYtDlpPath = CreateSettingLabel("yt-dlp Path (cho Deep Dive)", xField, 306);
             lblYtDlpPath.Parent = grpMedia;
@@ -2638,6 +2855,27 @@ namespace tiktok_Omni
             };
             btnDownloadYtDlp.FlatAppearance.BorderSize = 0;
             btnDownloadYtDlp.Click += btnDownloadYtDlp_Click;
+
+            var lblVideoReupMusicLibrary = CreateSettingLabel(
+                "Video reup — thư mục nhạc .mp3 (để trống = …\\VideoReup\\Music cạnh exe)",
+                xField,
+                364);
+            lblVideoReupMusicLibrary.Parent = grpMedia;
+            txtVideoReupMusicLibraryPath = CreateSettingTextBox("txtVideoReupMusicLibraryPath", xField, 386, tbPath);
+            txtVideoReupMusicLibraryPath.Parent = grpMedia;
+            btnBrowseVideoReupMusicLibrary = new Button
+            {
+                Name = "btnBrowseVideoReupMusicLibrary",
+                Text = "Browse",
+                Location = new Point(xBrowsePath, 386),
+                Size = new Size(85, 30),
+                BackColor = Color.FromArgb(60, 64, 77),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.WhiteSmoke,
+                Parent = grpMedia
+            };
+            btnBrowseVideoReupMusicLibrary.FlatAppearance.BorderSize = 0;
+            btnBrowseVideoReupMusicLibrary.Click += btnBrowseVideoReupMusicLibrary_Click;
 
             var yBottom = Math.Max(leftY, rightY) + 4;
             lblSettingsValidation = new Label

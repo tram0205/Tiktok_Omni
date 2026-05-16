@@ -14,12 +14,19 @@ project.lock.json
 # Thư mục build tạm (CI / agent)
 _build*/
 _build_out*/
+_agent_build*/
 
 # --- Logs & tạm chạy app ---
 *.log
 [Ll]ogs/
 temp_downloads/
 generated_videos/
+
+# --- FFmpeg bundle tự tải (Tools/ffmpeg) ---
+Tools/ffmpeg/
+
+# --- Philosophy video output ---
+PhilosophyVideo/Output/
 
 # --- Video reup / affiliate output trong repo (tái tạo được) ---
 VideoReup/Stages/

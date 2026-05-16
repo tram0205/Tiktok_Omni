@@ -1,6 +1,6 @@
 namespace tiktok_Omni.Services
 {
-    /// <summary>Kết quả pipeline remix Video reup (đường dẫn + thời lượng để đồng bộ SRT / UI).</summary>
+    /// <summary>Kết quả pipeline remix Video reup (đường dẫn + thời lượng cho UI).</summary>
     public sealed class VideoReupRemixResult
     {
         public string OutputPath { get; set; } = string.Empty;

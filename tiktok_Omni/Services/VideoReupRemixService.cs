@@ -12,11 +12,35 @@ using Newtonsoft.Json.Linq;
 
 namespace tiktok_Omni.Services
 {
-    /// <summary>Pipeline «reup» tách bước: Gemini hook → chỉnh tay → Lyria âm thanh → chọn nhạc → FFmpeg ghép.</summary>
+    /// <summary>Pipeline «reup»: Gemini hook → Lyria → nhạc → FFmpeg (video + burn phụ đề karaoke đoạn hook) + mux.</summary>
     public sealed class VideoReupRemixService
     {
         private const string StageSourceMp4 = "source.mp4";
         private const string StageHookRawMp3 = "hook_raw.mp3";
+
+        /// <summary>Thư mục thư viện .mp3: Cài đặt «Video reup thư mục nhạc» nếu có, không thì …\VideoReup\Music cạnh exe.</summary>
+        public static string GetMusicLibraryDirectory(AppSettings settings)
+        {
+            var custom = (settings?.VideoReupMusicLibraryPath ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(custom))
+            {
+                try
+                {
+                    return Path.GetFullPath(custom);
+                }
+                catch
+                {
+                    // ignored — fall back
+                }
+            }
+
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "VideoReup", "Music");
+        }
+
+        public static void EnsureMusicLibraryDirectoryExists(AppSettings settings)
+        {
+            Directory.CreateDirectory(GetMusicLibraryDirectory(settings));
+        }
 
         /// <summary>URL có vẻ là link http(s) tuyệt đối — dùng trước khi gọi TikWM tải video.</summary>
         public static bool LooksLikeHttpVideoUrl(string url)
@@ -92,11 +116,14 @@ namespace tiktok_Omni.Services
                 return false;
             }
 
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? ".";
-            var musicDir = Path.Combine(baseDir, "VideoReup", "Music");
-            if (!Directory.Exists(musicDir) || Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly).Length == 0)
+            var musicDir = GetMusicLibraryDirectory(settings);
+            EnsureMusicLibraryDirectoryExists(settings);
+            if (Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly).Length == 0)
             {
-                errorMessage = "Cần ít nhất một file .mp3 trong VideoReup\\Music (để Gemini gợi ý tên file nhạc).";
+                errorMessage =
+                    "Cần ít nhất một file .mp3 trong thư mục nhạc Video reup (để Gemini gợi ý tên file):\r\n" +
+                    musicDir +
+                    "\r\nGợi ý: Cài đặt → «Video reup — thư mục nhạc» hoặc tab Video reup → «Mở thư mục nhạc».";
                 return false;
             }
 
@@ -131,16 +158,8 @@ namespace tiktok_Omni.Services
                 return false;
             }
 
-            var ffmpeg = ResolveFfmpegPath(settings);
-            if (string.IsNullOrWhiteSpace(ffmpeg))
+            if (!TryValidateFfmpegToolkit(settings, out errorMessage))
             {
-                errorMessage = "Chưa cấu hình FFmpeg Path trong Cài đặt (hoặc đặt ffmpeg.exe trên PATH).";
-                return false;
-            }
-
-            if (!string.Equals(ffmpeg, "ffmpeg", StringComparison.OrdinalIgnoreCase) && !File.Exists(ffmpeg))
-            {
-                errorMessage = "Không tìm thấy ffmpeg.exe — hãy cấu hình FFmpeg Path trong Cài đặt.";
                 return false;
             }
 
@@ -163,16 +182,8 @@ namespace tiktok_Omni.Services
                 return false;
             }
 
-            var ffmpeg = ResolveFfmpegPath(settings);
-            if (string.IsNullOrWhiteSpace(ffmpeg))
+            if (!TryValidateFfmpegToolkit(settings, out errorMessage))
             {
-                errorMessage = "Chưa cấu hình FFmpeg Path trong Cài đặt (hoặc đặt ffmpeg.exe trên PATH).";
-                return false;
-            }
-
-            if (!string.Equals(ffmpeg, "ffmpeg", StringComparison.OrdinalIgnoreCase) && !File.Exists(ffmpeg))
-            {
-                errorMessage = "Không tìm thấy ffmpeg.exe — hãy cấu hình FFmpeg Path trong Cài đặt.";
                 return false;
             }
 
@@ -188,20 +199,31 @@ namespace tiktok_Omni.Services
                 return false;
             }
 
+            var isFilm = row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal;
+            if (isFilm)
+            {
+                var ffmpegExe = ResolveFfmpegPath(settings);
+                if (!MediaFileHasAudioStream(ffmpegExe, row.ReupDownloadedVideoPath))
+                {
+                    errorMessage = "Chế độ «Phim» cần video nguồn có tiếng (ít nhất một track âm thanh) — file hiện tại không có audio.";
+                    return false;
+                }
+
+                return true;
+            }
+
             if (string.IsNullOrWhiteSpace((row.ReupSelectedMusicFile ?? string.Empty).Trim()))
             {
                 errorMessage = "Hãy chọn file nhạc nền (.mp3) trong danh sách.";
                 return false;
             }
 
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? ".";
-            var musicDir = Path.Combine(baseDir, "VideoReup", "Music");
-            var musicFiles = Directory.Exists(musicDir)
-                ? Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly)
-                : Array.Empty<string>();
+            var musicDir = GetMusicLibraryDirectory(settings);
+            EnsureMusicLibraryDirectoryExists(settings);
+            var musicFiles = Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly);
             if (musicFiles.Length == 0)
             {
-                errorMessage = "Cần ít nhất một file .mp3 trong VideoReup\\Music.";
+                errorMessage = "Cần ít nhất một file .mp3 trong thư mục nhạc Video reup:\r\n" + musicDir;
                 return false;
             }
 
@@ -209,7 +231,7 @@ namespace tiktok_Omni.Services
             var pick = PickMusicPath(musicFiles, row.ReupSelectedMusicFile, names, _ => { });
             if (string.IsNullOrWhiteSpace(pick) || !File.Exists(pick))
             {
-                errorMessage = "File nhạc đã chọn không tồn tại trong VideoReup\\Music.";
+                errorMessage = "File nhạc đã chọn không tồn tại trong thư mục nhạc Video reup:\r\n" + musicDir;
                 return false;
             }
 
@@ -220,6 +242,132 @@ namespace tiktok_Omni.Services
         public static bool TryValidateRemixPrerequisites(VideoReupRowItem row, AppSettings settings, out string errorMessage)
         {
             return TryValidateFinalRenderStep(row, settings, out errorMessage);
+        }
+
+        /// <summary>ffmpeg + ffprobe phải chạy được (đọc thời lượng, render).</summary>
+        public static bool TryValidateFfmpegToolkit(AppSettings settings, out string errorMessage)
+        {
+            errorMessage = string.Empty;
+            if (!FfmpegToolkitService.TryResolve(settings, out var toolkit, out errorMessage))
+            {
+                return false;
+            }
+
+            if (!FfmpegToolkitService.CanRunMediaTool(toolkit.FfprobeExe))
+            {
+                errorMessage = "Không chạy được ffprobe: " + toolkit.FfprobeExe;
+                return false;
+            }
+
+            if (!FfmpegToolkitService.CanRunMediaTool(toolkit.FfmpegExe))
+            {
+                errorMessage = "Không chạy được ffmpeg: " + toolkit.FfmpegExe;
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>Tự tải/cài FFmpeg nếu chưa có, cập nhật <see cref="AppSettings.FfmpegPath"/> khi thành công.</summary>
+        public static async Task<string> EnsureFfmpegToolkitAsync(
+            AppSettings settings,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            var path = await FfmpegToolkitService.EnsureAvailableAsync(settings, log, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                settings.FfmpegPath = path;
+            }
+
+            return path;
+        }
+
+        /// <summary>Chẩn đoán nhanh — dòng đang kẹt ở bước nào (hiển thị log / cột Lỗi).</summary>
+        public static string DescribePipelineBlockers(VideoReupRowItem row, AppSettings settings)
+        {
+            if (row == null)
+            {
+                return "Chưa chọn dòng trong bảng.";
+            }
+
+            var lines = new List<string>();
+            if (string.IsNullOrWhiteSpace((row.VideoUrl ?? string.Empty).Trim()))
+            {
+                lines.Add("① URL video: trống — dán link TikTok vào cột «URL video» hoặc ô bên dưới.");
+            }
+            else if (!LooksLikeHttpVideoUrl(row.VideoUrl))
+            {
+                lines.Add("① URL video: không hợp lệ (cần http/https).");
+            }
+
+            if (!TryValidateFfmpegToolkit(settings, out var ffErr))
+            {
+                lines.Add("② FFmpeg/ffprobe: " + ffErr.Replace("\r\n", " "));
+            }
+            else if (string.IsNullOrWhiteSpace((row.ReupDownloadedVideoPath ?? string.Empty).Trim()) ||
+                     !File.Exists(row.ReupDownloadedVideoPath))
+            {
+                lines.Add("② Tải nguồn: chưa có source.mp4 — đợi tải xong hoặc bấm «Tạo video thành phẩm» (tự tải).");
+            }
+
+            if (string.IsNullOrWhiteSpace((row.ReupHookDraft ?? string.Empty).Trim()))
+            {
+                if (settings == null || string.IsNullOrWhiteSpace(settings.AiApiKey))
+                {
+                    lines.Add("③ Hook: trống — gõ câu hook (4–7s) vào cột «Hook» HOẶC cấu hình AI API Key rồi dùng Gemini.");
+                }
+                else
+                {
+                    var musicDir = GetMusicLibraryDirectory(settings);
+                    if (Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly).Length == 0)
+                    {
+                        lines.Add("③ Hook: trống — cần ≥1 file .mp3 trong thư mục nhạc để Gemini gợi ý hook/nhạc: " + musicDir);
+                    }
+                    else
+                    {
+                        lines.Add("③ Hook: trống — bấm «Gemini: tạo hook» hoặc «Tạo video thành phẩm» (tự gọi Gemini).");
+                    }
+                }
+            }
+
+            if (!HasLyriaCredentials(settings))
+            {
+                lines.Add("④ Lyria: chưa cấu hình API Key + Endpoint (Cài đặt).");
+            }
+            else if (string.IsNullOrWhiteSpace((row.ReupHookAudioPath ?? string.Empty).Trim()) ||
+                     !File.Exists(row.ReupHookAudioPath))
+            {
+                lines.Add("④ Âm hook: chưa có WAV — cần «Lyria: đọc hook» hoặc «Tạo video thành phẩm» (tự chạy Lyria).");
+            }
+
+            if (row.ReupAudioMode != VideoReupAudioMode.FilmKeepOriginal)
+            {
+                if (string.IsNullOrWhiteSpace((row.ReupSelectedMusicFile ?? string.Empty).Trim()))
+                {
+                    lines.Add("⑤ Nhạc nền: chưa chọn bài trong combo (chế độ Affiliate).");
+                }
+            }
+
+            if (lines.Count == 0)
+            {
+                return "Sẵn sàng ghép MP4 — bấm «Tạo video thành phẩm».";
+            }
+
+            return string.Join("\r\n", lines);
+        }
+
+        public static bool TryResolveFfprobeExecutable(AppSettings settings, out string ffprobePath, out string errorMessage)
+        {
+            ffprobePath = string.Empty;
+            errorMessage = string.Empty;
+            if (!FfmpegToolkitService.TryResolve(settings, out var toolkit, out errorMessage))
+            {
+                return false;
+            }
+
+            ffprobePath = toolkit.FfprobeExe;
+            return true;
         }
         private static readonly object RngLock = new object();
         private static readonly Random Rng = new Random();
@@ -270,8 +418,8 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException(err);
             }
 
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? ".";
-            var musicDir = Path.Combine(baseDir, "VideoReup", "Music");
+            var musicDir = GetMusicLibraryDirectory(settings);
+            EnsureMusicLibraryDirectoryExists(settings);
             var musicFiles = Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly);
             var musicNames = musicFiles.Select(Path.GetFileName).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
             var pick = await ResolveHookAndMusicAsync(
@@ -316,8 +464,18 @@ namespace tiktok_Omni.Services
                 return;
             }
 
+            if (!TryValidateFfmpegToolkit(settings, out var ffErr))
+            {
+                throw new InvalidOperationException(ffErr);
+            }
+
             log?.Invoke("[VideoReup] Đang tải video nguồn (TikWM)...");
             var dl = await affiliateHunter.DownloadAffiliateVideoAsync(row.VideoUrl, stage, log, cancellationToken).ConfigureAwait(false);
+            if (!File.Exists(dl))
+            {
+                throw new InvalidOperationException("TikWM tải xong nhưng không thấy file MP4: " + dl);
+            }
+
             if (!string.Equals(dl, target, StringComparison.OrdinalIgnoreCase))
             {
                 if (File.Exists(target))
@@ -332,7 +490,17 @@ namespace tiktok_Omni.Services
                     }
                 }
 
-                File.Copy(dl, target, true);
+                try
+                {
+                    File.Copy(dl, target, true);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        "Đã tải MP4 nhưng không copy được sang source.mp4:\r\nNguồn: " + dl + "\r\nĐích: " + target + "\r\n" + ex.Message,
+                        ex);
+                }
+
                 try
                 {
                     File.Delete(dl);
@@ -344,7 +512,18 @@ namespace tiktok_Omni.Services
             }
 
             row.ReupDownloadedVideoPath = target;
+            if (!File.Exists(target))
+            {
+                throw new InvalidOperationException("Không thấy file video nguồn sau tải: " + target);
+            }
+
+            log?.Invoke("[VideoReup] Đã tải — đang đọc thời lượng (ffprobe)...");
             var totalDur = await ProbeMediaDurationSecondsAsync(ffmpeg, target, cancellationToken).ConfigureAwait(false);
+            if (totalDur < 0.5d)
+            {
+                throw new InvalidOperationException(
+                    "Không đọc được thời lượng video (ffprobe). Kiểm tra FFmpeg Path trong Cài đặt — cần ffmpeg.exe và ffprobe.exe cùng thư mục.");
+            }
             if (totalDur < ReupVideoSpec.TrimHeadSeconds + ReupVideoSpec.TrimTailSeconds + 1.5d)
             {
                 throw new InvalidOperationException($"Video quá ngắn ({totalDur:0.0}s) — không đủ cắt đầu/cuối 1s mỗi bên.");
@@ -384,11 +563,13 @@ namespace tiktok_Omni.Services
                 ? trimContentSeconds / ReupVideoSpec.SpeedFactor
                 : trimContentSeconds;
 
+            var reserveTailForMusic = row.ReupAudioMode == VideoReupAudioMode.AffiliateBed;
             var hookNormWav = await NormalizeHookAudioToWavAsync(
                 ffmpeg,
                 hookRaw,
                 stage,
                 videoOutSeconds,
+                reserveTailForMusic,
                 log,
                 cancellationToken).ConfigureAwait(false);
 
@@ -407,6 +588,7 @@ namespace tiktok_Omni.Services
         public async Task<VideoReupRemixResult> RenderFinalVideoAsync(
             VideoReupRowItem row,
             AppSettings settings,
+            GeminiService gemini,
             Action<string> log,
             CancellationToken cancellationToken)
         {
@@ -417,9 +599,17 @@ namespace tiktok_Omni.Services
 
             var ffmpeg = ResolveFfmpegPath(settings);
             var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? ".";
-            var musicDir = Path.Combine(baseDir, "VideoReup", "Music");
-            var musicFiles = Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly);
-            var musicNames = musicFiles.Select(Path.GetFileName).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            var isFilm = row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal;
+            IReadOnlyList<string> musicFiles = Array.Empty<string>();
+            IReadOnlyList<string> musicNames = Array.Empty<string>();
+            if (!isFilm)
+            {
+                var musicDir = GetMusicLibraryDirectory(settings);
+                EnsureMusicLibraryDirectoryExists(settings);
+                musicFiles = Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly);
+                musicNames = musicFiles.Select(Path.GetFileName).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            }
+
             var downloadedPath = row.ReupDownloadedVideoPath;
             var hookNormWav = row.ReupHookAudioPath;
 
@@ -444,21 +634,38 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException($"Hook WAV quá ngắn ({hookUsed:0.##}s).");
             }
 
-            var musicPath = PickMusicPath(musicFiles, row.ReupSelectedMusicFile, musicNames, log);
-            var musicSec = Math.Max(ReupVideoSpec.MinMusicTailSec, videoOutSeconds - hookUsed);
-            log?.Invoke($"[VideoReup] Ghép audio: hook {hookUsed:0.##}s + nhạc {musicSec:0.##}s (video ≈{videoOutSeconds:0.##}s).");
-
             var stage = row.ReupStageFolder;
+            var videoNoAudio = Path.Combine(stage, "video_noaudio.mp4");
             var fullAudioWav = Path.Combine(stage, "full_audio.wav");
-            await BuildCompositeAudioAsync(
-                ffmpeg,
-                hookNormWav,
-                musicPath,
-                hookUsed,
-                musicSec,
-                fullAudioWav,
-                log,
-                cancellationToken).ConfigureAwait(false);
+            if (!isFilm)
+            {
+                var musicPath = PickMusicPath(musicFiles, row.ReupSelectedMusicFile, musicNames, log);
+                var musicSec = Math.Max(ReupVideoSpec.MinMusicTailSec, videoOutSeconds - hookUsed);
+                log?.Invoke($"[VideoReup] Ghép audio: hook {hookUsed:0.##}s + nhạc {musicSec:0.##}s (video ≈{videoOutSeconds:0.##}s).");
+                await BuildCompositeAudioAsync(
+                    ffmpeg,
+                    hookNormWav,
+                    musicPath,
+                    hookUsed,
+                    musicSec,
+                    fullAudioWav,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                log?.Invoke($"[VideoReup] Ghép audio (phim): hook {hookUsed:0.##}s + tiếng gốc video đến hết đoạn (≈{trimContentSeconds:0.##}s).");
+                await BuildFilmCompositeAudioAsync(
+                    ffmpeg,
+                    downloadedPath,
+                    hookNormWav,
+                    stage,
+                    hookUsed,
+                    trimContentSeconds,
+                    fullAudioWav,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var compositeDur = await ProbeMediaDurationSecondsAsync(ffmpeg, fullAudioWav, cancellationToken).ConfigureAwait(false);
             var drift = Math.Abs(compositeDur - videoOutSeconds);
@@ -467,13 +674,59 @@ namespace tiktok_Omni.Services
                 log?.Invoke($"[VideoReup] Cảnh báo: độ dài track audio {compositeDur:0.##}s lệch video {videoOutSeconds:0.##}s khoảng {drift:0.##}s — mux dùng -shortest.");
             }
 
-            var videoNoAudio = Path.Combine(stage, "video_noaudio.mp4");
-            var vf = ReupVideoSpec.ApplySpeedChange
+            var hookSrtPath = Path.Combine(stage, "hook_karaoke.srt");
+            try
+            {
+                if (File.Exists(hookSrtPath))
+                {
+                    File.Delete(hookSrtPath);
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            var hookText = (row.ReupHookDraft ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(hookText))
+            {
+                var timings = await VideoReupCaptionService.BuildHookKaraokeTimingsAsync(
+                    gemini,
+                    hookText,
+                    hookUsed,
+                    settings.AiProvider,
+                    settings.AiApiKey,
+                    settings.AiModel,
+                    cancellationToken).ConfigureAwait(false);
+                var srtBody = VideoReupCaptionService.ToSrtContent(timings);
+                if (!string.IsNullOrWhiteSpace(srtBody))
+                {
+                    File.WriteAllText(hookSrtPath, srtBody, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    log?.Invoke("[VideoReup] Phụ đề karaoke hook (SRT tạm) → " + Path.GetFileName(hookSrtPath));
+                }
+                else
+                {
+                    log?.Invoke("[VideoReup] Không tạo được timeline phụ đề hook — render không burn chữ.");
+                }
+            }
+
+            var baseVf = ReupVideoSpec.ApplySpeedChange
                 ? string.Format(
                     CultureInfo.InvariantCulture,
                     "setpts=PTS/{0},hflip,eq=brightness=0.02:contrast=1.03:saturation=0.97",
                     ReupVideoSpec.SpeedFactor.ToString("0.#####", CultureInfo.InvariantCulture))
                 : "hflip,eq=brightness=0.02:contrast=1.03:saturation=0.97";
+
+            string vf;
+            if (File.Exists(hookSrtPath) && new FileInfo(hookSrtPath).Length > 8)
+            {
+                var esc = EscapePathForFfmpegSubtitleFilter(hookSrtPath);
+                vf = baseVf + ",subtitles='" + esc + "'";
+            }
+            else
+            {
+                vf = baseVf;
+            }
 
             var crf = NextCrf();
             var metaComment = RandomMetaToken("reup");
@@ -498,7 +751,9 @@ namespace tiktok_Omni.Services
                           " -metadata title=reup -metadata comment=" + muxMeta +
                           " \"" + finalPath + "\"";
 
-            log?.Invoke("[VideoReup] FFmpeg: ghép video + audio (hook + nhạc)...");
+            log?.Invoke(isFilm
+                ? "[VideoReup] FFmpeg: ghép video + audio (hook + tiếng gốc)..."
+                : "[VideoReup] FFmpeg: ghép video + audio (hook + nhạc)...");
             await RunFfmpegAsync(ffmpeg, muxArgs, log, cancellationToken).ConfigureAwait(false);
 
             if (!File.Exists(finalPath))
@@ -523,6 +778,7 @@ namespace tiktok_Omni.Services
             string inputPath,
             string workRoot,
             double videoOutSeconds,
+            bool reserveTailForMusic,
             Action<string> log,
             CancellationToken cancellationToken)
         {
@@ -532,11 +788,15 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException("Không đọc được thời lượng hook audio (Lyria).");
             }
 
-            var maxHook = Math.Min(ReupVideoSpec.HookMaxSec, videoOutSeconds - ReupVideoSpec.MinMusicTailSec);
+            var tailReserve = reserveTailForMusic ? ReupVideoSpec.MinMusicTailSec : 0.12d;
+            var maxHook = Math.Min(ReupVideoSpec.HookMaxSec, videoOutSeconds - tailReserve);
             if (maxHook < ReupVideoSpec.HookMinSec - 0.02d)
             {
+                var tailHint = reserveTailForMusic
+                    ? $"nhạc nền (cần chừa ~{ReupVideoSpec.MinMusicTailSec:0.#}s cuối)."
+                    : "tiếng gốc sau hook.";
                 throw new InvalidOperationException(
-                    $"Video sau xử lý ≈{videoOutSeconds:0.##}s — không đủ chỗ cho hook tối thiểu {ReupVideoSpec.HookMinSec}s và nhạc.");
+                    $"Video sau xử lý ≈{videoOutSeconds:0.##}s — không đủ chỗ cho hook tối thiểu {ReupVideoSpec.HookMinSec}s và {tailHint}");
             }
 
             var trimTarget = Math.Min(rawDur, maxHook);
@@ -832,15 +1092,86 @@ namespace tiktok_Omni.Services
             await RunFfmpegAsync(ffmpegExe, args, log, cancellationToken).ConfigureAwait(false);
         }
 
+        private static async Task BuildFilmCompositeAudioAsync(
+            string ffmpegExe,
+            string sourceVideoPath,
+            string hookWavPath,
+            string stageFolder,
+            double hookUsedSec,
+            double segmentDurationSec,
+            string outputWav,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            if (segmentDurationSec <= 0.2d)
+            {
+                throw new InvalidOperationException("Đoạn video sau cắt quá ngắn — không ghép được tiếng gốc.");
+            }
+
+            var origTrim = Path.Combine(stageFolder, "film_orig_trim.wav");
+            try
+            {
+                if (File.Exists(origTrim))
+                {
+                    File.Delete(origTrim);
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+
+            var trimT = segmentDurationSec.ToString("0.#####", CultureInfo.InvariantCulture);
+            var ss = ReupVideoSpec.TrimHeadSeconds.ToString("0.#####", CultureInfo.InvariantCulture);
+            var extractArgs = "-y -ss " + ss + " -i \"" + sourceVideoPath + "\" -t " + trimT +
+                              " -map 0:a:0 -vn -ac 2 -ar 48000 -c:a pcm_s16le \"" + origTrim + "\"";
+            log?.Invoke("[VideoReup] FFmpeg: trích audio gốc (cùng -ss/-t với pipeline video)...");
+            await RunFfmpegAsync(ffmpegExe, extractArgs, log, cancellationToken).ConfigureAwait(false);
+
+            var endStr = segmentDurationSec.ToString("0.#####", CultureInfo.InvariantCulture);
+            if (hookUsedSec >= segmentDurationSec - 0.08d)
+            {
+                var hookOnly = "-y -i \"" + hookWavPath + "\" -af \"atrim=0:" + endStr +
+                               ",asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo\" \"" +
+                               outputWav + "\"";
+                log?.Invoke("[VideoReup] FFmpeg: track audio chỉ hook (gần khớp hết đoạn video).");
+                await RunFfmpegAsync(ffmpegExe, hookOnly, log, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var hu = hookUsedSec.ToString("0.#####", CultureInfo.InvariantCulture);
+            const string Fmt = "sample_fmts=s16:channel_layouts=stereo";
+            var filter =
+                "[0:a]atrim=0:" + hu + ",asetpts=PTS-STARTPTS,aresample=48000,aformat=" + Fmt + "[h0];" +
+                "[1:a]atrim=" + hu + ":" + endStr + ",asetpts=PTS-STARTPTS,aresample=48000,aformat=" + Fmt + "[r0];" +
+                "[h0][r0]concat=n=2:v=0:a=1[aout]";
+            var concatArgs = "-y -i \"" + hookWavPath + "\" -i \"" + origTrim + "\"" +
+                             " -filter_complex \"" + filter + "\"" +
+                             " -map \"[aout]\" -c:a pcm_s16le \"" + outputWav + "\"";
+            log?.Invoke("[VideoReup] FFmpeg: concat hook + tiếng gốc (đoạn còn lại) → full_audio.wav");
+            await RunFfmpegAsync(ffmpegExe, concatArgs, log, cancellationToken).ConfigureAwait(false);
+        }
+
         private static string ResolveFfmpegPath(AppSettings settings)
         {
+            if (FfmpegToolkitService.TryResolve(settings, out var toolkit, out _))
+            {
+                return toolkit.FfmpegExe;
+            }
+
+            var bundled = FfmpegToolkitService.GetBundledFfmpegPath();
+            if (File.Exists(bundled))
+            {
+                return bundled;
+            }
+
             var p = (settings?.FfmpegPath ?? string.Empty).Trim();
             if (!string.IsNullOrWhiteSpace(p) && File.Exists(p))
             {
                 return p;
             }
 
-            return "ffmpeg";
+            return bundled;
         }
 
         private static string ResolveFfprobePath(string ffmpegPath)
@@ -869,9 +1200,49 @@ namespace tiktok_Omni.Services
             return "ffprobe";
         }
 
+        private static bool MediaFileHasAudioStream(string ffmpegPath, string mediaPath)
+        {
+            if (string.IsNullOrWhiteSpace(mediaPath) || !File.Exists(mediaPath))
+            {
+                return false;
+            }
+
+            var ffprobe = ResolveFfprobePath(ffmpegPath);
+            var args = "-v error -select_streams a:0 -show_entries stream=codec_type -of default=nw=1:nk=1 \"" + mediaPath + "\"";
+            using (var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = ffprobe,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            })
+            {
+                process.Start();
+                var stdout = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(30000);
+                return process.ExitCode == 0 && stdout.Trim().Length > 0;
+            }
+        }
+
         private static async Task<double> ProbeMediaDurationSecondsAsync(string ffmpegPath, string mediaPath, CancellationToken cancellationToken)
         {
+            if (string.IsNullOrWhiteSpace(mediaPath) || !File.Exists(mediaPath))
+            {
+                throw new FileNotFoundException("Không tìm thấy file media để đo thời lượng.", mediaPath ?? string.Empty);
+            }
+
             var ffprobe = ResolveFfprobePath(ffmpegPath);
+            if (!string.Equals(ffprobe, "ffprobe", StringComparison.OrdinalIgnoreCase) && !File.Exists(ffprobe))
+            {
+                throw new InvalidOperationException(
+                    "Không tìm thấy ffprobe.exe — cấu hình FFmpeg Path trỏ tới ffmpeg.exe (ffprobe.exe cùng thư mục).");
+            }
+
             var args = "-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"" + mediaPath + "\"";
             var psi = new ProcessStartInfo
             {
@@ -885,7 +1256,17 @@ namespace tiktok_Omni.Services
 
             using (var process = new Process { StartInfo = psi })
             {
-                process.Start();
+                try
+                {
+                    process.Start();
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        "Không chạy được ffprobe (" + ffprobe + "). Cài đặt → FFmpeg Path: chọn ffmpeg.exe (kèm ffprobe.exe).\r\n" +
+                        ex.Message,
+                        ex);
+                }
                 var outputTask = process.StandardOutput.ReadToEndAsync();
                 var errTask = process.StandardError.ReadToEndAsync();
                 while (!process.HasExited)
@@ -904,6 +1285,17 @@ namespace tiktok_Omni.Services
             return 0d;
         }
 
+        private static string EscapePathForFfmpegSubtitleFilter(string filePath)
+        {
+            var full = Path.GetFullPath(filePath).Replace('\\', '/');
+            if (full.Length >= 2 && full[1] == ':')
+            {
+                full = char.ToUpperInvariant(full[0]) + "\\:" + full.Substring(2);
+            }
+
+            return full.Replace("'", "\\'");
+        }
+
         private static async Task RunFfmpegAsync(string ffmpegExecutable, string args, Action<string> log, CancellationToken cancellationToken)
         {
             var startInfo = new ProcessStartInfo
@@ -918,7 +1310,16 @@ namespace tiktok_Omni.Services
 
             using (var process = new Process { StartInfo = startInfo })
             {
-                process.Start();
+                try
+                {
+                    process.Start();
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        "Không chạy được ffmpeg (" + ffmpegExecutable + "). Kiểm tra FFmpeg Path trong Cài đặt.\r\n" + ex.Message,
+                        ex);
+                }
                 var stdOut = process.StandardOutput.ReadToEndAsync();
                 var stdErr = process.StandardError.ReadToEndAsync();
 

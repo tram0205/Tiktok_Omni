@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace tiktok_Omni.Services
 {
-    /// <summary>Phụ đề SRT cho Video reup: chia câu theo thời lượng hoặc timeline Gemini (text-only).</summary>
+    /// <summary>Phụ đề timing (SRT) — heuristic / Gemini; dùng cho karaoke hook trong Video reup render.</summary>
     public sealed class CaptionTiming
     {
         public double StartSeconds { get; set; }
@@ -84,6 +84,56 @@ namespace tiktok_Omni.Services
             }
 
             return result;
+        }
+
+        /// <summary>Chia câu hook theo thời lượng WAV Lyria (0…hookDuration): Gemini nếu có API key, không thì heuristic.</summary>
+        public static async Task<List<CaptionTiming>> BuildHookKaraokeTimingsAsync(
+            GeminiService gemini,
+            string hookText,
+            double hookDurationSeconds,
+            string provider,
+            string apiKey,
+            string model,
+            CancellationToken cancellationToken)
+        {
+            var script = (hookText ?? string.Empty).Trim();
+            if (hookDurationSeconds <= 0.25d || string.IsNullOrEmpty(script))
+            {
+                return new List<CaptionTiming>();
+            }
+
+            if (gemini != null && !string.IsNullOrWhiteSpace(apiKey))
+            {
+                var dur = hookDurationSeconds.ToString("0.##", CultureInfo.InvariantCulture);
+                var prompt =
+                    "Đoạn sau là câu hook tiếng Việt sẽ được đọc thành tiếng (TTS) trong khoảng " + dur +
+                    " giây. Chia thành các cụm từ ngắn (karaoke, hiển thị lần lượt), tối đa 18 dòng.\r\n" +
+                    "Mỗi dòng đúng định dạng: start|end|text — start/end là giây thập phân từ 0 đến " + dur +
+                    ", text là phần tiếng Việt khớp câu gốc (không thêm lời).\r\n" +
+                    "Căn tiến độ đọc tự nhiên, trải đều suốt " + dur + " giây (không dồn hết vào cuối). Không markdown, không giải thích.\r\n" +
+                    "Câu hook:\r\n" + script;
+
+                try
+                {
+                    var raw = await gemini.GenerateScriptAsync(
+                        prompt,
+                        provider,
+                        apiKey,
+                        model,
+                        cancellationToken).ConfigureAwait(false);
+                    var parsed = ParseGeminiLines(raw, hookDurationSeconds);
+                    if (parsed.Count > 0)
+                    {
+                        return parsed;
+                    }
+                }
+                catch
+                {
+                    // fallback heuristic
+                }
+            }
+
+            return BuildHeuristic(script, hookDurationSeconds);
         }
 
         /// <summary>Gọi Gemini (hoặc Claude nếu provider) để lấy dòng dạng start|end|text; lỗi hoặc rỗng thì heuristic.</summary>

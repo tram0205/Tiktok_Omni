@@ -130,8 +130,11 @@ namespace tiktok_Omni
         private Button btnTestVeo;
         private Button btnTestLyria;
         private Button btnBrowseFfmpegPath;
+        private Button btnDownloadFfmpeg;
         private Button btnBrowseYtDlpPath;
+        private Button btnBrowseVideoReupMusicLibrary;
         private Button btnDownloadYtDlp;
+        private TextBox txtVideoReupMusicLibraryPath;
         private Button btnSaveSettings;
         private CheckBox chkAutoResumeQueueOnStartup;
         private CheckBox chkScheduleWarmupStub;
@@ -179,6 +182,11 @@ namespace tiktok_Omni
         private List<string> _mascotPreviewSceneScripts = new List<string>();
         private List<string> _mascotPreviewImagePaths = new List<string>();
         private TextBox txtPhilosophyInput;
+        private Panel pnlPhilosophyStatus;
+        private Label lblPhilosophyProgress;
+        private ProgressBar pbPhilosophyProgress;
+        private RichTextBox rtbPhilosophyLog;
+        private Button btnPhilosophyClearLog;
         private DataGridView dgvAiVideoScriptReview;
         private NumericUpDown numAiTransitionDuration;
         private NumericUpDown numAiTextSize;
@@ -237,19 +245,33 @@ namespace tiktok_Omni
         private DataGridView dgvVideoReupInput;
         private BindingList<VideoReupRowItem> _videoReupBindingList;
         private Button btnPushSelectionToVideoReup;
-        private Button btnVideoReupExportSrtHeuristic;
-        private Button btnVideoReupExportSrtGemini;
-        private TextBox txtVideoReupHookDraft;
         private Button btnVideoReupHookGemini;
         private Button btnVideoReupHookRegen;
         private Button btnVideoReupLyriaHook;
         private Label lblVideoReupMusicPick;
         private ComboBox cbVideoReupMusic;
+        private Button btnVideoReupOpenMusicFolder;
+        private Button btnVideoReupRefreshMusicList;
+        private Label lblVideoReupMusicPathHint;
+        private ToolTip _tipVideoReupMusicPath;
         private Button btnVideoReupRenderVideo;
+        private Button btnVideoReupRenderBatch;
         private TextBox txtVideoReupVideoUrl;
         private Label lblVideoReupVideoUrl;
+        private Label lblVideoReupHook;
+        private Label lblVideoReupHint;
+        private Panel pnlVideoReupStatus;
+        private Label lblVideoReupProgress;
+        private ProgressBar pbVideoReupProgress;
+        private RichTextBox rtbVideoReupLog;
+        private Button btnVideoReupClearLog;
         private Button btnVideoReupAddManualRow;
+        private GroupBox grpVideoReupAudioMode;
+        private RadioButton rbVideoReupAudioAffiliate;
+        private RadioButton rbVideoReupAudioFilm;
+        private bool _videoReupSuppressAudioModeEvents;
         private bool _videoReupSuppressUrlEditorEvents;
+        private string _videoReupVideoUrlBeforeCellEdit = string.Empty;
         private readonly SemaphoreSlim _videoReupDownloadGate = new SemaphoreSlim(1, 1);
 
         private List<AiVideoGenInputItem> _aiVideoGenInputBuffer = new List<AiVideoGenInputItem>();
@@ -277,9 +299,9 @@ namespace tiktok_Omni
         public Form1()
         {
             InitializeTheme();
+            _configManager = new ConfigManager();
             InitializeComponent();
 
-            _configManager = new ConfigManager();
             _warmupStateManager = new WarmupStateManager();
             _warmupQueueScheduler = new WarmupQueueScheduler();
             _warmupQueueStateManager = new WarmupQueueStateManager();
@@ -1272,7 +1294,7 @@ namespace tiktok_Omni
         {
             if (_affiliateBindingList == null || _affiliateBindingList.Count == 0)
             {
-                Log("Video reup: không có dữ liệu affiliate — hãy săn hoặc tải kết quả trước.");
+                LogVideoReup("Video reup: không có dữ liệu affiliate — hãy săn hoặc tải kết quả trước.");
                 return;
             }
 
@@ -1330,7 +1352,7 @@ namespace tiktok_Omni
                 });
             }
 
-            Log($"Video reup: đã nhập {_videoReupBindingList.Count} dòng từ Săn Affiliate (bỏ qua không có URL video: {skippedNoUrl}).");
+            LogVideoReup($"Video reup: đã nhập {_videoReupBindingList.Count} dòng từ Săn Affiliate (bỏ qua không có URL video: {skippedNoUrl}).");
             if (_videoReupBindingList.Count > 0)
             {
                 tabMain.SelectedTab = tabAiVideoGen;
@@ -1376,7 +1398,7 @@ namespace tiktok_Omni
 
             e.Handled = true;
             e.SuppressKeyPress = true;
-            Log($"Video reup: đã xóa {items.Count} dòng (Delete).");
+            LogVideoReup($"Video reup: đã xóa {items.Count} dòng (Delete).");
         }
 
         private void DgvVideoReupInput_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
@@ -1387,7 +1409,7 @@ namespace tiktok_Omni
             }
 
             dgvVideoReupInput.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvVideoReupInput.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+            dgvVideoReupInput.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCellsExceptHeaders;
 
             foreach (DataGridViewColumn col in dgvVideoReupInput.Columns)
             {
@@ -1396,39 +1418,51 @@ namespace tiktok_Omni
                 col.SortMode = DataGridViewColumnSortMode.NotSortable;
 
                 var name = col.DataPropertyName ?? string.Empty;
+                var editable = string.Equals(name, "VideoUrl", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(name, "ReupHookDraft", StringComparison.OrdinalIgnoreCase);
+                col.ReadOnly = !editable;
+
                 if (string.Equals(name, "ProductName", StringComparison.OrdinalIgnoreCase))
                 {
                     col.HeaderText = "Sản phẩm";
-                    col.ToolTipText = "Tên dòng — dùng đặt tên file MP4/SRT khi xuất.";
+                    col.ToolTipText = "Tên dòng — dùng đặt tên file MP4 khi xuất.";
                     col.FillWeight = 68f;
                     col.MinimumWidth = 64;
                 }
                 else if (string.Equals(name, "VideoUrl", StringComparison.OrdinalIgnoreCase))
                 {
                     col.HeaderText = "URL video";
-                    col.ToolTipText = "Link TikTok — đồng bộ với ô «URL video» phía trên khi chọn dòng; rời ô để tải qua TikWM.";
-                    col.FillWeight = 95f;
+                    col.ToolTipText = "F2 hoặc double-click để sửa trực tiếp trong bảng; hoặc dán vào ô «URL video» bên dưới. Rời ô / Enter để tải qua TikWM.";
+                    col.FillWeight = 88f;
                     col.MinimumWidth = 72;
+                }
+                else if (string.Equals(name, "ReupHookDraft", StringComparison.OrdinalIgnoreCase))
+                {
+                    col.HeaderText = "Hook (4–7s)";
+                    col.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+                    col.ToolTipText = "Sửa tại đây (F2) hoặc bấm «Gemini: tạo hook» — kết quả ghi vào đúng dòng đang chọn; Lyria / Render dùng hook của dòng đó.";
+                    col.FillWeight = 110f;
+                    col.MinimumWidth = 120;
                 }
                 else if (string.Equals(name, "Hashtags", StringComparison.OrdinalIgnoreCase))
                 {
                     col.HeaderText = "Hashtag";
                     col.ToolTipText = "Hashtag affiliate — đưa vào ngữ cảnh Gemini (hook / nhạc).";
-                    col.FillWeight = 42f;
+                    col.FillWeight = 38f;
                     col.MinimumWidth = 52;
                 }
                 else if (string.Equals(name, "VideoScript", StringComparison.OrdinalIgnoreCase))
                 {
                     col.HeaderText = "Phân tích";
                     col.ToolTipText = "Deep dive / script — ngữ cảnh nội dung cho Gemini khi remix.";
-                    col.FillWeight = 88f;
+                    col.FillWeight = 78f;
                     col.MinimumWidth = 72;
                 }
                 else if (string.Equals(name, "LastRemixOutputPath", StringComparison.OrdinalIgnoreCase))
                 {
                     col.HeaderText = "MP4 remix";
                     col.ToolTipText = "Đường dẫn file video reup đã xuất (cắt đầu/đuôi, lật, hook Lyria + nhạc).";
-                    col.FillWeight = 78f;
+                    col.FillWeight = 72f;
                     col.MinimumWidth = 72;
                 }
                 else if (string.Equals(name, "RemixStatus", StringComparison.OrdinalIgnoreCase))
@@ -1442,197 +1476,35 @@ namespace tiktok_Omni
                 {
                     col.HeaderText = "Lỗi";
                     col.ToolTipText = "Thông báo lỗi remix (nếu có). Rê chuột lên ô để xem đầy đủ nếu bị cắt.";
-                    col.FillWeight = 52f;
+                    col.FillWeight = 48f;
                     col.MinimumWidth = 56;
                 }
             }
-        }
 
-        private static bool TryResolveVideoReupCaptionDurationSeconds(VideoReupRowItem row, out double durationSeconds)
-        {
-            durationSeconds = 0d;
-            if (row == null)
+            void SetDisplayIndex(string dataProperty, int displayIndex)
             {
-                return false;
-            }
-
-            if (row.LastRemixOutputVideoDurationSec.HasValue && row.LastRemixOutputVideoDurationSec.Value > 0.5d)
-            {
-                durationSeconds = row.LastRemixOutputVideoDurationSec.Value;
-                return true;
-            }
-
-            if (row.LastSourceVideoDurationSec.HasValue && row.LastSourceVideoDurationSec.Value > 2.5d)
-            {
-                durationSeconds = Math.Max(1d, row.LastSourceVideoDurationSec.Value - 2d);
-                return true;
-            }
-
-            return false;
-        }
-
-        private static string ResolveVideoReupCaptionSourceText(VideoReupRowItem row)
-        {
-            if (row == null)
-            {
-                return string.Empty;
-            }
-
-            var script = (row.VideoScript ?? string.Empty).Trim();
-            if (!string.IsNullOrEmpty(script))
-            {
-                return script;
-            }
-
-            var product = (row.ProductName ?? string.Empty).Trim();
-            var tags = (row.Hashtags ?? string.Empty).Trim();
-            if (!string.IsNullOrEmpty(product) && !string.IsNullOrEmpty(tags))
-            {
-                return product + ". " + tags;
-            }
-
-            if (!string.IsNullOrEmpty(product))
-            {
-                return product;
-            }
-
-            return tags;
-        }
-
-        private async void btnVideoReupExportSrtHeuristic_Click(object sender, EventArgs e)
-        {
-            await ExportVideoReupCaptionSrtAsync(useGemini: false).ConfigureAwait(true);
-        }
-
-        private async void btnVideoReupExportSrtGemini_Click(object sender, EventArgs e)
-        {
-            await ExportVideoReupCaptionSrtAsync(useGemini: true).ConfigureAwait(true);
-        }
-
-        private async Task ExportVideoReupCaptionSrtAsync(bool useGemini)
-        {
-            if (dgvVideoReupInput?.SelectedRows == null || dgvVideoReupInput.SelectedRows.Count == 0)
-            {
-                Log("Video reup caption: chọn ít nhất một dòng trong bảng.");
-                return;
-            }
-
-            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            if (useGemini && string.IsNullOrWhiteSpace(settings.AiApiKey))
-            {
-                Log("Video reup caption (Gemini): chưa cấu hình AI API Key trong Cài đặt.");
-                return;
-            }
-
-            var outDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VideoReup", "Captions");
-            try
-            {
-                Directory.CreateDirectory(outDir);
-            }
-            catch (Exception ex)
-            {
-                Log("Video reup caption: không tạo được thư mục xuất — " + ex.Message);
-                return;
-            }
-
-            SetVideoReupCaptionButtonsEnabled(false);
-            var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-            var ok = 0;
-            var skipped = 0;
-
-            try
-            {
-                foreach (DataGridViewRow gridRow in dgvVideoReupInput.SelectedRows)
+                foreach (DataGridViewColumn c in dgvVideoReupInput.Columns)
                 {
-                    if (!(gridRow?.DataBoundItem is VideoReupRowItem row))
+                    if (string.Equals(c.DataPropertyName, dataProperty, StringComparison.OrdinalIgnoreCase))
                     {
-                        skipped++;
-                        continue;
+                        c.DisplayIndex = displayIndex;
+                        return;
                     }
-
-                    if (!TryResolveVideoReupCaptionDurationSeconds(row, out var duration) || duration < 1d)
-                    {
-                        Log($"Video reup caption: bỏ qua «{row.ProductName}» — chưa có độ dài video (chạy «Remix reup» một lần để probe nguồn / MP4, rồi xuất SRT).");
-                        skipped++;
-                        continue;
-                    }
-
-                    var sourceText = ResolveVideoReupCaptionSourceText(row);
-                    if (string.IsNullOrWhiteSpace(sourceText))
-                    {
-                        Log($"Video reup caption: bỏ qua «{row.ProductName}» — không có script / tên / hashtag để làm phụ đề.");
-                        skipped++;
-                        continue;
-                    }
-
-                    List<CaptionTiming> timings;
-                    if (useGemini)
-                    {
-                        timings = await VideoReupCaptionService.BuildWithGeminiAsync(
-                            _geminiService,
-                            sourceText,
-                            duration,
-                            settings.AiProvider,
-                            settings.AiApiKey,
-                            settings.AiModel,
-                            CancellationToken.None).ConfigureAwait(true);
-                    }
-                    else
-                    {
-                        timings = VideoReupCaptionService.BuildHeuristic(sourceText, duration);
-                    }
-
-                    var srt = VideoReupCaptionService.ToSrtContent(timings);
-                    if (string.IsNullOrWhiteSpace(srt))
-                    {
-                        Log($"Video reup caption: không tạo được khung thời gian — «{row.ProductName}».");
-                        skipped++;
-                        continue;
-                    }
-
-                    var baseName = VideoReupCaptionService.SanitizeFileNameFragment(row.ProductName) + "_" + stamp + "_" + ok;
-                    var path = Path.Combine(outDir, baseName + ".srt");
-                    try
-                    {
-                        File.WriteAllText(path, srt, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"Video reup caption: ghi file lỗi ({row.ProductName}): " + ex.Message);
-                        skipped++;
-                        continue;
-                    }
-
-                    row.LastCaptionSrtPath = path;
-                    ok++;
-                    Log($"Video reup caption: đã xuất {(useGemini ? "Gemini + " : string.Empty)}SRT → {path}");
                 }
+            }
 
-                _videoReupBindingList?.ResetBindings();
-                Log($"Video reup caption: xong — {ok} file, bỏ qua {skipped}. Thư mục: {outDir}");
-            }
-            catch (Exception ex)
-            {
-                Log("Video reup caption lỗi: " + ex.Message);
-            }
-            finally
-            {
-                SetVideoReupCaptionButtonsEnabled(true);
-            }
+            SetDisplayIndex("ProductName", 0);
+            SetDisplayIndex("VideoUrl", 1);
+            SetDisplayIndex("ReupHookDraft", 2);
+            SetDisplayIndex("Hashtags", 3);
+            SetDisplayIndex("VideoScript", 4);
+            SetDisplayIndex("LastRemixOutputPath", 5);
+            SetDisplayIndex("RemixStatus", 6);
+            SetDisplayIndex("RemixLastError", 7);
         }
 
         private void SetVideoReupCaptionButtonsEnabled(bool enabled)
         {
-            if (btnVideoReupExportSrtHeuristic != null)
-            {
-                btnVideoReupExportSrtHeuristic.Enabled = enabled;
-            }
-
-            if (btnVideoReupExportSrtGemini != null)
-            {
-                btnVideoReupExportSrtGemini.Enabled = enabled;
-            }
-
             if (btnPushSelectionToVideoReup != null)
             {
                 btnPushSelectionToVideoReup.Enabled = enabled;
@@ -1653,14 +1525,44 @@ namespace tiktok_Omni
                 btnVideoReupLyriaHook.Enabled = enabled;
             }
 
+            if (grpVideoReupAudioMode != null)
+            {
+                grpVideoReupAudioMode.Enabled = enabled;
+            }
+
+            if (rbVideoReupAudioAffiliate != null)
+            {
+                rbVideoReupAudioAffiliate.Enabled = enabled;
+            }
+
+            if (rbVideoReupAudioFilm != null)
+            {
+                rbVideoReupAudioFilm.Enabled = enabled;
+            }
+
             if (cbVideoReupMusic != null)
             {
                 cbVideoReupMusic.Enabled = enabled;
             }
 
+            if (btnVideoReupOpenMusicFolder != null)
+            {
+                btnVideoReupOpenMusicFolder.Enabled = enabled;
+            }
+
+            if (btnVideoReupRefreshMusicList != null)
+            {
+                btnVideoReupRefreshMusicList.Enabled = enabled;
+            }
+
             if (btnVideoReupRenderVideo != null)
             {
                 btnVideoReupRenderVideo.Enabled = enabled;
+            }
+
+            if (btnVideoReupRenderBatch != null)
+            {
+                btnVideoReupRenderBatch.Enabled = enabled;
             }
 
             if (txtVideoReupVideoUrl != null)
@@ -1673,10 +1575,6 @@ namespace tiktok_Omni
                 btnVideoReupAddManualRow.Enabled = enabled;
             }
 
-            if (txtVideoReupHookDraft != null)
-            {
-                txtVideoReupHookDraft.ReadOnly = !enabled;
-            }
         }
 
         private bool TryGetVideoReupSelectedRow(out VideoReupRowItem row)
@@ -1699,14 +1597,74 @@ namespace tiktok_Omni
             return false;
         }
 
+        /// <summary>Tất cả dòng đang chọn, sắp theo chỉ số hàng trong lưới (ổn định cho render lô).</summary>
+        private List<VideoReupRowItem> GetVideoReupSelectedRowsOrdered()
+        {
+            var result = new List<VideoReupRowItem>();
+            if (dgvVideoReupInput?.SelectedRows == null || dgvVideoReupInput.SelectedRows.Count == 0)
+            {
+                return result;
+            }
+
+            var ordered = dgvVideoReupInput.SelectedRows
+                .Cast<DataGridViewRow>()
+                .Where(r => r != null && r.DataBoundItem is VideoReupRowItem)
+                .OrderBy(r => r.Index);
+            foreach (var gridRow in ordered)
+            {
+                result.Add((VideoReupRowItem)gridRow.DataBoundItem);
+            }
+
+            return result;
+        }
+
         private void FlushVideoReupHookDraftFromEditor()
         {
-            if (!TryGetVideoReupSelectedRow(out var row) || txtVideoReupHookDraft == null)
+            try
+            {
+                dgvVideoReupInput?.EndEdit();
+            }
+            catch
+            {
+                // EndEdit có thể ném nếu lưới đang dispose — bỏ qua.
+            }
+        }
+
+        private AppSettings GetSettingsSnapshotForVideoReupMusic()
+        {
+            var s = _configManager.LoadAsync().GetAwaiter().GetResult();
+            if (txtVideoReupMusicLibraryPath != null)
+            {
+                s.VideoReupMusicLibraryPath = (txtVideoReupMusicLibraryPath.Text ?? string.Empty).Trim();
+            }
+
+            return s;
+        }
+
+        private void UpdateVideoReupMusicPathHint()
+        {
+            if (lblVideoReupMusicPathHint == null)
             {
                 return;
             }
 
-            row.ReupHookDraft = (txtVideoReupHookDraft.Text ?? string.Empty).Trim();
+            try
+            {
+                var s = GetSettingsSnapshotForVideoReupMusic();
+                var dir = VideoReupRemixService.GetMusicLibraryDirectory(s);
+                var src = string.IsNullOrWhiteSpace(s.VideoReupMusicLibraryPath) ? "mặc định" : "Cài đặt";
+                lblVideoReupMusicPathHint.Text =
+                    "Thư mục (" + src + "): " + dir +
+                    "\r\nTiếp: kéo/thả hoặc copy các file .mp3 vào cửa sổ vừa mở → quay lại đây bấm «Làm mới danh sách» (hoặc chọn lại dòng trong bảng) → chọn bài trong combo.";
+                _tipVideoReupMusicPath ??= new ToolTip { ShowAlways = true };
+                _tipVideoReupMusicPath.SetToolTip(
+                    lblVideoReupMusicPathHint,
+                    dir);
+            }
+            catch
+            {
+                lblVideoReupMusicPathHint.Text = string.Empty;
+            }
         }
 
         private void RefreshVideoReupMusicCombo()
@@ -1716,19 +1674,32 @@ namespace tiktok_Omni
                 return;
             }
 
+            AppSettings settingsSnap;
+            try
+            {
+                settingsSnap = GetSettingsSnapshotForVideoReupMusic();
+            }
+            catch
+            {
+                settingsSnap = new AppSettings();
+            }
+
+            var dir = VideoReupRemixService.GetMusicLibraryDirectory(settingsSnap);
+            VideoReupRemixService.EnsureMusicLibraryDirectoryExists(settingsSnap);
+
             var prev = (cbVideoReupMusic.SelectedItem ?? string.Empty).ToString();
             cbVideoReupMusic.Items.Clear();
-            var dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VideoReup", "Music");
-            if (Directory.Exists(dir))
+            foreach (var f in Directory.GetFiles(dir, "*.mp3", SearchOption.TopDirectoryOnly))
             {
-                foreach (var f in Directory.GetFiles(dir, "*.mp3", SearchOption.TopDirectoryOnly))
-                {
-                    cbVideoReupMusic.Items.Add(Path.GetFileName(f));
-                }
+                cbVideoReupMusic.Items.Add(Path.GetFileName(f));
             }
+
+            UpdateVideoReupMusicPathHint();
 
             if (cbVideoReupMusic.Items.Count == 0)
             {
+                cbVideoReupMusic.SelectedIndex = -1;
+                cbVideoReupMusic.Text = string.Empty;
                 return;
             }
 
@@ -1756,7 +1727,7 @@ namespace tiktok_Omni
 
         private void BindVideoReupEditorFromRow(VideoReupRowItem row)
         {
-            if (txtVideoReupHookDraft == null || cbVideoReupMusic == null)
+            if (cbVideoReupMusic == null)
             {
                 return;
             }
@@ -1776,26 +1747,152 @@ namespace tiktok_Omni
 
             if (row == null)
             {
-                txtVideoReupHookDraft.Text = string.Empty;
+                ApplyVideoReupAudioModeToUi(null);
                 return;
             }
 
-            txtVideoReupHookDraft.Text = row.ReupHookDraft ?? string.Empty;
-            RefreshVideoReupMusicCombo();
-            if (!string.IsNullOrWhiteSpace(row.ReupSelectedMusicFile) && cbVideoReupMusic.Items.Contains(row.ReupSelectedMusicFile))
+            ApplyVideoReupAudioModeToUi(row);
+            if (row.ReupAudioMode == VideoReupAudioMode.AffiliateBed)
             {
-                cbVideoReupMusic.SelectedItem = row.ReupSelectedMusicFile;
+                RefreshVideoReupMusicCombo();
+                if (!string.IsNullOrWhiteSpace(row.ReupSelectedMusicFile) && cbVideoReupMusic.Items.Contains(row.ReupSelectedMusicFile))
+                {
+                    cbVideoReupMusic.SelectedItem = row.ReupSelectedMusicFile;
+                }
+                else if (!string.IsNullOrWhiteSpace(row.ReupSuggestedMusicFile) && cbVideoReupMusic.Items.Contains(row.ReupSuggestedMusicFile))
+                {
+                    cbVideoReupMusic.SelectedItem = row.ReupSuggestedMusicFile;
+                    row.ReupSelectedMusicFile = row.ReupSuggestedMusicFile;
+                }
+                else if (cbVideoReupMusic.Items.Count > 0)
+                {
+                    cbVideoReupMusic.SelectedIndex = 0;
+                    row.ReupSelectedMusicFile = cbVideoReupMusic.SelectedItem?.ToString() ?? string.Empty;
+                }
             }
-            else if (!string.IsNullOrWhiteSpace(row.ReupSuggestedMusicFile) && cbVideoReupMusic.Items.Contains(row.ReupSuggestedMusicFile))
+        }
+
+        private void ApplyVideoReupAudioModeToUi(VideoReupRowItem row)
+        {
+            if (grpVideoReupAudioMode == null || rbVideoReupAudioAffiliate == null || rbVideoReupAudioFilm == null)
             {
-                cbVideoReupMusic.SelectedItem = row.ReupSuggestedMusicFile;
-                row.ReupSelectedMusicFile = row.ReupSuggestedMusicFile;
+                return;
             }
-            else if (cbVideoReupMusic.Items.Count > 0)
+
+            if (row == null)
             {
-                cbVideoReupMusic.SelectedIndex = 0;
-                row.ReupSelectedMusicFile = cbVideoReupMusic.SelectedItem?.ToString() ?? string.Empty;
+                grpVideoReupAudioMode.Enabled = false;
+                _videoReupSuppressAudioModeEvents = true;
+                try
+                {
+                    rbVideoReupAudioAffiliate.Checked = true;
+                }
+                finally
+                {
+                    _videoReupSuppressAudioModeEvents = false;
+                }
+
+                if (lblVideoReupMusicPick != null)
+                {
+                    lblVideoReupMusicPick.Visible = true;
+                }
+
+                if (cbVideoReupMusic != null)
+                {
+                    cbVideoReupMusic.Visible = true;
+                }
+
+                if (btnVideoReupOpenMusicFolder != null)
+                {
+                    btnVideoReupOpenMusicFolder.Visible = true;
+                }
+
+                if (btnVideoReupRefreshMusicList != null)
+                {
+                    btnVideoReupRefreshMusicList.Visible = true;
+                }
+
+                if (lblVideoReupMusicPathHint != null)
+                {
+                    lblVideoReupMusicPathHint.Visible = true;
+                }
+
+                UpdateVideoReupMusicPathHint();
+                return;
             }
+
+            grpVideoReupAudioMode.Enabled = true;
+            _videoReupSuppressAudioModeEvents = true;
+            try
+            {
+                if (row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal)
+                {
+                    rbVideoReupAudioFilm.Checked = true;
+                }
+                else
+                {
+                    rbVideoReupAudioAffiliate.Checked = true;
+                }
+            }
+            finally
+            {
+                _videoReupSuppressAudioModeEvents = false;
+            }
+
+            var film = row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal;
+            if (lblVideoReupMusicPick != null)
+            {
+                lblVideoReupMusicPick.Visible = !film;
+            }
+
+            if (cbVideoReupMusic != null)
+            {
+                cbVideoReupMusic.Visible = !film;
+            }
+
+            if (btnVideoReupOpenMusicFolder != null)
+            {
+                btnVideoReupOpenMusicFolder.Visible = !film;
+            }
+
+            if (btnVideoReupRefreshMusicList != null)
+            {
+                btnVideoReupRefreshMusicList.Visible = !film;
+            }
+
+            if (lblVideoReupMusicPathHint != null)
+            {
+                lblVideoReupMusicPathHint.Visible = !film;
+            }
+
+            if (!film)
+            {
+                UpdateVideoReupMusicPathHint();
+            }
+        }
+
+        private void VideoReupAudioModeRadio_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_videoReupSuppressAudioModeEvents)
+            {
+                return;
+            }
+
+            if (!TryGetVideoReupSelectedRow(out var row))
+            {
+                return;
+            }
+
+            if (rbVideoReupAudioFilm != null && rbVideoReupAudioFilm.Checked)
+            {
+                row.ReupAudioMode = VideoReupAudioMode.FilmKeepOriginal;
+            }
+            else if (rbVideoReupAudioAffiliate != null && rbVideoReupAudioAffiliate.Checked)
+            {
+                row.ReupAudioMode = VideoReupAudioMode.AffiliateBed;
+            }
+
+            ApplyVideoReupAudioModeToUi(row);
         }
 
         private void dgvVideoReupInput_SelectionChanged(object sender, EventArgs e)
@@ -1807,12 +1904,6 @@ namespace tiktok_Omni
             }
 
             BindVideoReupEditorFromRow(row);
-        }
-
-        private void txtVideoReupHookDraft_Leave(object sender, EventArgs e)
-        {
-            FlushVideoReupHookDraftFromEditor();
-            _videoReupBindingList?.ResetBindings();
         }
 
         private void FlushVideoReupVideoUrlFromEditor()
@@ -1833,8 +1924,50 @@ namespace tiktok_Omni
             VideoReupRemixService.ClearReupCachedMediaPaths(row);
         }
 
+        /// <summary>Tự tìm/tải ffmpeg+ffprobe, lưu vào cài đặt nếu thành công.</summary>
+        private async Task<bool> TryEnsureVideoReupFfmpegAsync(AppSettings settings, bool saveSettings)
+        {
+            try
+            {
+                var path = await VideoReupRemixService.EnsureFfmpegToolkitAsync(
+                    settings,
+                    LogVideoReup,
+                    CancellationToken.None).ConfigureAwait(true);
+                if (saveSettings)
+                {
+                    await _configManager.SaveAsync(settings).ConfigureAwait(true);
+                }
+
+                if (!string.IsNullOrWhiteSpace(path) && txtFfmpegPath != null && !txtFfmpegPath.IsDisposed)
+                {
+                    if (txtFfmpegPath.InvokeRequired)
+                    {
+                        txtFfmpegPath.Invoke(new Action(() => txtFfmpegPath.Text = path));
+                    }
+                    else
+                    {
+                        txtFfmpegPath.Text = path;
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogVideoReup("[FFmpeg] " + ex.Message);
+                SetVideoReupProgress("lỗi FFmpeg — xem log", 0);
+                return false;
+            }
+        }
+
         private async Task VideoReupEnsureDownloadWithGateAsync(VideoReupRowItem row, AppSettings settings)
         {
+            if (!await TryEnsureVideoReupFfmpegAsync(settings, saveSettings: true).ConfigureAwait(true))
+            {
+                throw new InvalidOperationException(
+                    "Chưa cài được FFmpeg/ffprobe. Cần mạng lần đầu — thử lại hoặc bấm «⬇ Tải FFmpeg» trong Cài đặt.");
+            }
+
             await _videoReupDownloadGate.WaitAsync().ConfigureAwait(true);
             try
             {
@@ -1842,7 +1975,7 @@ namespace tiktok_Omni
                     row,
                     settings,
                     _affiliateHunter,
-                    Log,
+                    LogVideoReup,
                     CancellationToken.None).ConfigureAwait(true);
             }
             finally
@@ -1873,17 +2006,18 @@ namespace tiktok_Omni
                     row.RemixStatus = "Đang tải video…";
                     row.RemixLastError = string.Empty;
                     _videoReupBindingList?.ResetBindings();
+                    SetVideoReupProgress($"Đang tải «{row.ProductName}»…", 0, indeterminate: true);
                     try
                     {
                         await VideoReupEnsureDownloadWithGateAsync(row, settings).ConfigureAwait(true);
                         row.RemixStatus = "Đã tải video";
-                        Log($"Video reup: đã tải video nguồn — «{row.ProductName}».");
+                        LogVideoReup($"Video reup: đã tải video nguồn — «{row.ProductName}».");
                     }
                     catch (Exception ex)
                     {
                         row.RemixStatus = "Lỗi";
                         row.RemixLastError = ex.Message;
-                        Log($"Video reup tải video «{row.ProductName}»: {ex.Message}");
+                        LogVideoReup($"Video reup tải video «{row.ProductName}»: {ex.Message}");
                     }
 
                     _videoReupBindingList?.ResetBindings();
@@ -1903,7 +2037,132 @@ namespace tiktok_Omni
             }
             catch (Exception ex)
             {
-                Log("Video reup (tải sau nhập): " + ex.Message);
+                LogVideoReup("Video reup (tải sau nhập): " + ex.Message);
+            }
+        }
+
+        private async Task VideoReupCommitUrlThenMaybeDownloadAsync(VideoReupRowItem row)
+        {
+            if (row == null || !VideoReupRemixService.LooksLikeHttpVideoUrl(row.VideoUrl))
+            {
+                return;
+            }
+
+            SetVideoReupCaptionButtonsEnabled(false);
+            row.RemixStatus = "Đang tải video…";
+            row.RemixLastError = string.Empty;
+            _videoReupBindingList?.ResetBindings();
+            SetVideoReupProgress("Đang tải video nguồn (TikWM)…", 0, indeterminate: true);
+            try
+            {
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                await VideoReupEnsureDownloadWithGateAsync(row, settings).ConfigureAwait(true);
+                row.RemixStatus = "Đã tải video";
+                LogVideoReup($"Video reup: đã tải video nguồn — «{row.ProductName}».");
+                SetVideoReupProgress("Đã tải video nguồn", 100);
+            }
+            catch (Exception ex)
+            {
+                row.RemixStatus = "Lỗi tải";
+                row.RemixLastError = ex.Message;
+                LogVideoReup("Video reup tải video: " + ex.Message);
+                SetVideoReupProgress("lỗi tải video", 0);
+                try
+                {
+                    var s = await _configManager.LoadAsync().ConfigureAwait(true);
+                    LogVideoReup("Gợi ý:\r\n" + VideoReupRemixService.DescribePipelineBlockers(row, s));
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+            finally
+            {
+                SetVideoReupCaptionButtonsEnabled(true);
+                _videoReupBindingList?.ResetBindings();
+            }
+        }
+
+        private void DgvVideoReupInput_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
+        {
+            if (dgvVideoReupInput == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            var col = dgvVideoReupInput.Columns[e.ColumnIndex];
+            if (!string.Equals(col.DataPropertyName, "VideoUrl", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (dgvVideoReupInput.Rows[e.RowIndex].DataBoundItem is VideoReupRowItem row)
+            {
+                _videoReupVideoUrlBeforeCellEdit = row.VideoUrl ?? string.Empty;
+            }
+        }
+
+        private async void DgvVideoReupInput_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            if (dgvVideoReupInput == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            var col = dgvVideoReupInput.Columns[e.ColumnIndex];
+            var prop = col.DataPropertyName ?? string.Empty;
+            if (!(dgvVideoReupInput.Rows[e.RowIndex].DataBoundItem is VideoReupRowItem row))
+            {
+                return;
+            }
+
+            if (string.Equals(prop, "ReupHookDraft", StringComparison.OrdinalIgnoreCase))
+            {
+                row.ReupHookDraft = (row.ReupHookDraft ?? string.Empty).Trim();
+                _videoReupBindingList?.ResetBindings();
+                return;
+            }
+
+            if (!string.Equals(prop, "VideoUrl", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var newUrl = (row.VideoUrl ?? string.Empty).Trim();
+            var prev = (_videoReupVideoUrlBeforeCellEdit ?? string.Empty).Trim();
+            if (!string.Equals(prev, newUrl, StringComparison.Ordinal))
+            {
+                VideoReupRemixService.ClearReupCachedMediaPaths(row);
+            }
+
+            if (TryGetVideoReupSelectedRow(out var sel) && ReferenceEquals(sel, row) && txtVideoReupVideoUrl != null)
+            {
+                _videoReupSuppressUrlEditorEvents = true;
+                try
+                {
+                    txtVideoReupVideoUrl.Text = row.VideoUrl ?? string.Empty;
+                }
+                finally
+                {
+                    _videoReupSuppressUrlEditorEvents = false;
+                }
+            }
+
+            _videoReupBindingList?.ResetBindings();
+
+            if (string.Equals(prev, newUrl, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            try
+            {
+                await VideoReupCommitUrlThenMaybeDownloadAsync(row).ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                LogVideoReup("Video reup (sửa URL trong bảng): " + ex.Message);
             }
         }
 
@@ -1916,32 +2175,13 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (!VideoReupRemixService.LooksLikeHttpVideoUrl(row.VideoUrl))
-            {
-                return;
-            }
-
-            SetVideoReupCaptionButtonsEnabled(false);
-            row.RemixStatus = "Đang tải video…";
-            row.RemixLastError = string.Empty;
-            _videoReupBindingList?.ResetBindings();
             try
             {
-                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-                await VideoReupEnsureDownloadWithGateAsync(row, settings).ConfigureAwait(true);
-                row.RemixStatus = "Đã tải video";
-                Log($"Video reup: đã tải video nguồn — «{row.ProductName}».");
+                await VideoReupCommitUrlThenMaybeDownloadAsync(row).ConfigureAwait(true);
             }
             catch (Exception ex)
             {
-                row.RemixStatus = "Lỗi";
-                row.RemixLastError = ex.Message;
-                Log("Video reup tải video: " + ex.Message);
-            }
-            finally
-            {
-                SetVideoReupCaptionButtonsEnabled(true);
-                _videoReupBindingList?.ResetBindings();
+                LogVideoReup("Video reup tải video: " + ex.Message);
             }
         }
 
@@ -1969,7 +2209,7 @@ namespace tiktok_Omni
             }
 
             txtVideoReupVideoUrl?.Focus();
-            Log("Video reup: đã thêm dòng — dán URL TikTok vào ô «URL video», rời ô để tải.");
+            LogVideoReup("Video reup: đã thêm dòng — nhập URL TikTok trong cột «URL video» (F2) hoặc ô «URL video» bên dưới, rời ô / Enter để tải.");
         }
 
         private void cbVideoReupMusic_SelectedIndexChanged(object sender, EventArgs e)
@@ -1996,7 +2236,7 @@ namespace tiktok_Omni
         {
             if (!TryGetVideoReupSelectedRow(out var row))
             {
-                Log("Video reup hook: chọn một dòng trong bảng.");
+                LogVideoReup("Video reup hook: chọn một dòng trong bảng.");
                 return;
             }
 
@@ -2007,7 +2247,8 @@ namespace tiktok_Omni
             {
                 row.RemixStatus = "Lỗi";
                 row.RemixLastError = preflightError;
-                Log("Video reup hook: " + preflightError);
+                LogVideoReup("Video reup hook: " + preflightError);
+                SetVideoReupProgress("lỗi — kiểm tra Cài đặt / nhạc .mp3", 0);
                 _videoReupBindingList?.ResetBindings();
                 return;
             }
@@ -2016,18 +2257,18 @@ namespace tiktok_Omni
             row.RemixStatus = regenerateLabel ? "Gemini (lại)…" : "Gemini hook…";
             row.RemixLastError = string.Empty;
             _videoReupBindingList?.ResetBindings();
+            SetVideoReupProgress(
+                regenerateLabel ? "Gemini: tạo lại hook + gợi ý nhạc…" : "Gemini: đang tạo hook + gợi ý nhạc…",
+                0,
+                indeterminate: true);
             try
             {
                 await _videoReupRemixService.GenerateHookAndSuggestMusicAsync(
                     row,
                     settings,
                     _geminiService,
-                    Log,
+                    LogVideoReup,
                     CancellationToken.None).ConfigureAwait(true);
-                if (txtVideoReupHookDraft != null)
-                {
-                    txtVideoReupHookDraft.Text = row.ReupHookDraft ?? string.Empty;
-                }
 
                 RefreshVideoReupMusicCombo();
                 if (!string.IsNullOrWhiteSpace(row.ReupSuggestedMusicFile) && cbVideoReupMusic?.Items.Contains(row.ReupSuggestedMusicFile) == true)
@@ -2037,14 +2278,18 @@ namespace tiktok_Omni
                 }
 
                 row.RemixStatus = "Hook OK";
-                Log(regenerateLabel ? "Video reup hook: Gemini đã tạo lại hook + gợi ý nhạc." : "Video reup hook: Gemini đã tạo hook + gợi ý nhạc.");
+                LogVideoReup(regenerateLabel
+                    ? "Video reup hook: Gemini đã ghi lại hook vào cột «Hook» của dòng đang chọn (+ gợi ý nhạc)."
+                    : "Video reup hook: Gemini đã ghi hook vào cột «Hook» của dòng đang chọn (+ gợi ý nhạc).");
+                SetVideoReupProgress("Hook OK — có thể bấm Lyria hoặc «Tạo video thành phẩm»", 100);
                 _videoReupBindingList?.ResetBindings();
             }
             catch (Exception ex)
             {
                 row.RemixStatus = "Lỗi";
                 row.RemixLastError = ex.Message;
-                Log("Video reup hook lỗi: " + ex.Message);
+                LogVideoReup("Video reup hook lỗi: " + ex.Message);
+                SetVideoReupProgress("lỗi tạo hook", 0);
                 _videoReupBindingList?.ResetBindings();
             }
             finally
@@ -2057,7 +2302,7 @@ namespace tiktok_Omni
         {
             if (!TryGetVideoReupSelectedRow(out var row))
             {
-                Log("Video reup Lyria: chọn một dòng trong bảng.");
+                LogVideoReup("Video reup Lyria: chọn một dòng trong bảng.");
                 return;
             }
 
@@ -2068,7 +2313,8 @@ namespace tiktok_Omni
             {
                 row.RemixStatus = "Lỗi";
                 row.RemixLastError = preflightError;
-                Log("Video reup Lyria: " + preflightError);
+                LogVideoReup("Video reup Lyria: " + preflightError);
+                SetVideoReupProgress("lỗi — thiếu hook / Lyria / FFmpeg", 0);
                 _videoReupBindingList?.ResetBindings();
                 return;
             }
@@ -2077,23 +2323,26 @@ namespace tiktok_Omni
             row.RemixStatus = "Lyria…";
             row.RemixLastError = string.Empty;
             _videoReupBindingList?.ResetBindings();
+            SetVideoReupProgress("Lyria: đang đọc hook → WAV…", 0, indeterminate: true);
             try
             {
                 await _videoReupRemixService.BuildLyriaHookAudioAsync(
                     row,
                     settings,
                     _affiliateHunter,
-                    Log,
+                    LogVideoReup,
                     CancellationToken.None).ConfigureAwait(true);
                 row.RemixStatus = "Âm thanh hook OK";
-                Log("Video reup Lyria: đã tạo WAV hook — chọn nhạc rồi «Render video».");
+                LogVideoReup("Video reup Lyria: đã tạo WAV hook — chọn nhạc rồi «Tạo video thành phẩm».");
+                SetVideoReupProgress("Âm thanh hook OK", 100);
                 _videoReupBindingList?.ResetBindings();
             }
             catch (Exception ex)
             {
                 row.RemixStatus = "Lỗi";
                 row.RemixLastError = ex.Message;
-                Log("Video reup Lyria lỗi: " + ex.Message);
+                LogVideoReup("Video reup Lyria lỗi: " + ex.Message);
+                SetVideoReupProgress("lỗi Lyria", 0);
                 _videoReupBindingList?.ResetBindings();
             }
             finally
@@ -2102,52 +2351,210 @@ namespace tiktok_Omni
             }
         }
 
+        private void SyncVideoReupMusicFromComboToRow(VideoReupRowItem row)
+        {
+            if (row == null || row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal)
+            {
+                return;
+            }
+
+            if (cbVideoReupMusic?.SelectedItem != null)
+            {
+                row.ReupSelectedMusicFile = cbVideoReupMusic.SelectedItem.ToString() ?? string.Empty;
+            }
+            else if (cbVideoReupMusic?.Items.Count > 0 && string.IsNullOrWhiteSpace(row.ReupSelectedMusicFile))
+            {
+                row.ReupSelectedMusicFile = cbVideoReupMusic.Items[0]?.ToString() ?? string.Empty;
+            }
+        }
+
+        /// <summary>Tự chạy đủ bước: tải → Gemini (nếu thiếu hook) → Lyria → ghép MP4.</summary>
+        private async Task<VideoReupRemixResult> RunVideoReupFullPipelineAsync(VideoReupRowItem row, AppSettings settings)
+        {
+            if (row == null)
+            {
+                throw new ArgumentNullException(nameof(row));
+            }
+
+            if (!VideoReupRemixService.LooksLikeHttpVideoUrl(row.VideoUrl))
+            {
+                throw new InvalidOperationException("URL video không hợp lệ — cần link TikTok http(s).");
+            }
+
+            if (!await TryEnsureVideoReupFfmpegAsync(settings, saveSettings: true).ConfigureAwait(true))
+            {
+                throw new InvalidOperationException(
+                    "Chưa cài được FFmpeg/ffprobe. Cần mạng lần đầu — thử lại hoặc bấm «⬇ Tải FFmpeg» trong Cài đặt.");
+            }
+
+            row.RemixStatus = "Bước 1/4: tải video…";
+            row.RemixLastError = string.Empty;
+            _videoReupBindingList?.ResetBindings();
+            SetVideoReupProgress("Bước 1/4: tải video (TikWM)…", 12, indeterminate: true);
+            await VideoReupEnsureDownloadWithGateAsync(row, settings).ConfigureAwait(true);
+            LogVideoReup("Video reup [1/4]: đã tải video nguồn.");
+            SetVideoReupProgress("Bước 1/4: xong", 25);
+
+            if (string.IsNullOrWhiteSpace((row.ReupHookDraft ?? string.Empty).Trim()))
+            {
+                if (!VideoReupRemixService.TryValidateHookGeminiStep(row, settings, out var geminiPre))
+                {
+                    throw new InvalidOperationException(
+                        "Chưa có câu hook.\r\n" + geminiPre + "\r\nHoặc gõ hook tay vào cột «Hook» (4–7s) rồi thử lại.");
+                }
+
+                row.RemixStatus = "Bước 2/4: Gemini hook…";
+                _videoReupBindingList?.ResetBindings();
+                SetVideoReupProgress("Bước 2/4: Gemini tạo hook…", 40, indeterminate: true);
+                await _videoReupRemixService.GenerateHookAndSuggestMusicAsync(
+                    row,
+                    settings,
+                    _geminiService,
+                    LogVideoReup,
+                    CancellationToken.None).ConfigureAwait(true);
+                RefreshVideoReupMusicCombo();
+                if (!string.IsNullOrWhiteSpace(row.ReupSuggestedMusicFile) && cbVideoReupMusic?.Items.Contains(row.ReupSuggestedMusicFile) == true)
+                {
+                    cbVideoReupMusic.SelectedItem = row.ReupSuggestedMusicFile;
+                    row.ReupSelectedMusicFile = row.ReupSuggestedMusicFile;
+                }
+
+                LogVideoReup("Video reup [2/4]: Gemini đã ghi hook.");
+                SetVideoReupProgress("Bước 2/4: xong", 50);
+            }
+            else
+            {
+                LogVideoReup("Video reup [2/4]: đã có hook — bỏ qua Gemini.");
+                SetVideoReupProgress("Bước 2/4: bỏ qua (đã có hook)", 50);
+            }
+
+            row.RemixStatus = "Bước 3/4: Lyria hook…";
+            _videoReupBindingList?.ResetBindings();
+            SetVideoReupProgress("Bước 3/4: Lyria đọc hook…", 65, indeterminate: true);
+            await _videoReupRemixService.BuildLyriaHookAudioAsync(
+                row,
+                settings,
+                _affiliateHunter,
+                LogVideoReup,
+                CancellationToken.None).ConfigureAwait(true);
+            LogVideoReup("Video reup [3/4]: Lyria đã tạo âm thanh hook.");
+            SetVideoReupProgress("Bước 3/4: xong", 75);
+
+            SyncVideoReupMusicFromComboToRow(row);
+            if (!VideoReupRemixService.TryValidateFinalRenderStep(row, settings, out var renderPre))
+            {
+                throw new InvalidOperationException(renderPre);
+            }
+
+            row.RemixStatus = "Bước 4/4: render MP4…";
+            _videoReupBindingList?.ResetBindings();
+            SetVideoReupProgress("Bước 4/4: ghép MP4 (FFmpeg)…", 88, indeterminate: true);
+            var result = await _videoReupRemixService.RenderFinalVideoAsync(
+                row,
+                settings,
+                _geminiService,
+                LogVideoReup,
+                CancellationToken.None).ConfigureAwait(true);
+            LogVideoReup("Video reup [4/4]: render xong.");
+            SetVideoReupProgress("Hoàn tất", 100);
+            return result;
+        }
+
         private async void btnVideoReupRenderVideo_Click(object sender, EventArgs e)
         {
             if (!TryGetVideoReupSelectedRow(out var row))
             {
-                Log("Video reup render: chọn một dòng trong bảng.");
+                LogVideoReup("Video reup: chọn một dòng trong bảng.");
                 return;
             }
 
             FlushVideoReupHookDraftFromEditor();
             FlushVideoReupVideoUrlFromEditor();
             var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            if (!VideoReupRemixService.TryValidateFinalRenderStep(row, settings, out var preflightError))
-            {
-                row.RemixStatus = "Lỗi";
-                row.RemixLastError = preflightError;
-                Log("Video reup render: " + preflightError);
-                _videoReupBindingList?.ResetBindings();
-                return;
-            }
+            LogVideoReup("Video reup — kiểm tra trước khi tạo:\r\n" + VideoReupRemixService.DescribePipelineBlockers(row, settings));
+            SetVideoReupProgress("Bắt đầu pipeline 4 bước…", 5);
 
             SetVideoReupCaptionButtonsEnabled(false);
-            row.RemixStatus = "Đang render…";
             row.RemixLastError = string.Empty;
             _videoReupBindingList?.ResetBindings();
+            VideoReupRemixService.EnsureMusicLibraryDirectoryExists(settings);
             try
             {
-                var result = await _videoReupRemixService.RenderFinalVideoAsync(
-                    row,
-                    settings,
-                    Log,
-                    CancellationToken.None).ConfigureAwait(true);
+                var result = await RunVideoReupFullPipelineAsync(row, settings).ConfigureAwait(true);
                 row.LastRemixOutputPath = result.OutputPath ?? string.Empty;
                 row.LastSourceVideoDurationSec = result.SourceDurationSeconds;
                 row.LastRemixOutputVideoDurationSec = result.OutputFileDurationSeconds;
                 row.LastHookDurationUsedSec = result.HookDurationSecondsUsed;
                 row.RemixStatus = "Xong";
                 row.RemixLastError = string.Empty;
-                Log($"Video reup render: xong → {row.LastRemixOutputPath} (≈{result.OutputFileDurationSeconds:0.##}s).");
+                LogVideoReup($"Video reup: thành phẩm → {row.LastRemixOutputPath} (≈{result.OutputFileDurationSeconds:0.##}s).");
+                SetVideoReupProgress("Xong — xem cột MP4 remix", 100);
                 _videoReupBindingList?.ResetBindings();
             }
             catch (Exception ex)
             {
                 row.RemixStatus = "Lỗi";
                 row.RemixLastError = ex.Message;
-                Log("Video reup render lỗi: " + ex.Message);
+                LogVideoReup("Video reup lỗi: " + ex.Message);
+                LogVideoReup("Gợi ý:\r\n" + VideoReupRemixService.DescribePipelineBlockers(row, settings));
+                SetVideoReupProgress("lỗi — xem cột Lỗi và log", 0);
                 _videoReupBindingList?.ResetBindings();
+            }
+            finally
+            {
+                SetVideoReupCaptionButtonsEnabled(true);
+            }
+        }
+
+        private async void btnVideoReupRenderBatch_Click(object sender, EventArgs e)
+        {
+            var list = GetVideoReupSelectedRowsOrdered();
+            if (list.Count == 0)
+            {
+                LogVideoReup("Video reup render lô: chọn ít nhất một dòng trong bảng (Ctrl+click nhiều dòng).");
+                return;
+            }
+
+            FlushVideoReupHookDraftFromEditor();
+            FlushVideoReupVideoUrlFromEditor();
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            SetVideoReupCaptionButtonsEnabled(false);
+            var ok = 0;
+            var fail = 0;
+            try
+            {
+                for (var i = 0; i < list.Count; i++)
+                {
+                    var row = list[i];
+                    var batchPct = list.Count > 0 ? (int)Math.Round((double)i / list.Count * 100) : 0;
+                    SetVideoReupProgress($"Lô [{i + 1}/{list.Count}]: «{row.ProductName}»", batchPct);
+                    LogVideoReup($"Video reup lô [{i + 1}/{list.Count}]: «{row.ProductName}»…");
+                    LogVideoReup(VideoReupRemixService.DescribePipelineBlockers(row, settings));
+                    try
+                    {
+                        var result = await RunVideoReupFullPipelineAsync(row, settings).ConfigureAwait(true);
+                        row.LastRemixOutputPath = result.OutputPath ?? string.Empty;
+                        row.LastSourceVideoDurationSec = result.SourceDurationSeconds;
+                        row.LastRemixOutputVideoDurationSec = result.OutputFileDurationSeconds;
+                        row.LastHookDurationUsedSec = result.HookDurationSecondsUsed;
+                        row.RemixStatus = "Xong";
+                        row.RemixLastError = string.Empty;
+                        LogVideoReup($"Video reup lô: xong «{row.ProductName}» → {row.LastRemixOutputPath} (≈{result.OutputFileDurationSeconds:0.##}s).");
+                        ok++;
+                    }
+                    catch (Exception ex)
+                    {
+                        row.RemixStatus = "Lỗi";
+                        row.RemixLastError = ex.Message;
+                        LogVideoReup($"Video reup lô lỗi «{row.ProductName}»: {ex.Message}");
+                        fail++;
+                    }
+
+                    _videoReupBindingList?.ResetBindings();
+                }
+
+                LogVideoReup($"Video reup lô: hoàn tất — thành công {ok}, lỗi {fail} (tổng {list.Count} dòng).");
+                SetVideoReupProgress($"Lô xong — OK {ok}, lỗi {fail}", fail > 0 ? 0 : 100);
             }
             finally
             {
@@ -4056,20 +4463,38 @@ namespace tiktok_Omni
             var input = txtPhilosophyInput?.Text?.Trim() ?? string.Empty;
             if (string.IsNullOrWhiteSpace(input))
             {
-                Log("Philosophy module: nhập quote hoặc link bài viết.");
+                LogPhilosophy("Triết lý: nhập quote hoặc link bài viết.");
                 return;
             }
 
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            LogPhilosophy("Triết lý — kiểm tra:\r\n" + PhilosophyVideoService.DescribeBlockers(settings));
+
             btnRunPhilosophyVideo.Enabled = false;
+            SetPhilosophyProgress("Bắt đầu…", 5);
             try
             {
-                Log("Philosophy module: generating video from quote/link...");
-                var outputPath = await _philosophyVideoService.GenerateAsync(input, Log, CancellationToken.None);
-                Log("Philosophy module: done -> " + outputPath);
+                var result = await _philosophyVideoService.GenerateAsync(
+                    input,
+                    settings,
+                    LogPhilosophy,
+                    (status, pct) => SetPhilosophyProgress(status, pct),
+                    CancellationToken.None).ConfigureAwait(true);
+
+                await _configManager.SaveAsync(settings).ConfigureAwait(true);
+                if (txtFfmpegPath != null && !string.IsNullOrWhiteSpace(settings.FfmpegPath))
+                {
+                    txtFfmpegPath.Text = settings.FfmpegPath;
+                }
+
+                LogPhilosophy($"Triết lý: xong → {result.OutputPath} (≈{result.DurationSeconds:0.##}s).");
+                LogPhilosophy("Quote: " + result.Quote);
+                SetPhilosophyProgress("Xong — mở thư mục Output", 100);
             }
             catch (Exception ex)
             {
-                Log("Philosophy module failed: " + ex.Message);
+                LogPhilosophy("Triết lý lỗi: " + ex.Message);
+                SetPhilosophyProgress("lỗi — xem log", 0);
             }
             finally
             {
@@ -4077,10 +4502,83 @@ namespace tiktok_Omni
             }
         }
 
+        private void LogPhilosophy(string message)
+        {
+            Log(message);
+
+            if (rtbPhilosophyLog == null || rtbPhilosophyLog.IsDisposed)
+            {
+                return;
+            }
+
+            if (rtbPhilosophyLog.InvokeRequired)
+            {
+                rtbPhilosophyLog.Invoke(new Action<string>(LogPhilosophy), message);
+                return;
+            }
+
+            var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
+            var isError = message.IndexOf("lỗi", StringComparison.OrdinalIgnoreCase) >= 0
+                          || message.IndexOf("429", StringComparison.Ordinal) >= 0
+                          || message.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0;
+            rtbPhilosophyLog.SelectionStart = rtbPhilosophyLog.TextLength;
+            rtbPhilosophyLog.SelectionLength = 0;
+            rtbPhilosophyLog.SelectionColor = isError ? Color.FromArgb(255, 120, 120) : Color.FromArgb(190, 195, 205);
+            rtbPhilosophyLog.AppendText(line + Environment.NewLine);
+            rtbPhilosophyLog.ScrollToCaret();
+        }
+
+        private void SetPhilosophyProgress(string statusText, int percent, bool indeterminate = false)
+        {
+            if (lblPhilosophyProgress == null || pbPhilosophyProgress == null)
+            {
+                return;
+            }
+
+            void Apply()
+            {
+                lblPhilosophyProgress.Text = "Tiến trình: " + (statusText ?? string.Empty).Trim();
+                if (indeterminate)
+                {
+                    pbPhilosophyProgress.Style = ProgressBarStyle.Marquee;
+                    pbPhilosophyProgress.MarqueeAnimationSpeed = 28;
+                }
+                else
+                {
+                    pbPhilosophyProgress.Style = ProgressBarStyle.Continuous;
+                    pbPhilosophyProgress.MarqueeAnimationSpeed = 0;
+                    pbPhilosophyProgress.Value = Math.Max(0, Math.Min(100, percent));
+                }
+            }
+
+            if (lblPhilosophyProgress.InvokeRequired)
+            {
+                lblPhilosophyProgress.Invoke(new Action(Apply));
+                return;
+            }
+
+            Apply();
+        }
+
+        private void btnPhilosophyClearLog_Click(object sender, EventArgs e)
+        {
+            if (rtbPhilosophyLog == null || rtbPhilosophyLog.IsDisposed)
+            {
+                return;
+            }
+
+            rtbPhilosophyLog.Clear();
+            SetPhilosophyProgress("sẵn sàng", 0);
+        }
+
         private void tabAiVideoGenModes_SelectedIndexChanged(object sender, EventArgs e)
         {
             ApplyAiVideoGenModeUiVisibility();
             AttachAiRenderProgressPanelToSelectedModeTab();
+            if (tabAiVideoGenModes?.SelectedTab != null && ReferenceEquals(tabAiVideoGenModes.SelectedTab, tabAiModeVideoReup))
+            {
+                RefreshVideoReupMusicCombo();
+            }
         }
 
         private void AttachAiRenderProgressPanelToSelectedModeTab()
@@ -4129,6 +4627,20 @@ namespace tiktok_Omni
             {
                 pbAiRenderSlot3.Width = barW;
             }
+
+            // Video reup: hướng dẫn nằm dưới panel tiến độ (cả hai Dock Bottom — hint sát đáy tab).
+            if (ReferenceEquals(page, tabAiModeVideoReup) && lblVideoReupHint != null)
+            {
+                lblVideoReupHint.Dock = DockStyle.Bottom;
+                lblVideoReupHint.Height = 102;
+                if (lblVideoReupHint.Parent != page)
+                {
+                    lblVideoReupHint.Parent = page;
+                }
+
+                page.Controls.SetChildIndex(pnlAiRenderProgress, Math.Max(0, page.Controls.Count - 2));
+                page.Controls.SetChildIndex(lblVideoReupHint, page.Controls.Count - 1);
+            }
         }
 
         private void ApplyAiVideoGenModeUiVisibility()
@@ -4161,7 +4673,7 @@ namespace tiktok_Omni
                 {
                     lblAiVideoGenProductBlockHint.Visible = true;
                     lblAiVideoGenProductBlockHint.Text =
-                        "Video reup: ô «URL video» + bảng. Có link http(s) → rời ô hoặc nhập từ Affiliate → tải nguồn. Bước: hook Gemini → Lyria → nhạc → Render. Xóa dòng: Delete. SRT sau render. Slideshow phía trên không dùng cho reup.";
+                        "Video reup: URL + hook trong bảng; «Render video» nhúng phụ đề karaoke đoạn hook (Gemini timeline nếu có API key). «Render lô» (Ctrl). Slideshow không dùng cho reup.";
                 }
                 else
                 {
@@ -5759,6 +6271,7 @@ namespace tiktok_Omni
             _isWarmupQueuePaused = paused && (_warmupQueueScheduler?.QueueCount ?? 0) > 0;
             RefreshWarmupQueueStatus();
             SetStatusStripText(tabMain?.SelectedTab == null ? "tiktok_Omni" : $"Đang xem: {tabMain.SelectedTab.Text}");
+            _ = WarmupBundledToolingInBackgroundAsync();
             if (_isWarmupQueuePaused)
             {
                 var autoResumeEnabled = chkAutoResumeQueueOnStartup?.Checked ?? true;
@@ -5791,7 +6304,16 @@ namespace tiktok_Omni
                 txtVeoEndpoint.Text = settings.VeoEndpoint;
                 txtLyriaEndpoint.Text = settings.LyriaEndpoint;
                 txtFfmpegPath.Text = settings.FfmpegPath;
-                if (txtYtDlpPath != null) txtYtDlpPath.Text = settings.YtDlpPath ?? string.Empty;
+                if (txtYtDlpPath != null)
+                {
+                    txtYtDlpPath.Text = settings.YtDlpPath ?? string.Empty;
+                }
+
+                if (txtVideoReupMusicLibraryPath != null)
+                {
+                    txtVideoReupMusicLibraryPath.Text = settings.VideoReupMusicLibraryPath ?? string.Empty;
+                }
+
                 chkAutoResumeQueueOnStartup.Checked = settings.AutoResumeQueueOnStartup ?? true;
                 chkAlwaysRequirePrePostApproval.Checked = settings.AlwaysRequirePrePostApproval ?? true;
                 chkAlwaysRequirePreRenderApproval.Checked = settings.AlwaysRequirePreRenderApproval ?? false;
@@ -5837,6 +6359,7 @@ namespace tiktok_Omni
                 RefreshRunningProfileOptions(settings);
                 RefreshAutoPostVideoCombo();
                 ValidateSettingsInputs();
+                RefreshVideoReupMusicCombo();
                 Log("Settings loaded.");
             }
             catch (Exception ex)
@@ -5873,6 +6396,7 @@ namespace tiktok_Omni
                 settings.LyriaEndpoint = txtLyriaEndpoint.Text.Trim();
                 settings.FfmpegPath = txtFfmpegPath.Text.Trim();
                 settings.YtDlpPath = (txtYtDlpPath?.Text ?? string.Empty).Trim();
+                settings.VideoReupMusicLibraryPath = (txtVideoReupMusicLibraryPath?.Text ?? string.Empty).Trim();
                 settings.AutoResumeQueueOnStartup = chkAutoResumeQueueOnStartup?.Checked ?? true;
                 settings.AlwaysRequirePrePostApproval = chkAlwaysRequirePrePostApproval?.Checked ?? true;
                 settings.AlwaysRequirePreRenderApproval = chkAlwaysRequirePreRenderApproval?.Checked ?? false;
@@ -5889,6 +6413,7 @@ namespace tiktok_Omni
 
                 await _configManager.SaveAsync(settings);
                 RefreshRunningProfileOptions(settings);
+                RefreshVideoReupMusicCombo();
                 Log("Settings saved successfully.");
             }
             catch (Exception ex)
@@ -6038,6 +6563,159 @@ namespace tiktok_Omni
             }
         }
 
+        private void btnBrowseVideoReupMusicLibrary_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var s = GetSettingsSnapshotForVideoReupMusic();
+                var start = VideoReupRemixService.GetMusicLibraryDirectory(s);
+                if (!Directory.Exists(start))
+                {
+                    start = VideoReupRemixService.GetMusicLibraryDirectory(new AppSettings());
+                }
+
+                using (var dlg = new FolderBrowserDialog())
+                {
+                    dlg.Description = "Chọn thư mục chứa file .mp3 cho Video reup (Affiliate).";
+                    dlg.SelectedPath = Directory.Exists(start) ? start : Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
+                    if (dlg.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(dlg.SelectedPath))
+                    {
+                        if (txtVideoReupMusicLibraryPath != null)
+                        {
+                            txtVideoReupMusicLibraryPath.Text = dlg.SelectedPath.Trim();
+                        }
+
+                        RefreshVideoReupMusicCombo();
+                        Log("Video reup nhạc: đã chọn thư mục trong Cài đặt — bấm «Save Settings» để lưu vào appsettings.json.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Video reup nhạc (Browse thư mục): " + ex.Message);
+            }
+        }
+
+        private void btnVideoReupOpenMusicFolder_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var s = GetSettingsSnapshotForVideoReupMusic();
+                var dir = VideoReupRemixService.GetMusicLibraryDirectory(s);
+                VideoReupRemixService.EnsureMusicLibraryDirectoryExists(s);
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "\"" + dir + "\"",
+                    UseShellExecute = true
+                });
+                RefreshVideoReupMusicCombo();
+                Log("Video reup nhạc: đã mở thư mục → " + dir);
+                MessageBox.Show(
+                    this,
+                    "Đã mở thư mục nhạc trong File Explorer.\r\n\r\n" +
+                    "• Kéo hoặc copy các file .mp3 vào đúng thư mục đó (chỉ đuôi .mp3).\r\n" +
+                    "• Quay lại tab Video reup: bấm «Làm mới danh sách» hoặc chọn lại một dòng trong bảng — combo bên trên sẽ hiện tên bài.\r\n" +
+                    "• Chọn bài trong combo rồi tiếp tục Lyria / Render.",
+                    "Video reup — thư mục nhạc",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                Log("Video reup nhạc: " + ex.Message);
+            }
+        }
+
+        private void btnVideoReupRefreshMusicList_Click(object sender, EventArgs e)
+        {
+            RefreshVideoReupMusicCombo();
+            var n = cbVideoReupMusic?.Items.Count ?? 0;
+            Log(n > 0
+                ? $"Video reup nhạc: đã làm mới — có {n} file .mp3."
+                : "Video reup nhạc: đã làm mới — chưa thấy file .mp3 (kiểm tra đúng thư mục và đuôi .mp3).");
+        }
+
+        private async Task WarmupBundledToolingInBackgroundAsync()
+        {
+            try
+            {
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                VideoReupRemixService.EnsureMusicLibraryDirectoryExists(settings);
+
+                if (FfmpegToolkitService.TryResolve(settings, out var toolkit, out _))
+                {
+                    if (string.IsNullOrWhiteSpace(settings.FfmpegPath))
+                    {
+                        settings.FfmpegPath = toolkit.FfmpegExe;
+                        await _configManager.SaveAsync(settings).ConfigureAwait(true);
+                        if (txtFfmpegPath != null && !txtFfmpegPath.IsDisposed)
+                        {
+                            BeginInvoke(new Action(() => txtFfmpegPath.Text = toolkit.FfmpegExe));
+                        }
+                    }
+
+                    Log("[FFmpeg] Sẵn sàng: " + toolkit.FfmpegExe);
+                    return;
+                }
+
+                Log("[FFmpeg] Chưa có — sẽ tự tải khi cần (Video reup) hoặc bấm «⬇ Tải FFmpeg» trong Cài đặt.");
+            }
+            catch (Exception ex)
+            {
+                Log("[FFmpeg] Kiểm tra: " + ex.Message);
+            }
+        }
+
+        private async void btnDownloadFfmpeg_Click(object sender, EventArgs e)
+        {
+            if (btnDownloadFfmpeg != null)
+            {
+                btnDownloadFfmpeg.Enabled = false;
+                btnDownloadFfmpeg.Text = "⏳ Đang tải...";
+            }
+
+            try
+            {
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                var path = await VideoReupRemixService.EnsureFfmpegToolkitAsync(
+                    settings,
+                    Log,
+                    CancellationToken.None).ConfigureAwait(true);
+                await _configManager.SaveAsync(settings).ConfigureAwait(true);
+                if (txtFfmpegPath != null)
+                {
+                    txtFfmpegPath.Text = path;
+                }
+
+                Log("[FFmpeg] Đã cài: " + path);
+                MessageBox.Show(this,
+                    "Đã cài FFmpeg + ffprobe:\r\n" + path +
+                    "\r\n\r\n(Thư mục Tools\\ffmpeg cạnh file exe — không cần Browse thủ công.)",
+                    "Tải FFmpeg",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                Log("[FFmpeg] Lỗi tải: " + ex.Message);
+                MessageBox.Show(this,
+                    "Không tải được FFmpeg.\r\n\r\nLỗi: " + ex.Message +
+                    "\r\n\r\nKiểm tra mạng / firewall rồi thử lại.",
+                    "Tải FFmpeg",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (btnDownloadFfmpeg != null)
+                {
+                    btnDownloadFfmpeg.Enabled = true;
+                    btnDownloadFfmpeg.Text = "⬇ Tải FFmpeg";
+                }
+            }
+        }
+
         private async void btnDownloadYtDlp_Click(object sender, EventArgs e)
         {
             const string downloadUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
@@ -6118,6 +6796,77 @@ namespace tiktok_Omni
             rtbLogs.SelectionColor = Color.LightGray;
             rtbLogs.ScrollToCaret();
             _ = AppendLogToFileAsync(line);
+        }
+
+        /// <summary>Log Video reup trên tab (và ghi file qua <see cref="Log"/>).</summary>
+        private void LogVideoReup(string message)
+        {
+            Log(message);
+
+            if (rtbVideoReupLog == null || rtbVideoReupLog.IsDisposed)
+            {
+                return;
+            }
+
+            if (rtbVideoReupLog.InvokeRequired)
+            {
+                rtbVideoReupLog.Invoke(new Action<string>(LogVideoReup), message);
+                return;
+            }
+
+            var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
+            var isError = message.IndexOf("lỗi", StringComparison.OrdinalIgnoreCase) >= 0
+                          || message.IndexOf("429", StringComparison.Ordinal) >= 0
+                          || message.IndexOf("quota", StringComparison.OrdinalIgnoreCase) >= 0;
+            rtbVideoReupLog.SelectionStart = rtbVideoReupLog.TextLength;
+            rtbVideoReupLog.SelectionLength = 0;
+            rtbVideoReupLog.SelectionColor = isError ? Color.FromArgb(255, 120, 120) : Color.FromArgb(190, 195, 205);
+            rtbVideoReupLog.AppendText(line + Environment.NewLine);
+            rtbVideoReupLog.SelectionColor = Color.LightGray;
+            rtbVideoReupLog.ScrollToCaret();
+        }
+
+        private void SetVideoReupProgress(string statusText, int percent, bool indeterminate = false)
+        {
+            if (lblVideoReupProgress == null || pbVideoReupProgress == null)
+            {
+                return;
+            }
+
+            void Apply()
+            {
+                lblVideoReupProgress.Text = "Tiến trình: " + (statusText ?? string.Empty).Trim();
+                if (indeterminate)
+                {
+                    pbVideoReupProgress.Style = ProgressBarStyle.Marquee;
+                    pbVideoReupProgress.MarqueeAnimationSpeed = 28;
+                }
+                else
+                {
+                    pbVideoReupProgress.Style = ProgressBarStyle.Continuous;
+                    pbVideoReupProgress.MarqueeAnimationSpeed = 0;
+                    pbVideoReupProgress.Value = Math.Max(0, Math.Min(100, percent));
+                }
+            }
+
+            if (lblVideoReupProgress.InvokeRequired)
+            {
+                lblVideoReupProgress.Invoke(new Action(Apply));
+                return;
+            }
+
+            Apply();
+        }
+
+        private void btnVideoReupClearLog_Click(object sender, EventArgs e)
+        {
+            if (rtbVideoReupLog == null || rtbVideoReupLog.IsDisposed)
+            {
+                return;
+            }
+
+            rtbVideoReupLog.Clear();
+            SetVideoReupProgress("sẵn sàng", 0);
         }
 
         private void UpdateWarmupProgress(int completed, int total)

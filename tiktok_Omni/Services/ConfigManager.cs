@@ -225,6 +225,7 @@ namespace tiktok_Omni.Services
             settings.VideoBackgroundMusicFileName = (settings.VideoBackgroundMusicFileName ?? string.Empty).Trim();
             settings.FfmpegPath = (settings.FfmpegPath ?? string.Empty).Trim();
             settings.YtDlpPath = (settings.YtDlpPath ?? string.Empty).Trim();
+            settings.VideoReupMusicLibraryPath = (settings.VideoReupMusicLibraryPath ?? string.Empty).Trim();
             settings.CommentStyle = (settings.CommentStyle ?? string.Empty).Trim();
             settings.Profiles = settings.Profiles ?? new List<AutomationProfile>();
 
@@ -447,6 +448,9 @@ namespace tiktok_Omni.Services
         public string NotificationWebhookUrl { get; set; } = string.Empty;
         public string FfmpegPath { get; set; } = string.Empty;
         public string YtDlpPath { get; set; } = string.Empty;
+
+        /// <summary>Thư mục chứa .mp3 cho tab Video reup (Affiliate). Để trống = [exe]\VideoReup\Music.</summary>
+        public string VideoReupMusicLibraryPath { get; set; } = string.Empty;
         public int WatchSecondsMin { get; set; } = 7;
         public int WatchSecondsMax { get; set; } = 18;
         public double VideoTransitionDurationSeconds { get; set; } = 0.6d;
