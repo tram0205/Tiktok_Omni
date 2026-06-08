@@ -10,11 +10,14 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using tiktok_Omni.Services;
+using tiktok_Omni.Services.Affiliate;
+using tiktok_Omni.Services.Jobs;
 
 namespace tiktok_Omni
 {
@@ -22,12 +25,15 @@ namespace tiktok_Omni
     {
         private readonly ConfigManager _configManager;
         private readonly TikTokAutomation _tikTokAutomation;
-        private readonly WarmupStateManager _warmupStateManager;
+        private readonly SocialAutomation _socialAutomation;
+        private NumericUpDown numMaxConcurrentJobs;
+        private string _storageRootPathCache = string.Empty;
         private readonly AffiliateHunter _affiliateHunter;
         private readonly NotificationService _notificationService;
+        private readonly AffiliateRevenueService _affiliateRevenueService;
 
+        private Panel pnlMainWorkspace;
         private TabControl tabMain;
-        private TabPage tabAutoWarmup;
         private TabPage tabAffiliateHunter;
         private TabPage tabAiVideoGen;
         private TabPage tabAutoPost;
@@ -36,43 +42,15 @@ namespace tiktok_Omni
         private StatusStrip statusStripMain;
         private ToolStripStatusLabel tslStatusMain;
 
-        private TextBox txtKeywords;
         private ComboBox cbRunningProfile;
-        private NumericUpDown numVideoCount;
-        private NumericUpDown numWatchMin;
-        private NumericUpDown numWatchMax;
-        private CheckBox chkAutoComment;
-        private RadioButton rbDryRun;
-        private RadioButton rbLiveRun;
-        private Button btnStartWarmup;
         private Button btnOpenTikTokManualBrowser;
-        private Button btnResumeWarmup;
-        private Button btnStopWarmup;
-        private Button btnQueueWarmup;
-        private Button btnStartWarmupQueue;
-        private Button btnStopWarmupQueue;
-        private Button btnPauseWarmupQueue;
-        private Button btnResumeWarmupQueue;
-        private Button btnPauseNowWarmupQueue;
-        private Button btnRemoveQueueJob;
-        private Button btnClearWarmupQueue;
-        private Button btnMoveQueueJobUp;
-        private Button btnMoveQueueJobDown;
-        private Button btnOpenQueueHistory;
-        private Button btnOpenQueueTrend;
-        private Button btnOpenApprovalQueue;
-        private Button btnRefreshQueueStats;
-        private ComboBox cbQueueStatsRange;
-        private DateTimePicker dtQueueStatsFrom;
-        private DateTimePicker dtQueueStatsTo;
-        private Label lblWarmupQueueStatus;
-        private Label lblQueueStatsSummary;
-        private Label lblQueueStatsSuccessRate;
-        private Label lblQueueStatsAvgRetry;
-        private Label lblQueueStatsTopFailedProfile;
-        private DataGridView dgvWarmupQueue;
-        private ProgressBar pbWarmupProgress;
-        private Label lblWarmupProgress;
+        private Button btnNavApprovalQueue;
+        private Button btnSlideshowOpenApproval;
+        private Button btnPhilosophyOpenApproval;
+        private Label lblHealthReadiness;
+        private Button btnHealthRecheck;
+        private Panel pnlHealthReadiness;
+        private Button btnHealthOpenSettings;
         private Button btnOpenLogsFolder;
         private Button btnExportCurrentLogs;
         private Button btnClearLogs;
@@ -80,17 +58,44 @@ namespace tiktok_Omni
         private TextBox txtAutoPostFolder;
         private Button btnBrowseAutoPostFolder;
         private ComboBox cbAutoPostProfile;
+        private ComboBox cbAutoPostVideoType;
         private ComboBox cbAutoPostVideoFile;
-        private Button btnRefreshAutoPostVideos;
+        private Button btnLoginAllSocial;
+        private Button btnRefreshProfileLoginStatus;
+        private Button btnLoginFacebook;
+        private Button btnLoginYouTube;
         private TextBox txtAutoPostHashtags;
         private ComboBox cbCaptionStyle;
         private Button btnGenerateGeminiCaption;
         private Button btnPreviewAutoPostVideo;
         private TextBox txtAutoPostCaption;
+        private TextBox txtAutoPostAffiliateLink;
         private CheckBox chkAutoPostVideoApproved;
         private CheckBox chkAutoPostUploadOnly;
         private Button btnStartAutoPost;
         private Button btnCloseAutoPostBrowser;
+        private Panel pnlAutoPostShared;
+        private TabControl tabMultiPlatformPost;
+        private TabPage tabTikTokPost;
+        private TabPage tabFacebookPost;
+        private TabPage tabYouTubePost;
+        private Panel pnlAutoPostActions;
+        private DateTimePicker dtpAutoPostTikTok;
+        private CheckBox chkAutoPostEnableTikTok;
+        private TextBox txtAutoPostFbCaption;
+        private TextBox txtAutoPostFbHashtags;
+        private TextBox txtAutoPostFbShopeeLink;
+        private CheckBox chkAutoPostFbAttachShopee;
+        private Button btnFetchFbShopeeInfo;
+        private Label lblFbShopeeStatus;
+        private Button btnGenerateGeminiCaptionFb;
+        private DateTimePicker dtpAutoPostFacebook;
+        private CheckBox chkAutoPostEnableFacebook;
+        private TextBox txtAutoPostYtTitle;
+        private TextBox txtAutoPostYtDescription;
+        private Button btnGenerateGeminiCaptionYoutube;
+        private DateTimePicker dtpAutoPostYouTube;
+        private CheckBox chkAutoPostEnableYouTube;
 
         private static readonly string[] AutoPostCaptionStyleKeys =
         {
@@ -101,7 +106,7 @@ namespace tiktok_Omni
         };
 
         private const string AffiliateKeywordsPlaceholder =
-            "Mỗi dòng 1 từ khoá. Ví dụ:\r\náo dài trắng\r\nváy maxi hè";
+            "Nhập từ khoá (nhiều từ khoá cách nhau bởi dấu phẩy)";
 
         /// <summary>Giới hạn app săn tối đa mỗi keyword khi bật buffer xếp hạng (tránh quá tải TikWM).</summary>
         private const int AffiliateHuntBufferHardCap = 120;
@@ -116,28 +121,28 @@ namespace tiktok_Omni
         private TextBox txtAiApiKey;
         private TextBox txtTwoCaptchaApiKey;
         private TextBox txtVeoApiKey;
-        private TextBox txtLyriaApiKey;
+        private TextBox txtTtsApiKey;
         private TextBox txtVeoEndpoint;
-        private TextBox txtLyriaEndpoint;
+        private TextBox txtTtsEndpoint;
         private TextBox txtFfmpegPath;
         private TextBox txtYtDlpPath;
         private Button btnToggleAiApiKey;
         private Button btnToggleTwoCaptchaApiKey;
         private Button btnToggleVeoApiKey;
-        private Button btnToggleLyriaApiKey;
+        private Button btnToggleTtsApiKey;
         private Button btnTestAi;
         private Button btnTestTwoCaptcha;
         private Button btnTestVeo;
-        private Button btnTestLyria;
+        private Button btnTestTts;
         private Button btnBrowseFfmpegPath;
         private Button btnDownloadFfmpeg;
         private Button btnBrowseYtDlpPath;
+        private Control pnlReupMusicLibraryPath;
         private Button btnBrowseVideoReupMusicLibrary;
         private Button btnDownloadYtDlp;
         private TextBox txtVideoReupMusicLibraryPath;
         private Button btnSaveSettings;
-        private CheckBox chkAutoResumeQueueOnStartup;
-        private CheckBox chkScheduleWarmupStub;
+        private CheckBox chkAutoFetchAffiliateRevenueOnStartup;
         private CheckBox chkAlwaysRequirePrePostApproval;
         private CheckBox chkAlwaysRequirePreRenderApproval;
         private CheckBox chkAutoRunApprovedQueue;
@@ -146,20 +151,25 @@ namespace tiktok_Omni
         private DataGridView dgvProxyProfiles;
         private BindingList<AutomationProfile> _proxyProfileBindingList;
         private Button btnCheckBrowserProfileHealth;
+        private CheckBox chkAiVideoGenCurrentProfileOnly;
+        private List<AiVideoGenInputItem> _slideshowBuffer = new List<AiVideoGenInputItem>();
+        private List<AiVideoGenInputItem> _deepDiveBuffer = new List<AiVideoGenInputItem>();
         private DataGridView dgvAiVideoGenInput;
-        private BindingList<AiVideoGenInputItem> _aiVideoGenBindingList;
+        private DataGridView dgvDeepDiveInput;
+        private Panel pnlAiVideoGenScriptHost;
         private Label lblAiVideoGenProductsTitle;
-        private Label lblAiVideoGenProductBlockHint;
-        private TabControl tabAiVideoGenModes;
-        private TabPage tabAiModeSlideshow;
-        private TabPage tabAiModeAffiliateDeep;
-        private TabPage tabAiModeMascot;
-        private TabPage tabAiModePhilosophy;
-        private TabPage tabAiModeVideoReup;
+        private Panel pnlManualInput;
+        private TextBox txtManualProductUrl;
+        private Button btnAddManualProduct;
+        private CheckBox chkEnableAffiliateLink;
         private Button btnGenerateGeminiPrompt;
         private Button btnReviewScriptBeforeRender;
         private Button btnRunAffiliateDeepVideo;
         private Button btnRunMascotChannelPipeline;
+        private Panel tabMascotStory;
+        private PictureBox pbMascotMouthMarker;
+        private Label lblMascotMouthCoord;
+        private Button btnRunMascotProduction;
         private Button btnRunPhilosophyVideo;
         private Button btnCopyAiVideoPrompt;
         private Button btnSaveAiVideoPrompt;
@@ -171,7 +181,6 @@ namespace tiktok_Omni
         private TextBox txtAvatarIdentityPack;
         private Button btnSelectAvatarIdentityPack;
         private Button btnPreviewMascotVariants;
-        private ComboBox cbMascotSceneCount;
         private PictureBox pbMascotPreview1;
         private PictureBox pbMascotPreview2;
         private PictureBox pbMascotPreview3;
@@ -182,7 +191,14 @@ namespace tiktok_Omni
         private List<string> _mascotPreviewSceneScripts = new List<string>();
         private List<string> _mascotPreviewImagePaths = new List<string>();
         private TextBox txtPhilosophyInput;
-        private Panel pnlPhilosophyStatus;
+        private ComboBox cbPhilosophyProfile;
+        private Button btnPhilosophyImportFromFile;
+        private ComboBox cbMascotProfile;
+        private GroupBox grpAiRenderProgress;
+        private TableLayoutPanel tblAiRenderSlots;
+        private Label lblPhilosophyPrereq;
+        private Label lblPhilosophyQuoteLabel;
+        private Button btnPhilosophyOpenAssets;
         private Label lblPhilosophyProgress;
         private ProgressBar pbPhilosophyProgress;
         private RichTextBox rtbPhilosophyLog;
@@ -191,44 +207,102 @@ namespace tiktok_Omni
         private NumericUpDown numAiTransitionDuration;
         private NumericUpDown numAiTextSize;
         private NumericUpDown numAiMusicVolume;
-        private Panel pnlAiRenderProgress;
         private Panel pnlAiVideoGenStickyHost;
-        private Panel pnlAiVideoGenScrollHost;
+        private Panel pnlAiVideoGenProductArea;
+        private Panel pnlAffiliateDeepStoryboardHost;
+        private TableLayoutPanel tblAffiliateDeepRoot;
+        private Panel pnlAffiliateDeepRoot;
+        private FlowLayoutPanel flpAffiliateDeepHeaderActions;
+        private Panel pnlAffiliateDeepHeaderHost;
+        private Panel pnlAffiliateDeepReadinessHost;
+        private Panel pnlAffiliateDeepProductHost;
+        private Panel pnlAffiliateDeepProductGridHost;
+        private Panel pnlAffiliateDeepStoryboardSlot;
+        private Panel pnlAffiliateDeepScriptReviewHost;
+        private Panel pnlAffiliateDeepPreviewHost;
+        private Panel pnlAffiliateDeepPreviewPromptHost;
+        private Panel pnlAffiliateDeepPreviewProgressHost;
+        private Label lblAffiliateDeepSectionTitle;
+        private Button btnAffiliateDeepOpenOutput;
+        private bool _affiliateDeepRootWired;
+        private TableLayoutPanel tblAiVideoGenRoot;
+        private Panel pnlAiVideoGenRenderStatusHost;
+        private FlowLayoutPanel flpAiVideoGenHeader;
+        private Panel pnlAiVideoGenActionBar;
+        private TableLayoutPanel tblAiVideoGenActionInner;
+        private TableLayoutPanel tblAiVideoGenScriptInner;
+        private Panel pnlSlideshowActionBar;
+        private Panel pnlAiVideoGenReadinessHost;
+        private FlowLayoutPanel flpSlideshowData;
+        private FlowLayoutPanel flpSlideshowExecute;
+        private bool _aiVideoGenLayoutGuard;
         private ProgressBar pbAiRenderSlot1;
         private ProgressBar pbAiRenderSlot2;
         private ProgressBar pbAiRenderSlot3;
         private Label lblAiRenderSlot1;
         private Label lblAiRenderSlot2;
         private Label lblAiRenderSlot3;
-        private CancellationTokenSource _warmupCancellation;
-        private CancellationTokenSource _warmupQueueCancellation;
-        private CancellationTokenSource _currentQueueJobCancellation;
         private CancellationTokenSource _autoPostCancellation;
+        private const int AiVideoGenRenderStatusHeight = 132;
         private readonly object _sessionLogSync = new object();
+        private ComboBox cbGeminiStyleTemplate;
+        private CheckBox chkReupUseVisualHookSfx;
+        private TextBox txtReupVisualHookSfx;
+        private Button btnBrowseReupVisualHookSfx;
+        private ComboBox cbReupVisualHookPreset;
         private readonly string _sessionLogFilePath;
-        private WarmupRunState _currentWarmupState;
+
+        private TabControl tabCtrlHunter;
+        private TabPage tabHuntVideo;
+        private TabPage tabHuntProduct;
+
+        private TextBox txtHuntProductKeyword;
+        private CheckBox chkHuntProductTikTok;
+        private CheckBox chkHuntProductShopee;
+        private NumericUpDown numHuntProductMaxResults;
+        private NumericUpDown numHuntProductMinSales;
+        private NumericUpDown numHuntProductMinRating;
+        private Button btnHuntProductAutoScan;
+        private Label lblHuntProductStatus;
+        private ProgressBar pbHuntProductScan;
+        private LinkLabel lnkHuntProductDownloadFolder;
+        private CancellationTokenSource _huntProductCancellation;
+        private string _lastHuntProductKeyword = string.Empty;
+        private TextBox txtHuntProductManualLink;
+        private ComboBox cbHuntProductProfile;
+        private Button btnHuntProductAddManual;
+        private DataGridView dgvHuntProduct;
+        private BindingList<HuntProductCandidate> _huntProductBindingList;
+        private Button btnHuntProductDownloadMedia;
+        private Button btnHuntProductPushDeep;
+        private Button btnHuntProductDeleteRow;
+        private Button btnHuntProductExportCsv;
 
         private TextBox txtAffiliateKeywords;
+        private ComboBox cbAffiliateHuntProfile;
         private NumericUpDown numAffiliateMaxResults;
         private Button btnHuntAffiliates;
         private Button btnStopHunt;
         private Button btnExportAffiliateCsv;
         private Button btnPushToAiVideoGen;
-        private Button btnPushHighQualityToAiVideoGen;
         private Button btnDownloadSelectedAffiliate;
         private Button btnAffiliateDeepDive;
+        private Button btnAffiliateGenerateScript;
+        private Button btnAffiliateEditScript;
+        private Button btnDeepGenerateScript;
+        private Button btnDeepEditScript;
         private CheckBox chkAffiliateAutoEnrich;
         private Label lblAffiliateEnrichStatus;
         private LinkLabel lnkAffiliateDownloadFolder;
-        private bool _affiliateDeepDiveRunning;
-        private CancellationTokenSource _affiliateBulkDeepDiveCancelCts;
         private bool _affiliateAutoEnrichRunning;
         private CancellationTokenSource _affiliateAutoEnrichCts;
         private System.Windows.Forms.Timer _affiliateAutoEnrichSaveTimer;
         private System.Windows.Forms.Timer _affiliateHuntPrefsSaveTimer;
         private bool _affiliateRowEnrichRunning;
         private CancellationTokenSource _affiliateRowEnrichCts;
-        private ComboBox cbAffiliateSearchMode;
+        private CheckBox chkAffiliatePlatformTikTok;
+        private CheckBox chkAffiliatePlatformFacebook;
+        private CheckBox chkAffiliatePlatformYouTube;
         private CheckBox chkAffiliateOnlyHighQuality;
         private CheckBox chkAffiliateRankByEngagement;
         private NumericUpDown numAffiliateBufferMultiplier;
@@ -236,6 +310,10 @@ namespace tiktok_Omni
         private DataGridView dgvAffiliateResults;
         private BindingList<AffiliateCandidate> _affiliateBindingList;
         private List<AffiliateCandidate> _affiliateAllResults = new List<AffiliateCandidate>();
+        private List<HuntKeywordEntry> _lastHuntKeywordEntries = new List<HuntKeywordEntry>();
+
+        /// <summary>Lọc lưới affiliate theo profile đang chọn (cbRunningProfile).</summary>
+        private string _affiliateGridProfileScope = string.Empty;
         private string _lastHuntKeyword = string.Empty;
         private List<string> _lastHuntKeywords = new List<string>();
         private bool _affiliateKeywordsPlaceholderActive;
@@ -260,7 +338,11 @@ namespace tiktok_Omni
         private Label lblVideoReupVideoUrl;
         private Label lblVideoReupHook;
         private Label lblVideoReupHint;
+        private Label lblVideoReupReadiness;
+        private Label lblSlideshowReadiness;
+        private Label lblAffiliateDeepReadiness;
         private Panel pnlVideoReupStatus;
+        private Panel pnlReupEditor;
         private Label lblVideoReupProgress;
         private ProgressBar pbVideoReupProgress;
         private RichTextBox rtbVideoReupLog;
@@ -272,16 +354,27 @@ namespace tiktok_Omni
         private bool _videoReupSuppressAudioModeEvents;
         private bool _videoReupSuppressUrlEditorEvents;
         private string _videoReupVideoUrlBeforeCellEdit = string.Empty;
+        private static readonly SemaphoreSlim _browserSemaphore = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _videoReupDownloadGate = new SemaphoreSlim(1, 1);
+        private CancellationTokenSource _revenueCancellation;
+        private CancellationTokenSource _activeJobCancellation;
+        private readonly RenderHistoryStore _renderHistoryStore = new RenderHistoryStore();
+        private readonly HuntHistoryStore _huntHistoryStore = new HuntHistoryStore();
+        private readonly AffiliateCategoryService _affiliateCategoryService = new AffiliateCategoryService();
+        private readonly AffiliateScriptPreviewService _affiliateScriptPreviewService = new AffiliateScriptPreviewService();
+        private readonly Dictionary<string, Guid> _affiliateDeepDiveJobByVideoUrl =
+            new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        private CancellationTokenSource _affiliateCategorizeCts;
+        private readonly VideoReupDraftStore _videoReupDraftStore = new VideoReupDraftStore();
+        private System.Windows.Forms.Timer _videoReupDraftTimer;
+        private bool _videoReupDraftDirty;
+        private Dictionary<string, bool> _systemHealth = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        private SystemHealthCheckService _systemHealthCheckService;
 
-        private List<AiVideoGenInputItem> _aiVideoGenInputBuffer = new List<AiVideoGenInputItem>();
         private BindingList<AiVideoScriptReviewItem> _aiVideoScriptBindingList;
         private readonly VideoProcessingService _videoProcessingService;
         private CancellationTokenSource _huntCancellation;
         private CancellationTokenSource _aiVideoGenCancellation;
-        private readonly WarmupQueueScheduler _warmupQueueScheduler;
-        private readonly WarmupQueueStateManager _warmupQueueStateManager;
-        private readonly WarmupQueueHistoryManager _warmupQueueHistoryManager;
         private readonly ApprovalQueueManager _approvalQueueManager;
         private readonly SafetyScoreService _safetyScoreService;
 
@@ -289,18 +382,17 @@ namespace tiktok_Omni
         private readonly PhilosophyVideoService _philosophyVideoService;
         private readonly GeminiService _geminiService;
         private readonly VideoReupRemixService _videoReupRemixService;
-        private BindingList<WarmupQueueUiItem> _warmupQueueBindingList;
-        private List<WarmupQueueHistoryRecord> _warmupQueueHistory;
+        private readonly RevenueDrivenService _revenueDrivenService = new RevenueDrivenService();
+        private readonly AsyncTasksRebootStore _asyncTasksRebootStore = new AsyncTasksRebootStore();
         private List<ApprovalQueueItem> _approvalQueueItems;
-        private bool _isWarmupQueueRunning;
-        private bool _isWarmupQueuePaused;
-        private bool _pauseNowRequested;
 
         public Form1()
         {
             InitializeTheme();
             _configManager = new ConfigManager();
             InitializeComponent();
+            ApplyGlobalButtonThemes();
+            HighlightSidebarForSelectedTab();
 
             _warmupStateManager = new WarmupStateManager();
             _warmupQueueScheduler = new WarmupQueueScheduler();
@@ -313,15 +405,59 @@ namespace tiktok_Omni
             _warmupQueueHistory = new List<WarmupQueueHistoryRecord>();
             _approvalQueueItems = new List<ApprovalQueueItem>();
             _geminiService = new GeminiService();
+            _systemHealthCheckService = new SystemHealthCheckService(_configManager, _geminiService);
+            _renderHistoryStore.Load();
+            _huntHistoryStore.Load();
             _videoReupRemixService = new VideoReupRemixService();
             _tikTokAutomation = new TikTokAutomation(_geminiService, _configManager, new CaptchaService());
+            _socialAutomation = new SocialAutomation(_tikTokAutomation, _configManager);
             _tikTokAutomation.CaptchaDetected += TikTokAutomation_CaptchaDetected;
             _tikTokAutomation.CheckpointDetected += TikTokAutomation_CheckpointDetected;
             _affiliateHunter = new AffiliateHunter();
             _notificationService = new NotificationService();
-            _videoProcessingService = new VideoProcessingService();
+            _affiliateRevenueService = new AffiliateRevenueService(_configManager, _socialAutomation, _notificationService);
+            _videoProcessingService = new VideoProcessingService(_asyncTasksRebootStore);
             _sessionLogFilePath = InitializeSessionLogFile();
+            _warmupScheduleTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+            _warmupScheduleTimer.Tick += WarmupScheduleTimer_Tick;
+            _warmupScheduleTimer.Start();
+            InitializeAutoPostScheduleQueue();
             Shown += Form1_Shown;
+            Load += Form1_LoadSyncChrome;
+            FormClosing += Form1_FormClosing;
+        }
+
+        private void Form1_LoadSyncChrome(object sender, EventArgs e)
+        {
+            if (tabMain != null && tabMain.TabPages.Count > 0 && tabMain.SelectedIndex < 0)
+            {
+                tabMain.SelectedIndex = 0;
+            }
+
+            HighlightSidebarForSelectedTab();
+            ApplyGlobalLogChrome();
+            Services.WarmupBuildInfo.WriteStartupFingerprint(Log);
+            Text = "tiktok_Omni — " + Services.WarmupBuildInfo.BuildId;
+        }
+
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            try
+            {
+                FlushVideoReupDraftToDisk();
+                FlushSlideshowDraftToDisk();
+            }
+            catch
+            {
+                // ignored on exit
+            }
+
+            _slideshowDraftTimer?.Stop();
+            _slideshowDraftTimer?.Dispose();
+            _videoReupDraftTimer?.Stop();
+            _videoReupDraftTimer?.Dispose();
+            _jobWorkerService?.Dispose();
+            _globalJobQueue?.Dispose();
         }
 
         private void InitializeTheme()
@@ -329,48 +465,56 @@ namespace tiktok_Omni
             Text = "tiktok_Omni";
             StartPosition = FormStartPosition.CenterScreen;
             Size = new Size(1100, 700);
-            BackColor = Color.FromArgb(24, 26, 32);
+            BackColor = Color.FromArgb(32, 34, 44);
             ForeColor = Color.Gainsboro;
-            Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            Font = AppInputFont;
         }
 
         private void InitializeComponent()
         {
+            MinimumSize = new Size(1024, 680);
+
             tabMain = new TabControl
             {
-                Dock = DockStyle.Fill,
-                Appearance = TabAppearance.Normal
+                Dock = DockStyle.Fill
             };
-            tabMain.DrawMode = TabDrawMode.OwnerDrawFixed;
-            tabMain.DrawItem += TabMain_DrawItem;
+            ConfigureMainTabChrome();
 
-            // Settings first (API keys, profiles); then workflow tabs.
             tabAffiliateHunter = new TabPage("Săn Affiliate");
-            tabAiVideoGen = new TabPage("AI Video Gen");
+            tabAiVideoGen = new TabPage("AI tạo video");
             tabAutoPost = new TabPage("Đăng tự động");
             tabAutoWarmup = new TabPage("Làm ấm tài khoản");
             tabSetting = new TabPage("Cài đặt");
+            BuildHealthDashboardTabUi();
+            BuildRevenueDashboardTabUi();
 
-            ConfigureTabPage(tabSetting);
             ConfigureTabPage(tabAffiliateHunter);
             ConfigureTabPage(tabAiVideoGen);
             ConfigureTabPage(tabAutoPost);
             ConfigureTabPage(tabAutoWarmup);
+            ConfigureTabPage(tabSetting);
+            ConfigureTabPage(tabHealthDashboard);
+            ConfigureTabPage(tabRevenueDashboard);
 
             tabMain.TabPages.AddRange(new[]
             {
-                tabSetting,
+                tabHealthDashboard,
+                tabRevenueDashboard,
                 tabAffiliateHunter,
                 tabAiVideoGen,
                 tabAutoPost,
-                tabAutoWarmup
+                tabAutoWarmup,
+                tabSetting
             });
 
+            BuildGlobalLogShell();
             BuildAffiliateHunterUi();
             BuildAiVideoGenUi();
             BuildAutoPostUi();
             BuildAutoWarmupUi();
             BuildSettingUi();
+            BuildApprovalQueueBehaviorControls();
+            BuildSidebarUi();
             PostAdjustUiLayout();
 
             statusStripMain = new StatusStrip
@@ -382,28 +526,91 @@ namespace tiktok_Omni
             tslStatusMain = new ToolStripStatusLabel
             {
                 Spring = true,
-                Text = "Sẵn sàng — chọn tab hoặc Cài đặt để nhập API key và profile."
+                Text = "Sẵn sàng — chọn mục bên trái hoặc Cài đặt để nhập API key và profile."
             };
             statusStripMain.Items.Add(tslStatusMain);
             tabMain.SelectedIndexChanged += TabMain_SelectedIndexChanged;
 
-            Controls.Add(tabMain);
+            pnlMainWorkspace = new Panel
+            {
+                Name = "pnlMainWorkspace",
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(32, 34, 44),
+                Padding = new Padding(0),
+                Margin = new Padding(0)
+            };
+            pnlMainWorkspace.Controls.Add(tabMain);
+            pnlMainWorkspace.Controls.Add(pnlSidebar);
+
+            Controls.Add(pnlMainWorkspace);
+            Controls.Add(pnlGlobalLog);
             Controls.Add(statusStripMain);
+
+            if (tabMain.TabPages.Count > 0)
+            {
+                tabMain.SelectedIndex = 0;
+            }
+
+            HighlightSidebarForSelectedTab();
+            ApplyGlobalLogChrome();
+
+            _ = RefreshHealthDashboardAsync();
         }
 
         private void ConfigureTabPage(TabPage page)
         {
-            page.BackColor = Color.FromArgb(31, 34, 42);
+            if (page == null)
+            {
+                return;
+            }
+
+            page.BackColor = Color.FromArgb(32, 34, 44);
             page.ForeColor = Color.Gainsboro;
         }
 
         private void PostAdjustUiLayout()
         {
+            WrapSettingsTabResponsive();
             ApplyTabEnhancements(tabSetting);
             ApplyTabEnhancements(tabAffiliateHunter);
+            EnsureAffiliateFiltersLayout();
             ApplyTabEnhancements(tabAiVideoGen);
             ApplyTabEnhancements(tabAutoPost);
             ApplyTabEnhancements(tabAutoWarmup);
+            ApplyTabEnhancements(tabRevenueDashboard);
+        }
+
+        private static void DisableAutoScrollRecursive(Control parent)
+        {
+            if (parent == null)
+            {
+                return;
+            }
+
+            if (string.Equals(parent.Name, "tabHuntProduct", StringComparison.Ordinal)
+                || string.Equals(parent.Name, "pnlHuntProductFiltersScroll", StringComparison.Ordinal)
+                || string.Equals(parent.Name, "splitHuntProductMain", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (parent is ScrollableControl scrollable)
+            {
+                scrollable.AutoScroll = false;
+                scrollable.AutoScrollMinSize = Size.Empty;
+            }
+
+            foreach (Control child in parent.Controls)
+            {
+                if (string.Equals(child.Name, "tabHuntProduct", StringComparison.Ordinal)
+                    || string.Equals(child.Name, "pnlHuntProductFiltersScroll", StringComparison.Ordinal)
+                    || string.Equals(child.Name, "splitHuntProductMain", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                DisableAutoScrollRecursive(child);
+            }
         }
 
         private void ApplyTabEnhancements(TabPage tab)
@@ -418,14 +625,42 @@ namespace tiktok_Omni
                 tab.AutoScroll = false;
                 tab.AutoScrollMinSize = new Size(0, 0);
                 LocalizeControlTextsRecursive(tab.Controls);
-                if (pnlAiVideoGenScrollHost != null)
-                {
-                    var required = MeasureContentSize(pnlAiVideoGenScrollHost.Controls);
-                    pnlAiVideoGenScrollHost.AutoScrollMinSize = new Size(
-                        Math.Max(0, required.Width + 24),
-                        Math.Max(pnlAiVideoGenScrollHost.ClientSize.Height + 20, required.Height + 24));
-                }
+                return;
+            }
 
+            if (ReferenceEquals(tab, tabAutoPost))
+            {
+                tab.AutoScroll = false;
+                tab.AutoScrollMinSize = Size.Empty;
+                DisableAutoScrollRecursive(tab);
+                LocalizeControlTextsRecursive(tab.Controls);
+                return;
+            }
+
+            if (ReferenceEquals(tab, tabSetting))
+            {
+                tab.AutoScroll = false;
+                tab.AutoScrollMinSize = new Size(0, 0);
+                LocalizeControlTextsRecursive(tab.Controls);
+                return;
+            }
+
+            if (ReferenceEquals(tab, tabAutoWarmup))
+            {
+                tab.AutoScroll = false;
+                tab.AutoScrollMinSize = Size.Empty;
+                DisableAutoScrollRecursive(tab);
+                LocalizeControlTextsRecursive(tab.Controls);
+                return;
+            }
+
+            if (ReferenceEquals(tab, tabAffiliateHunter))
+            {
+                tab.AutoScroll = false;
+                tab.AutoScrollMinSize = Size.Empty;
+                DisableAutoScrollRecursive(tab);
+                EnableHuntProductTabAutoScroll();
+                LocalizeControlTextsRecursive(tab.Controls);
                 return;
             }
 
@@ -465,52 +700,6 @@ namespace tiktok_Omni
                 if (control.HasChildren)
                 {
                     LocalizeControlTextsRecursive(control.Controls);
-                }
-            }
-        }
-
-        private void NormalizeButtonsRecursive(Control.ControlCollection controls, int containerWidth)
-        {
-            if (controls == null)
-            {
-                return;
-            }
-
-            var buttons = controls
-                .OfType<Button>()
-                .OrderBy(x => x.Top)
-                .ThenBy(x => x.Left)
-                .ToList();
-            var rowGroups = buttons
-                .GroupBy(x => Math.Max(0, x.Top / 26))
-                .OrderBy(g => g.Key)
-                .ToList();
-
-            foreach (var row in rowGroups)
-            {
-                var ordered = row.OrderBy(x => x.Left).ToList();
-                var rowTop = ordered.Count > 0 ? ordered.Min(x => x.Top) : 0;
-                var currentLeft = ordered.Count > 0 ? Math.Max(12, ordered[0].Left) : 12;
-                foreach (var btn in ordered)
-                {
-                    var width = btn.Width < 120 ? 120 : btn.Width;
-                    var height = btn.Height < 32 ? 32 : Math.Min(40, btn.Height);
-                    if (currentLeft + width > Math.Max(220, containerWidth - 24))
-                    {
-                        rowTop += 40;
-                        currentLeft = 12;
-                    }
-
-                    btn.SetBounds(currentLeft, rowTop, width, height);
-                    currentLeft = btn.Right + 10;
-                }
-            }
-
-            foreach (Control control in controls)
-            {
-                if (control.HasChildren)
-                {
-                    NormalizeButtonsRecursive(control.Controls, control.ClientSize.Width > 200 ? control.ClientSize.Width : containerWidth);
                 }
             }
         }
@@ -646,7 +835,63 @@ namespace tiktok_Omni
                 ["Total"] = "Tổng",
                 ["Success Rate"] = "Tỉ lệ thành công",
                 ["Result"] = "Kết quả",
-                ["Error"] = "Lỗi"
+                ["Error"] = "Lỗi",
+                ["AI Video Gen"] = "AI tạo video",
+                ["Settings"] = "Cài đặt",
+                ["Show"] = "Hiện",
+                ["Hide"] = "Ẩn",
+                ["Test"] = "Kiểm tra",
+                ["Browse RootPath"] = "Duyệt RootPath",
+                ["Min engagement score"] = "Điểm tương tác tối thiểu",
+                ["Only high-quality"] = "Chỉ chất lượng cao",
+                ["Batch Pipeline"] = "Pipeline hàng loạt",
+                ["Deep Dive (Queue)"] = "Phân tích chuyên sâu (hàng đợi)",
+                ["Auto-Detect Mouth"] = "Tự nhận diện miệng",
+                ["Auto-Lipsync"] = "Tự động Lip-sync",
+                ["Preview LipSync"] = "Xem thử Lip-sync",
+                ["Visual Hook SFX (3s)"] = "Hook SFX hình ảnh (3s)",
+                ["Profile"] = "Profile",
+                ["Status"] = "Trạng thái",
+                ["Scheduled At"] = "Lịch chạy",
+                ["Remove"] = "Xóa",
+                ["Clear"] = "Xóa",
+                ["Delete"] = "Xóa",
+                ["Cancel"] = "Hủy",
+                ["OK"] = "Đồng ý",
+                ["Yes"] = "Có",
+                ["No"] = "Không",
+                ["Render"] = "Render",
+                ["Start"] = "Bắt đầu",
+                ["Export"] = "Xuất",
+                ["Import"] = "Nhập",
+                ["Refresh"] = "Làm mới",
+                ["Copy"] = "Sao chép",
+                ["Paste"] = "Dán",
+                ["Open"] = "Mở",
+                ["Close"] = "Đóng",
+                ["Upload"] = "Tải lên",
+                ["Download"] = "Tải xuống",
+                ["Enable"] = "Bật",
+                ["Disable"] = "Tắt",
+                ["Caption"] = "Caption",
+                ["Description"] = "Mô tả",
+                ["Title"] = "Tiêu đề",
+                ["Queue"] = "Hàng đợi",
+                ["History"] = "Lịch sử",
+                ["Trend"] = "Xu hướng",
+                ["Dashboard"] = "Bảng điều khiển",
+                ["Health"] = "Sức khỏe hệ thống",
+                ["Revenue"] = "Doanh thu",
+                ["Approval"] = "Duyệt",
+                ["Warm-up"] = "Làm ấm",
+                ["Warmup"] = "Làm ấm",
+                ["Affiliate"] = "Affiliate",
+                ["Gemini"] = "Gemini",
+                ["Chrome profile"] = "Profile Chrome",
+                ["TTS API Key (Text-to-Speech)"] = "Khóa API TTS (Text-to-Speech)",
+                ["Veo API Key (video AI, tùy chọn)"] = "Khóa API Veo (video AI, tùy chọn)",
+                ["2Captcha API Key"] = "Khóa API 2Captcha",
+                ["Gemini / AI API Key"] = "Khóa API Gemini / AI"
             };
 
             if (map.TryGetValue(text, out var localized))
@@ -659,19 +904,23 @@ namespace tiktok_Omni
 
         private async void btnHuntAffiliates_Click(object sender, EventArgs e)
         {
-            var keywords = ParseAffiliateKeywordListFromUi();
-            if (keywords.Count == 0)
+            var keywordEntries = ParseAffiliateKeywordEntriesFromUi();
+            if (keywordEntries.Count == 0)
             {
-                MessageBox.Show(this, "Hãy nhập ít nhất 1 từ khoá.", "Săn Affiliate",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this,
+                    "Hãy nhập ít nhất 1 từ khoá vào ô «từ khoá» (bấm vào ô rồi gõ, không để text gợi ý xám).",
+                    "Săn Affiliate",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                txtAffiliateKeywords?.Focus();
                 return;
             }
 
-            if (keywords.Count >= 3)
+            if (keywordEntries.Count >= 3)
             {
-                var estMinutes = (int)Math.Ceiling(keywords.Count * 1.5);
+                var estMinutes = (int)Math.Ceiling(keywordEntries.Count * 1.5);
                 var confirm = MessageBox.Show(this,
-                    $"Bạn sắp quét {keywords.Count} từ khoá, dự kiến mất ~{estMinutes} phút. Tiếp tục?",
+                    $"Bạn sắp quét {keywordEntries.Count} từ khoá, dự kiến mất ~{estMinutes} phút. Tiếp tục?",
                     "Săn Affiliate",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question);
@@ -681,143 +930,157 @@ namespace tiktok_Omni
                 }
             }
 
+            ApplyProfileScope(keywordEntries[0].ProfileName);
+
             btnHuntAffiliates.Enabled = false;
             btnExportAffiliateCsv.Enabled = false;
             btnStopHunt.Enabled = true;
             _affiliateBindingList.Clear();
             _affiliateAllResults = new List<AffiliateCandidate>();
             _huntCancellation?.Dispose();
-            _huntCancellation = new CancellationTokenSource();
-            var huntToken = _huntCancellation.Token;
-            _lastHuntKeywords = new List<string>(keywords);
-            _lastHuntKeyword = string.Join(",", keywords);
+            _huntCancellation = RegisterActiveJobCancellation();
+            _lastHuntKeywordEntries = new List<HuntKeywordEntry>(keywordEntries);
+            _lastHuntKeywords = keywordEntries.Select(e => e.Keyword).ToList();
+            _lastHuntKeyword = string.Join(",", keywordEntries.Select(e => $"{e.Keyword}@{e.ProfileName}"));
+            foreach (var entry in keywordEntries)
+            {
+                Log($"Đã nhận diện từ khóa [{entry.Keyword}] cho nick [{entry.ProfileName}]");
+            }
+
             RefreshAffiliateDownloadFolderHint();
-            var originalHuntButtonText = btnHuntAffiliates.Text;
-            var completedKeywordCount = 0;
+            var platforms = GetSelectedAffiliatePlatformsFromUi();
+            if (platforms.Count == 0)
+            {
+                MessageBox.Show(this,
+                    "Chọn ít nhất một nền tảng: TikTok, Facebook hoặc YouTube.",
+                    "Săn Affiliate",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                btnHuntAffiliates.Enabled = true;
+                btnExportAffiliateCsv.Enabled = true;
+                btnStopHunt.Enabled = false;
+                return;
+            }
 
             try
             {
-                var modeText = (cbAffiliateSearchMode?.SelectedItem?.ToString() ?? "Video").Trim();
-                var mode = modeText.IndexOf("Video", StringComparison.OrdinalIgnoreCase) >= 0
-                    ? AffiliateSearchMode.Video
-                    : AffiliateSearchMode.Shop;
-                Log(mode == AffiliateSearchMode.Shop
-                    ? "Affiliate hunt started — TikTok Shop products."
-                    : "Affiliate hunt started — TikTok video search.");
-                var runningProfile = (cbRunningProfile?.SelectedItem?.ToString() ?? "default").Trim();
-
                 var huntSettings = await _configManager.LoadAsync().ConfigureAwait(true);
-                var desiredPerKeyword = (int)numAffiliateMaxResults.Value;
-                var rankByEngagement = chkAffiliateRankByEngagement?.Checked ?? huntSettings.AffiliateRankByEngagementEnabled;
-                var bufferMult = huntSettings.AffiliateHuntBufferMultiplier;
-                if (numAffiliateBufferMultiplier != null)
+                ProfileScopedPaths.SetConfiguredStorageRoot(huntSettings.StorageRootPath);
+                foreach (var entry in keywordEntries)
                 {
-                    bufferMult = (double)numAffiliateBufferMultiplier.Value;
+                    ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(huntSettings.StorageRootPath, entry.ProfileName);
                 }
 
-                if (rankByEngagement && mode == AffiliateSearchMode.Video)
+                var payload = new HuntAffiliateJobPayload
                 {
-                    var collectPreview = ComputeAffiliateCollectLimit(desiredPerKeyword, bufferMult, true, mode);
-                    if (collectPreview > desiredPerKeyword)
-                    {
-                        Log($"[Affiliate] Ưu tiên engagement: tối đa {collectPreview} video/từ khoá → TikWM → giữ top {desiredPerKeyword}.");
-                    }
-                }
+                    KeywordEntries = keywordEntries,
+                    Keywords = keywordEntries.Select(e => e.Keyword).ToList(),
+                    Platforms = platforms,
+                    SearchMode = "Video",
+                    ProfileName = keywordEntries[0].ProfileName,
+                    MaxResultsPerKeyword = (int)numAffiliateMaxResults.Value,
+                    RankByEngagement = chkAffiliateRankByEngagement?.Checked ?? huntSettings.AffiliateRankByEngagementEnabled,
+                    BufferMultiplier = numAffiliateBufferMultiplier != null
+                        ? (double)numAffiliateBufferMultiplier.Value
+                        : huntSettings.AffiliateHuntBufferMultiplier,
+                    StorageRootPath = huntSettings.StorageRootPath ?? string.Empty
+                };
 
-                for (var i = 0; i < keywords.Count; i++)
+                var job = new OmniJob
                 {
-                    huntToken.ThrowIfCancellationRequested();
-                    var kw = keywords[i];
-                    btnHuntAffiliates.Text = $"⏳ Quét {i + 1}/{keywords.Count}: '{kw}'...";
-
-                    var collectLimit = ComputeAffiliateCollectLimit(desiredPerKeyword, bufferMult, rankByEngagement, mode);
-
-                    var results = await _affiliateHunter.HuntAsync(
-                        kw,
-                        collectLimit,
-                        mode,
-                        huntToken,
-                        Log,
-                        _configManager,
-                        runningProfile).ConfigureAwait(true);
-
-                    List<AffiliateCandidate> batch = results ?? new List<AffiliateCandidate>();
-                    if (rankByEngagement && mode == AffiliateSearchMode.Video && batch.Count > 0)
-                    {
-                        batch = await RankAffiliateBatchByEngagementAsync(batch, desiredPerKeyword, huntToken)
-                            .ConfigureAwait(true);
-                    }
-
-                    MergeAffiliateHuntResultsIntoAll(_affiliateAllResults, batch, kw);
-                    completedKeywordCount++;
-                    RefreshAffiliateGridByQualityFilter();
-                    RecomputeAffiliateDeepDiveErrorColumnVisibility();
-                }
-
-                Log($"Affiliate hunt completed. {_affiliateAllResults.Count} dòng gộp (từ {keywords.Count} từ khoá).");
-                btnExportAffiliateCsv.Enabled = _affiliateBindingList.Count > 0;
-                btnPushToAiVideoGen.Enabled = _affiliateBindingList.Count > 0;
-                btnPushHighQualityToAiVideoGen.Enabled = _affiliateBindingList.Count > 0;
-
-                // Auto enrich (Metrics → Anchor) chạy ngầm sau khi Hunt xong toàn bộ keywords.
-                // Dùng CancellationToken.None vì _huntCancellation sẽ bị dispose trong finally
-                // → user bấm Stop sau đó không hủy được enrich; thay vào đó dùng _affiliateAutoEnrichCts.
-                StartAffiliateAutoEnrichIfEnabled(CancellationToken.None);
-            }
-            catch (OperationCanceledException)
-            {
-                Log($"[Affiliate] Đã dừng (đã hoàn tất {completedKeywordCount}/{keywords.Count} từ khoá).");
-                btnExportAffiliateCsv.Enabled = _affiliateBindingList.Count > 0;
-                btnPushToAiVideoGen.Enabled = _affiliateBindingList.Count > 0;
-                btnPushHighQualityToAiVideoGen.Enabled = _affiliateBindingList.Count > 0;
+                    Kind = OmniJobKind.HuntAffiliate,
+                    Title = "Săn Affiliate (" + keywordEntries.Count + " từ khoá)",
+                    ProfileName = keywordEntries[0].ProfileName,
+                    PayloadJson = JsonConvert.SerializeObject(payload),
+                    MaxRetries = 2,
+                    Tag = _huntCancellation
+                };
+                _activeHuntJob = job;
+                _globalJobQueue.Enqueue(job);
+                Log("[JobQueue] Hunt đã vào hàng đợi — tối đa " + huntSettings.MaxConcurrentJobs + " job chạy song song.");
             }
             catch (Exception ex)
             {
-                Log("Affiliate hunt failed: " + ex.Message);
-            }
-            finally
-            {
-                btnHuntAffiliates.Text = originalHuntButtonText;
+                Log("[Affiliate] Lỗi khi bắt đầu Hunt: " + ex.Message);
+                MessageBox.Show(this, "Không bắt đầu được Hunt:\n" + ex.Message, "Săn Affiliate",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 btnHuntAffiliates.Enabled = true;
-                // Giữ Stop enabled khi auto enrich đang chạy (StartAffiliateAutoEnrichIfEnabled đã set true sync).
-                btnStopHunt.Enabled = _affiliateAutoEnrichRunning;
+                btnExportAffiliateCsv.Enabled = true;
+                btnStopHunt.Enabled = false;
+                _activeHuntJob = null;
                 _huntCancellation?.Dispose();
                 _huntCancellation = null;
-                RefreshAffiliateDownloadFolderHint();
             }
         }
 
-        private List<string> ParseAffiliateKeywordListFromUi()
+        private List<string> GetSelectedAffiliatePlatformsFromUi()
         {
-            if (_affiliateKeywordsPlaceholderActive)
+            var list = new List<string>();
+            if (chkAffiliatePlatformTikTok?.Checked == true)
             {
-                return new List<string>();
+                list.Add(AffiliateSourceIds.TikTok);
             }
 
-            return SplitAffiliateKeywordSegments(txtAffiliateKeywords?.Text ?? string.Empty);
+            if (chkAffiliatePlatformFacebook?.Checked == true)
+            {
+                list.Add(AffiliateSourceIds.Facebook);
+            }
+
+            if (chkAffiliatePlatformYouTube?.Checked == true)
+            {
+                list.Add(AffiliateSourceIds.YouTube);
+            }
+
+            return list;
         }
 
-        private static List<string> SplitAffiliateKeywordSegments(string raw)
+        private List<HuntKeywordEntry> ParseAffiliateKeywordEntriesFromUi()
         {
-            var ordered = new List<string>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var raw = GetAffiliateKeywordsTextFromUi();
             if (string.IsNullOrWhiteSpace(raw))
             {
-                return ordered;
+                return new List<HuntKeywordEntry>();
             }
 
-            foreach (var part in raw.Replace("\r", string.Empty).Split(new[] { '\n', ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            _affiliateKeywordsPlaceholderActive = false;
+            if (txtAffiliateKeywords != null)
             {
-                var t = part.Trim();
-                if (t.Length == 0 || !seen.Add(t))
-                {
-                    continue;
-                }
-
-                ordered.Add(t);
+                txtAffiliateKeywords.ForeColor = Color.WhiteSmoke;
             }
 
-            return ordered;
+            return ParseAffiliateKeywordEntries(raw, GetAffiliateHuntProfileFromUi());
+        }
+
+        private string GetAffiliateKeywordsTextFromUi()
+        {
+            var raw = txtAffiliateKeywords?.Text ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return string.Empty;
+            }
+
+            if (string.Equals(raw.Trim(), AffiliateKeywordsPlaceholder, StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            return raw;
+        }
+
+        private string GetAffiliateHuntProfileFromUi()
+        {
+            var profile = cbAffiliateHuntProfile?.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(profile))
+            {
+                profile = GetRunningProfileName();
+            }
+
+            return ProfileScopedPaths.ResolveProfileName(profile);
+        }
+
+        private static List<HuntKeywordEntry> ParseAffiliateKeywordEntries(string raw, string profileName)
+        {
+            return AffiliateKeywordParser.ParseKeywordLines(raw, profileName);
         }
 
         /// <summary>
@@ -846,7 +1109,7 @@ namespace tiktok_Omni
             return Math.Min(AffiliateHuntBufferHardCap, raw);
         }
 
-        private static void MergeAffiliateHuntResultsIntoAll(
+        private void MergeAffiliateHuntResultsIntoAll(
             List<AffiliateCandidate> all,
             IList<AffiliateCandidate> batch,
             string keyword)
@@ -857,6 +1120,7 @@ namespace tiktok_Omni
             }
 
             var kw = (keyword ?? string.Empty).Trim();
+            var addedCount = 0;
             foreach (var incoming in batch)
             {
                 if (incoming == null)
@@ -873,6 +1137,7 @@ namespace tiktok_Omni
                     }
 
                     all.Add(incoming);
+                    addedCount++;
                     continue;
                 }
 
@@ -888,12 +1153,52 @@ namespace tiktok_Omni
                     }
 
                     all.Add(incoming);
+                    addedCount++;
+                    if (!string.IsNullOrWhiteSpace(url) &&
+                        !_huntHistoryStore.ContainsRecent(url, TimeSpan.FromDays(7)))
+                    {
+                        _huntHistoryStore.Record(url, incoming.ProfileName, kw);
+                    }
                 }
                 else
                 {
                     dup.SourceKeyword = MergeDistinctKeywordLabels(dup.SourceKeyword, incoming.SourceKeyword);
+                    if (!string.IsNullOrWhiteSpace(incoming.ProfileName))
+                    {
+                        dup.ProfileName = ProfileScopedPaths.ResolveProfileName(incoming.ProfileName);
+                    }
                 }
             }
+        }
+
+        private static string ResolvePrimaryProfileFromAiBuffer(IList<AiVideoGenInputItem> items)
+        {
+            if (items == null)
+            {
+                return "default";
+            }
+
+            foreach (var item in items)
+            {
+                if (!string.IsNullOrWhiteSpace(item?.ProfileName))
+                {
+                    return ProfileScopedPaths.ResolveProfileName(item.ProfileName);
+                }
+            }
+
+            return "default";
+        }
+
+        private static string SanitizeAffiliateKeywordForFolder(AffiliateCandidate candidate)
+        {
+            var kw = (candidate?.SourceKeyword ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(kw))
+            {
+                kw = "default";
+            }
+
+            var safe = SanitizePathSegment(kw);
+            return string.IsNullOrWhiteSpace(safe) ? "default" : safe;
         }
 
         private static string MergeDistinctKeywordLabels(string existing, string append)
@@ -954,6 +1259,24 @@ namespace tiktok_Omni
             RefreshAffiliateDownloadFolderHint();
         }
 
+        private void TxtAffiliateKeywords_TextChanged(object sender, EventArgs e)
+        {
+            if (txtAffiliateKeywords == null)
+            {
+                return;
+            }
+
+            var text = txtAffiliateKeywords.Text ?? string.Empty;
+            var isPlaceholder = string.Equals(text, AffiliateKeywordsPlaceholder, StringComparison.Ordinal);
+            if (_affiliateKeywordsPlaceholderActive && !isPlaceholder && !string.IsNullOrWhiteSpace(text))
+            {
+                _affiliateKeywordsPlaceholderActive = false;
+                txtAffiliateKeywords.ForeColor = Color.WhiteSmoke;
+            }
+
+            RefreshAffiliateDownloadFolderHint();
+        }
+
         private void AffiliateBindingList_ListChanged(object sender, ListChangedEventArgs e)
         {
             RecomputeAffiliateDeepDiveErrorColumnVisibility();
@@ -1008,15 +1331,31 @@ namespace tiktok_Omni
                     case "SafetyScore":
                     case "MetricsCapturedAtUtc":
                     case "LastMetricsError":
+                    case "IsSlideshowRendered":
+                    case "LastRenderOutputPath":
+                    case "LastRenderError":
+                    case "SourcePlatform":
+                    case "CustomerReviews":
+                    case "Category":
                         col.Visible = false;
+                        break;
+                    case "ProfileName":
+                        col.HeaderText = "Profile";
+                        col.ToolTipText = "Chrome profile / nick sở hữu dòng này";
+                        col.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleLeft;
+                        col.Visible = true;
+                        col.FillWeight = 8;
+                        col.MinimumWidth = 64;
+                        col.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
                         break;
                     case "SourceKeyword":
                         col.HeaderText = "Từ khoá";
                         col.ToolTipText = "Từ khoá nguồn — bấm ô để xem đầy đủ / sao chép";
                         col.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleLeft;
+                        col.HeaderCell.Style.Padding = new Padding(4, 2, 4, 2);
                         col.Visible = true;
                         col.FillWeight = 10;
-                        col.MinimumWidth = 80;
+                        col.MinimumWidth = 92;
                         col.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
                         break;
                     case "ProductName":
@@ -1048,13 +1387,13 @@ namespace tiktok_Omni
                         break;
                     case "VoiceoverTranscript":
                         col.HeaderText = "Lời thoại";
-                        col.ToolTipText = "Lời thoại (Deep Dive) — bấm ô để xem đầy đủ / sao chép";
+                        col.ToolTipText = "Voiceover / script — «Sửa Script» hoặc Deep Dive";
                         col.Visible = true;
                         col.FillWeight = 16;
                         col.MinimumWidth = 100;
                         col.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
                         col.DefaultCellStyle.ForeColor = Color.LightGray;
-                        col.ReadOnly = true;
+                        col.ReadOnly = false;
                         col.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleLeft;
                         break;
                     case "VideoUrl":
@@ -1140,7 +1479,7 @@ namespace tiktok_Omni
 
             var displayOrder = new[]
             {
-                "ProductName", "SourceKeyword", "Hashtags", "LinkedProduct",
+                "ProductName", "Category", "SourceKeyword", "Hashtags", "LinkedProduct",
                 "PlayCount", "LikeCount", "CommentCount", "ShareCount", "CollectCount", "DurationSeconds", "CreateTimeUtc",
                 "VoiceoverTranscript", "VideoUrl", "LastDeepDiveError",
                 "ImageUrl", "ProfileUrl", "Price", "CommissionRate", "VideoScript", "Creator", "SafetyRiskSummary",
@@ -1165,32 +1504,36 @@ namespace tiktok_Omni
 
         private void btnStopHunt_Click(object sender, EventArgs e)
         {
+            var hasVideoReupJobs = _videoReupBatchJobIds != null && _videoReupBatchJobIds.Count > 0;
             if (_huntCancellation == null
                 && !(_affiliateDownloadingBatch && _affiliateDownloadBatchCts != null)
-                && !_affiliateAutoEnrichRunning)
+                && !_affiliateAutoEnrichRunning
+                && !hasVideoReupJobs
+                && !(_revenueFetchRunning && _revenueCancellation != null))
             {
                 return;
             }
 
             btnStopHunt.Enabled = false;
-            _huntCancellation?.Cancel();
-            if (_huntCancellation != null)
+            if (hasVideoReupJobs)
             {
-                Log("Stopping affiliate hunt...");
+                CancelAllVideoReupBatchJobs();
             }
 
-            _affiliateDownloadBatchCts?.Cancel();
+            TryCancel(_affiliateDownloadBatchCts);
             if (_affiliateDownloadingBatch)
             {
                 Log("Đang hủy tải video hàng loạt...");
             }
 
-            if (_affiliateAutoEnrichRunning && _affiliateAutoEnrichCts != null)
+            TryCancel(_affiliateAutoEnrichCts);
+            if (_affiliateAutoEnrichRunning)
             {
-                try { _affiliateAutoEnrichCts.Cancel(); }
-                catch { /* ignore */ }
                 Log("Đang hủy auto enrich...");
             }
+
+            CancelAffiliateBrowserWork();
+            Log("Đang dừng săn Affiliate / cào báo cáo / Auto Post…");
         }
 
         private async void btnExportAffiliateCsv_Click(object sender, EventArgs e)
@@ -1241,53 +1584,39 @@ namespace tiktok_Omni
 
         private void btnPushToAiVideoGen_Click(object sender, EventArgs e)
         {
-            if (_affiliateBindingList == null || _affiliateBindingList.Count == 0)
+            if (btnPushToAiVideoGen != null)
             {
-                Log("Không có dữ liệu affiliate để đẩy sang AI Video Gen.");
-                return;
+                btnPushToAiVideoGen.Enabled = false;
             }
 
-            var selectedItems = new List<AffiliateCandidate>();
-            if (dgvAffiliateResults?.SelectedRows != null && dgvAffiliateResults.SelectedRows.Count > 0)
+            try
             {
-                foreach (DataGridViewRow row in dgvAffiliateResults.SelectedRows)
+                var targetMode = PromptAffiliatePushTargetMode();
+                if (targetMode == null)
                 {
-                    if (row?.DataBoundItem is AffiliateCandidate candidate)
-                    {
-                        selectedItems.Add(candidate);
-                    }
-                }
-            }
-
-            if (selectedItems.Count == 0)
-            {
-                selectedItems.AddRange(_affiliateBindingList);
-            }
-
-            _aiVideoGenInputBuffer = new List<AiVideoGenInputItem>();
-            foreach (var item in selectedItems
-                .Where(x => x != null)
-                .GroupBy(x => (x.VideoUrl ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.First()))
-            {
-                var productName = (item.ProductName ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(productName))
-                {
-                    productName = (item.Creator ?? string.Empty).Trim();
+                    return;
                 }
 
-                _aiVideoGenInputBuffer.Add(new AiVideoGenInputItem
+                switch (targetMode.Value)
                 {
-                    ProductName = productName,
-                    Price = string.IsNullOrWhiteSpace(item.Price) ? "N/A" : item.Price.Trim(),
-                    ImageUrl = (item.ImageUrl ?? string.Empty).Trim()
-                });
+                    case AffiliatePushTargetMode.Slideshow:
+                        PushVisibleAffiliateRowsToAiVideoGen(targetDeepDive: false);
+                        break;
+                    case AffiliatePushTargetMode.DeepDive:
+                        PushVisibleAffiliateRowsToAiVideoGen(targetDeepDive: true);
+                        break;
+                    case AffiliatePushTargetMode.VideoReup:
+                        PushVisibleAffiliateRowsToVideoReup();
+                        break;
+                }
             }
-
-            var withImage = _aiVideoGenInputBuffer.Count(x => !string.IsNullOrWhiteSpace(x.ImageUrl));
-            Log($"Đã đẩy {_aiVideoGenInputBuffer.Count} sản phẩm sang bộ nhớ tạm của AI Video Gen (có ảnh: {withImage}).");
-            RefreshAiVideoGenInputGrid();
-            tabMain.SelectedTab = tabAiVideoGen;
+            finally
+            {
+                if (btnPushToAiVideoGen != null && !btnPushToAiVideoGen.IsDisposed)
+                {
+                    btnPushToAiVideoGen.Enabled = _affiliateBindingList != null && _affiliateBindingList.Count > 0;
+                }
+            }
         }
 
         private void btnPushSelectionToVideoReup_Click(object sender, EventArgs e)
@@ -1298,11 +1627,6 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (_videoReupBindingList == null)
-            {
-                return;
-            }
-
             var selectedItems = new List<AffiliateCandidate>();
             if (dgvAffiliateResults?.SelectedRows != null && dgvAffiliateResults.SelectedRows.Count > 0)
             {
@@ -1320,9 +1644,19 @@ namespace tiktok_Omni
                 selectedItems.AddRange(_affiliateBindingList);
             }
 
+            PushAffiliateCandidatesToVideoReup(selectedItems);
+        }
+
+        private void PushAffiliateCandidatesToVideoReup(IEnumerable<AffiliateCandidate> candidates)
+        {
+            if (_videoReupBindingList == null)
+            {
+                return;
+            }
+
             _videoReupBindingList.Clear();
             var skippedNoUrl = 0;
-            foreach (var item in selectedItems
+            foreach (var item in (candidates ?? Enumerable.Empty<AffiliateCandidate>())
                 .Where(x => x != null)
                 .GroupBy(x => (x.VideoUrl ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First()))
@@ -1342,6 +1676,7 @@ namespace tiktok_Omni
 
                 _videoReupBindingList.Add(new VideoReupRowItem
                 {
+                    ProfileName = ProfileScopedPaths.ResolveProfileFromCandidate(item),
                     SourceKeyword = (item.SourceKeyword ?? string.Empty).Trim(),
                     ProductName = productName,
                     Price = string.IsNullOrWhiteSpace(item.Price) ? "N/A" : item.Price.Trim(),
@@ -1355,11 +1690,8 @@ namespace tiktok_Omni
             LogVideoReup($"Video reup: đã nhập {_videoReupBindingList.Count} dòng từ Săn Affiliate (bỏ qua không có URL video: {skippedNoUrl}).");
             if (_videoReupBindingList.Count > 0)
             {
-                tabMain.SelectedTab = tabAiVideoGen;
-                if (tabAiVideoGenModes != null && tabAiVideoGenModes.TabPages.Count > 4)
-                {
-                    tabAiVideoGenModes.SelectedIndex = 4;
-                }
+                SwitchToMainTab(tabAiVideoGen);
+                SelectAiVideoGenMode(AiVideoGenMode.VideoReup);
 
                 VideoReupDownloadImportedRowsFireAndForgetAsync();
             }
@@ -1408,8 +1740,14 @@ namespace tiktok_Omni
                 return;
             }
 
+            dgvVideoReupInput.EnableHeadersVisualStyles = false;
+            dgvVideoReupInput.ColumnHeadersHeight = AppGridHeaderHeight;
+            dgvVideoReupInput.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             dgvVideoReupInput.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvVideoReupInput.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCellsExceptHeaders;
+            dgvVideoReupInput.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+            dgvVideoReupInput.RowTemplate.Height = 30;
+            dgvVideoReupInput.DefaultCellStyle.Font = AppInputFont;
+            ApplyAppGridHeaderChrome(dgvVideoReupInput);
 
             foreach (DataGridViewColumn col in dgvVideoReupInput.Columns)
             {
@@ -1440,7 +1778,7 @@ namespace tiktok_Omni
                 {
                     col.HeaderText = "Hook (4–7s)";
                     col.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
-                    col.ToolTipText = "Sửa tại đây (F2) hoặc bấm «Gemini: tạo hook» — kết quả ghi vào đúng dòng đang chọn; Lyria / Render dùng hook của dòng đó.";
+                    col.ToolTipText = "Sửa tại đây (F2) hoặc bấm «Gemini: tạo hook» — kết quả ghi vào đúng dòng đang chọn; Voiceover / Render dùng hook của dòng đó.";
                     col.FillWeight = 110f;
                     col.MinimumWidth = 120;
                 }
@@ -1461,16 +1799,22 @@ namespace tiktok_Omni
                 else if (string.Equals(name, "LastRemixOutputPath", StringComparison.OrdinalIgnoreCase))
                 {
                     col.HeaderText = "MP4 remix";
-                    col.ToolTipText = "Đường dẫn file video reup đã xuất (cắt đầu/đuôi, lật, hook Lyria + nhạc).";
+                    col.ToolTipText = "Đường dẫn file video reup đã xuất (cắt đầu/đuôi, lật, hook voiceover + nhạc).";
                     col.FillWeight = 72f;
                     col.MinimumWidth = 72;
                 }
                 else if (string.Equals(name, "RemixStatus", StringComparison.OrdinalIgnoreCase))
                 {
-                    col.HeaderText = "Remix";
+                    col.HeaderText = "Trạng thái remix";
                     col.ToolTipText = "Trạng thái lần remix gần nhất: Đang xử lý, Xong hoặc Lỗi.";
-                    col.FillWeight = 22f;
-                    col.MinimumWidth = 48;
+                    col.FillWeight = 34f;
+                    col.MinimumWidth = 96;
+                }
+                else if (string.Equals(name, "ProfileName", StringComparison.OrdinalIgnoreCase))
+                {
+                    col.HeaderText = "Profile";
+                    col.FillWeight = 16f;
+                    col.MinimumWidth = 64;
                 }
                 else if (string.Equals(name, "RemixLastError", StringComparison.OrdinalIgnoreCase))
                 {
@@ -1493,86 +1837,322 @@ namespace tiktok_Omni
                 }
             }
 
-            SetDisplayIndex("ProductName", 0);
-            SetDisplayIndex("VideoUrl", 1);
-            SetDisplayIndex("ReupHookDraft", 2);
-            SetDisplayIndex("Hashtags", 3);
-            SetDisplayIndex("VideoScript", 4);
-            SetDisplayIndex("LastRemixOutputPath", 5);
-            SetDisplayIndex("RemixStatus", 6);
-            SetDisplayIndex("RemixLastError", 7);
+            SetDisplayIndex("ProfileName", 0);
+            SetDisplayIndex("ProductName", 1);
+            SetDisplayIndex("VideoUrl", 2);
+            SetDisplayIndex("ReupHookDraft", 3);
+            SetDisplayIndex("Hashtags", 4);
+            SetDisplayIndex("VideoScript", 5);
+            SetDisplayIndex("LastRemixOutputPath", 6);
+            SetDisplayIndex("RemixStatus", 7);
+            SetDisplayIndex("RemixLastError", 8);
         }
 
-        private void SetVideoReupCaptionButtonsEnabled(bool enabled)
+        /// <summary>Render/hook/TTS — cần FFmpeg + API + storage.</summary>
+        private void SetVideoReupPipelineControlsEnabled(bool pipelineReady)
+        {
+            if (btnVideoReupHookGemini != null)
+            {
+                btnVideoReupHookGemini.Enabled = pipelineReady;
+            }
+
+            if (btnVideoReupHookRegen != null)
+            {
+                btnVideoReupHookRegen.Enabled = pipelineReady;
+            }
+
+            if (btnVideoReupLyriaHook != null)
+            {
+                btnVideoReupLyriaHook.Enabled = pipelineReady;
+            }
+
+            if (grpVideoReupAudioMode != null)
+            {
+                grpVideoReupAudioMode.Enabled = pipelineReady;
+            }
+
+            if (rbVideoReupAudioAffiliate != null)
+            {
+                rbVideoReupAudioAffiliate.Enabled = pipelineReady;
+            }
+
+            if (rbVideoReupAudioFilm != null)
+            {
+                rbVideoReupAudioFilm.Enabled = pipelineReady;
+            }
+
+            if (cbVideoReupMusic != null)
+            {
+                cbVideoReupMusic.Enabled = pipelineReady;
+            }
+
+            if (btnVideoReupOpenMusicFolder != null)
+            {
+                btnVideoReupOpenMusicFolder.Enabled = pipelineReady;
+            }
+
+            if (btnVideoReupRefreshMusicList != null)
+            {
+                btnVideoReupRefreshMusicList.Enabled = pipelineReady;
+            }
+
+            if (btnVideoReupRenderVideo != null)
+            {
+                btnVideoReupRenderVideo.Enabled = pipelineReady;
+            }
+
+            if (btnVideoReupRenderBatch != null)
+            {
+                btnVideoReupRenderBatch.Enabled = pipelineReady;
+            }
+
+            if (txtVideoReupVideoUrl != null)
+            {
+                txtVideoReupVideoUrl.ReadOnly = !pipelineReady;
+            }
+        }
+
+        /// <summary>Nút thêm dòng / nhập affiliate — luôn bật để người dùng chuẩn bị dữ liệu.</summary>
+        private void SetVideoReupDataEntryControlsEnabled(bool enabled = true)
         {
             if (btnPushSelectionToVideoReup != null)
             {
                 btnPushSelectionToVideoReup.Enabled = enabled;
             }
 
-            if (btnVideoReupHookGemini != null)
-            {
-                btnVideoReupHookGemini.Enabled = enabled;
-            }
-
-            if (btnVideoReupHookRegen != null)
-            {
-                btnVideoReupHookRegen.Enabled = enabled;
-            }
-
-            if (btnVideoReupLyriaHook != null)
-            {
-                btnVideoReupLyriaHook.Enabled = enabled;
-            }
-
-            if (grpVideoReupAudioMode != null)
-            {
-                grpVideoReupAudioMode.Enabled = enabled;
-            }
-
-            if (rbVideoReupAudioAffiliate != null)
-            {
-                rbVideoReupAudioAffiliate.Enabled = enabled;
-            }
-
-            if (rbVideoReupAudioFilm != null)
-            {
-                rbVideoReupAudioFilm.Enabled = enabled;
-            }
-
-            if (cbVideoReupMusic != null)
-            {
-                cbVideoReupMusic.Enabled = enabled;
-            }
-
-            if (btnVideoReupOpenMusicFolder != null)
-            {
-                btnVideoReupOpenMusicFolder.Enabled = enabled;
-            }
-
-            if (btnVideoReupRefreshMusicList != null)
-            {
-                btnVideoReupRefreshMusicList.Enabled = enabled;
-            }
-
-            if (btnVideoReupRenderVideo != null)
-            {
-                btnVideoReupRenderVideo.Enabled = enabled;
-            }
-
-            if (btnVideoReupRenderBatch != null)
-            {
-                btnVideoReupRenderBatch.Enabled = enabled;
-            }
-
-            if (txtVideoReupVideoUrl != null)
-            {
-                txtVideoReupVideoUrl.ReadOnly = !enabled;
-            }
-
             if (btnVideoReupAddManualRow != null)
             {
                 btnVideoReupAddManualRow.Enabled = enabled;
+            }
+        }
+
+        private void SetVideoReupCaptionButtonsEnabled(bool pipelineReady)
+        {
+            SetVideoReupPipelineControlsEnabled(pipelineReady);
+            SetVideoReupDataEntryControlsEnabled(true);
+        }
+
+        private void RefreshVideoReupReadinessLabel(AppSettings settings = null)
+        {
+            if (lblVideoReupReadiness == null || lblVideoReupReadiness.IsDisposed)
+            {
+                return;
+            }
+
+            if (settings == null)
+            {
+                _ = RefreshVideoReupReadinessLabelAsync();
+                return;
+            }
+
+            void Apply()
+            {
+                var row = new VideoReupRowItem();
+                var blockers = VideoReupRemixService.DescribePipelineBlockers(row, settings);
+                var pipelineReady = string.IsNullOrWhiteSpace(settings?.AiApiKey) == false
+                                    && VideoReupRemixService.TryValidateFfmpegToolkit(settings, out _);
+                lblVideoReupReadiness.ForeColor = pipelineReady
+                    ? Color.FromArgb(120, 220, 160)
+                    : Color.FromArgb(255, 180, 120);
+                lblVideoReupReadiness.Text = pipelineReady
+                    ? "\u2713 S\u1EB5n s\u00E0ng \u2014 th\u00EAm d\u00F2ng, nh\u1EADp URL, b\u1EA5m \u00ABB\u1EAFt \u0111\u1EA7u render\u00BB. C\u1EA5u h\u00ECnh hook/nh\u1EA1c: m\u1EDF panel b\u00EAn d\u01B0\u1EDBi."
+                    : "\u26A0 Ch\u01B0a render \u0111\u01B0\u1EE3c (v\u1EABn th\u00EAm d\u00F2ng \u0111\u01B0\u1EE3c): " + blockers.Replace("\r\n", "  \u2022  ");
+            }
+
+            if (lblVideoReupReadiness.InvokeRequired)
+            {
+                lblVideoReupReadiness.Invoke(new Action(Apply));
+                return;
+            }
+
+            Apply();
+        }
+
+        private async Task RefreshVideoReupReadinessLabelAsync()
+        {
+            try
+            {
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                RefreshVideoReupReadinessLabel(settings);
+            }
+            catch
+            {
+                RefreshVideoReupReadinessLabel(new AppSettings());
+            }
+        }
+
+        private enum AffiliatePushTargetMode
+        {
+            Slideshow,
+            DeepDive,
+            VideoReup
+        }
+
+        private AffiliatePushTargetMode? PromptAffiliatePushTargetMode()
+        {
+            using (var dlg = new Form
+            {
+                Text = "Đẩy sang AI Video Gen",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(360, 178),
+                BackColor = Color.FromArgb(32, 34, 44),
+                ForeColor = Color.Gainsboro,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false
+            })
+            {
+                var lbl = new Label
+                {
+                    Text = "Chọn chế độ đích:",
+                    AutoSize = true,
+                    Location = new Point(16, 16),
+                    ForeColor = Color.Gainsboro
+                };
+                var rbSlideshow = new RadioButton
+                {
+                    Text = "Slideshow (nhiều ảnh / SP)",
+                    AutoSize = true,
+                    Location = new Point(20, 44),
+                    Checked = true,
+                    ForeColor = Color.Gainsboro
+                };
+                var rbDeep = new RadioButton
+                {
+                    Text = "Affiliate chuyên sâu (4+ ảnh / 1 SP)",
+                    AutoSize = true,
+                    Location = new Point(20, 72),
+                    ForeColor = Color.Gainsboro
+                };
+                var rbReup = new RadioButton
+                {
+                    Text = "Video Reup (tải & render lại video)",
+                    AutoSize = true,
+                    Location = new Point(20, 100),
+                    ForeColor = Color.Gainsboro
+                };
+                var btnOk = new Button
+                {
+                    Text = "Đẩy",
+                    DialogResult = DialogResult.OK,
+                    Location = new Point(168, 136),
+                    Size = new Size(80, 30),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(82, 128, 89),
+                    ForeColor = Color.White
+                };
+                var btnCancel = new Button
+                {
+                    Text = "Hủy",
+                    DialogResult = DialogResult.Cancel,
+                    Location = new Point(256, 136),
+                    Size = new Size(80, 30),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.FromArgb(60, 64, 77),
+                    ForeColor = Color.WhiteSmoke
+                };
+                dlg.Controls.AddRange(new Control[] { lbl, rbSlideshow, rbDeep, rbReup, btnOk, btnCancel });
+                dlg.AcceptButton = btnOk;
+                dlg.CancelButton = btnCancel;
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return null;
+                }
+
+                if (rbDeep.Checked)
+                {
+                    return AffiliatePushTargetMode.DeepDive;
+                }
+
+                if (rbReup.Checked)
+                {
+                    return AffiliatePushTargetMode.VideoReup;
+                }
+
+                return AffiliatePushTargetMode.Slideshow;
+            }
+        }
+
+        private void RefreshAiVideoGenModeReadinessLabels(bool? ffmpegOk = null, bool? apiOk = null, bool? storageOk = null)
+        {
+            if (ffmpegOk == null || apiOk == null || storageOk == null)
+            {
+                bool Ok(string key) => _systemHealth != null
+                                       && _systemHealth.TryGetValue(key, out var v)
+                                       && v;
+                ffmpegOk = Ok("ffmpeg");
+                apiOk = Ok("api_keys");
+                storageOk = Ok("storage");
+            }
+
+            var pipelineReady = ffmpegOk.Value && apiOk.Value && storageOk.Value;
+            var blockers = new List<string>();
+            if (!apiOk.Value)
+            {
+                blockers.Add("Gemini API Key (Cài đặt)");
+            }
+
+            if (!ffmpegOk.Value)
+            {
+                blockers.Add("FFmpeg (Cài đặt)");
+            }
+
+            if (!storageOk.Value)
+            {
+                blockers.Add("Thư mục lưu trữ (Cài đặt)");
+            }
+
+            var blockerText = blockers.Count > 0
+                ? string.Join("  •  ", blockers)
+                : string.Empty;
+
+            void ApplySlideshow()
+            {
+                if (lblSlideshowReadiness == null || lblSlideshowReadiness.IsDisposed)
+                {
+                    return;
+                }
+
+                lblSlideshowReadiness.ForeColor = pipelineReady
+                    ? Color.FromArgb(120, 220, 160)
+                    : Color.FromArgb(255, 180, 120);
+                lblSlideshowReadiness.Text = pipelineReady
+                    ? "✓ Bảng SP phía trên → «Tạo kịch bản AI» → sửa script giữa màn hình → «Render video sản phẩm»."
+                    : "⚠ Chưa render được:\r\n" + blockerText;
+            }
+
+            void ApplyAffiliateDeep()
+            {
+                if (lblAffiliateDeepReadiness == null || lblAffiliateDeepReadiness.IsDisposed)
+                {
+                    return;
+                }
+
+                lblAffiliateDeepReadiness.ForeColor = pipelineReady
+                    ? Color.FromArgb(120, 220, 160)
+                    : Color.FromArgb(255, 180, 120);
+                lblAffiliateDeepReadiness.Text = pipelineReady
+                    ? "✓ Bảng SP phía trên (≥4 ảnh cùng tên) → chỉnh storyboard giữa màn hình → «Render Affiliate chuyên sâu»."
+                    : "⚠ Chưa render được:\r\n" + blockerText;
+            }
+
+            if (lblSlideshowReadiness?.InvokeRequired == true)
+            {
+                lblSlideshowReadiness.Invoke(new Action(ApplySlideshow));
+            }
+            else
+            {
+                ApplySlideshow();
+            }
+
+            if (lblAffiliateDeepReadiness?.InvokeRequired == true)
+            {
+                lblAffiliateDeepReadiness.Invoke(new Action(ApplyAffiliateDeep));
+            }
+            else
+            {
+                ApplyAffiliateDeep();
             }
 
         }
@@ -1630,9 +2210,45 @@ namespace tiktok_Omni
             }
         }
 
-        private AppSettings GetSettingsSnapshotForVideoReupMusic()
+        /// <summary>Chỉ vẽ lại một dòng lưới Video reup (tránh ResetBindings cả bảng trong vòng lặp lô).</summary>
+        private void InvalidateVideoReupGridRow(VideoReupRowItem row)
         {
-            var s = _configManager.LoadAsync().GetAwaiter().GetResult();
+            if (row == null || dgvVideoReupInput == null || dgvVideoReupInput.IsDisposed)
+            {
+                return;
+            }
+
+            void Apply()
+            {
+                for (var i = 0; i < dgvVideoReupInput.Rows.Count; i++)
+                {
+                    var gridRow = dgvVideoReupInput.Rows[i];
+                    if (gridRow.IsNewRow)
+                    {
+                        continue;
+                    }
+
+                    if (ReferenceEquals(gridRow.DataBoundItem, row))
+                    {
+                        dgvVideoReupInput.InvalidateRow(i);
+                        return;
+                    }
+                }
+            }
+
+            if (dgvVideoReupInput.InvokeRequired)
+            {
+                dgvVideoReupInput.BeginInvoke((Action)Apply);
+            }
+            else
+            {
+                Apply();
+            }
+        }
+
+        private async Task<AppSettings> GetSettingsSnapshotForVideoReupMusicAsync()
+        {
+            var s = await _configManager.LoadAsync().ConfigureAwait(true);
             if (txtVideoReupMusicLibraryPath != null)
             {
                 s.VideoReupMusicLibraryPath = (txtVideoReupMusicLibraryPath.Text ?? string.Empty).Trim();
@@ -1641,7 +2257,7 @@ namespace tiktok_Omni
             return s;
         }
 
-        private void UpdateVideoReupMusicPathHint()
+        private async Task UpdateVideoReupMusicPathHintAsync()
         {
             if (lblVideoReupMusicPathHint == null)
             {
@@ -1650,16 +2266,18 @@ namespace tiktok_Omni
 
             try
             {
-                var s = GetSettingsSnapshotForVideoReupMusic();
+                var s = await GetSettingsSnapshotForVideoReupMusicAsync().ConfigureAwait(true);
                 var dir = VideoReupRemixService.GetMusicLibraryDirectory(s);
-                var src = string.IsNullOrWhiteSpace(s.VideoReupMusicLibraryPath) ? "mặc định" : "Cài đặt";
+                var src = string.IsNullOrWhiteSpace(s.VideoReupMusicLibraryPath) ? "mặc định" : "tùy chỉnh";
                 lblVideoReupMusicPathHint.Text =
                     "Thư mục (" + src + "): " + dir +
                     "\r\nTiếp: kéo/thả hoặc copy các file .mp3 vào cửa sổ vừa mở → quay lại đây bấm «Làm mới danh sách» (hoặc chọn lại dòng trong bảng) → chọn bài trong combo.";
                 _tipVideoReupMusicPath ??= new ToolTip { ShowAlways = true };
-                _tipVideoReupMusicPath.SetToolTip(
-                    lblVideoReupMusicPathHint,
-                    dir);
+                var hintTarget = cbVideoReupMusic ?? lblVideoReupMusicPathHint as Control;
+                if (hintTarget != null)
+                {
+                    _tipVideoReupMusicPath.SetToolTip(hintTarget, dir);
+                }
             }
             catch
             {
@@ -1667,7 +2285,7 @@ namespace tiktok_Omni
             }
         }
 
-        private void RefreshVideoReupMusicCombo()
+        private async Task RefreshVideoReupMusicComboAsync()
         {
             if (cbVideoReupMusic == null)
             {
@@ -1677,7 +2295,7 @@ namespace tiktok_Omni
             AppSettings settingsSnap;
             try
             {
-                settingsSnap = GetSettingsSnapshotForVideoReupMusic();
+                settingsSnap = await GetSettingsSnapshotForVideoReupMusicAsync().ConfigureAwait(true);
             }
             catch
             {
@@ -1694,7 +2312,7 @@ namespace tiktok_Omni
                 cbVideoReupMusic.Items.Add(Path.GetFileName(f));
             }
 
-            UpdateVideoReupMusicPathHint();
+            await UpdateVideoReupMusicPathHintAsync().ConfigureAwait(true);
 
             if (cbVideoReupMusic.Items.Count == 0)
             {
@@ -1725,7 +2343,7 @@ namespace tiktok_Omni
             }
         }
 
-        private void BindVideoReupEditorFromRow(VideoReupRowItem row)
+        private async Task BindVideoReupEditorFromRowAsync(VideoReupRowItem row)
         {
             if (cbVideoReupMusic == null)
             {
@@ -1747,14 +2365,15 @@ namespace tiktok_Omni
 
             if (row == null)
             {
-                ApplyVideoReupAudioModeToUi(null);
+                await ApplyVideoReupAudioModeToUiAsync(null).ConfigureAwait(true);
+                await RefreshReupPreviewForRowAsync(null).ConfigureAwait(true);
                 return;
             }
 
-            ApplyVideoReupAudioModeToUi(row);
+            await ApplyVideoReupAudioModeToUiAsync(row).ConfigureAwait(true);
             if (row.ReupAudioMode == VideoReupAudioMode.AffiliateBed)
             {
-                RefreshVideoReupMusicCombo();
+                await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
                 if (!string.IsNullOrWhiteSpace(row.ReupSelectedMusicFile) && cbVideoReupMusic.Items.Contains(row.ReupSelectedMusicFile))
                 {
                     cbVideoReupMusic.SelectedItem = row.ReupSelectedMusicFile;
@@ -1770,9 +2389,11 @@ namespace tiktok_Omni
                     row.ReupSelectedMusicFile = cbVideoReupMusic.SelectedItem?.ToString() ?? string.Empty;
                 }
             }
+
+            await RefreshReupPreviewForRowAsync(row).ConfigureAwait(true);
         }
 
-        private void ApplyVideoReupAudioModeToUi(VideoReupRowItem row)
+        private async Task ApplyVideoReupAudioModeToUiAsync(VideoReupRowItem row)
         {
             if (grpVideoReupAudioMode == null || rbVideoReupAudioAffiliate == null || rbVideoReupAudioFilm == null)
             {
@@ -1817,7 +2438,12 @@ namespace tiktok_Omni
                     lblVideoReupMusicPathHint.Visible = true;
                 }
 
-                UpdateVideoReupMusicPathHint();
+                if (pnlReupMusicLibraryPath != null)
+                {
+                    pnlReupMusicLibraryPath.Visible = true;
+                }
+
+                await UpdateVideoReupMusicPathHintAsync().ConfigureAwait(true);
                 return;
             }
 
@@ -1865,13 +2491,35 @@ namespace tiktok_Omni
                 lblVideoReupMusicPathHint.Visible = !film;
             }
 
+            if (pnlReupMusicLibraryPath != null)
+            {
+                pnlReupMusicLibraryPath.Visible = !film;
+            }
+
             if (!film)
             {
-                UpdateVideoReupMusicPathHint();
+                await UpdateVideoReupMusicPathHintAsync().ConfigureAwait(true);
             }
         }
 
-        private void VideoReupAudioModeRadio_CheckedChanged(object sender, EventArgs e)
+        private void SyncVideoReupAudioModeFromUiToRow(VideoReupRowItem row)
+        {
+            if (row == null)
+            {
+                return;
+            }
+
+            if (rbVideoReupAudioFilm != null && rbVideoReupAudioFilm.Checked)
+            {
+                row.ReupAudioMode = VideoReupAudioMode.FilmKeepOriginal;
+            }
+            else if (rbVideoReupAudioAffiliate != null && rbVideoReupAudioAffiliate.Checked)
+            {
+                row.ReupAudioMode = VideoReupAudioMode.AffiliateBed;
+            }
+        }
+
+        private async void VideoReupAudioModeRadio_CheckedChanged(object sender, EventArgs e)
         {
             if (_videoReupSuppressAudioModeEvents)
             {
@@ -1892,18 +2540,18 @@ namespace tiktok_Omni
                 row.ReupAudioMode = VideoReupAudioMode.AffiliateBed;
             }
 
-            ApplyVideoReupAudioModeToUi(row);
+            await ApplyVideoReupAudioModeToUiAsync(row).ConfigureAwait(true);
         }
 
-        private void dgvVideoReupInput_SelectionChanged(object sender, EventArgs e)
+        private async void dgvVideoReupInput_SelectionChanged(object sender, EventArgs e)
         {
             if (!TryGetVideoReupSelectedRow(out var row))
             {
-                BindVideoReupEditorFromRow(null);
+                await BindVideoReupEditorFromRowAsync(null).ConfigureAwait(true);
                 return;
             }
 
-            BindVideoReupEditorFromRow(row);
+            await BindVideoReupEditorFromRowAsync(row).ConfigureAwait(true);
         }
 
         private void FlushVideoReupVideoUrlFromEditor()
@@ -2005,7 +2653,7 @@ namespace tiktok_Omni
 
                     row.RemixStatus = "Đang tải video…";
                     row.RemixLastError = string.Empty;
-                    _videoReupBindingList?.ResetBindings();
+                    InvalidateVideoReupGridRow(row);
                     SetVideoReupProgress($"Đang tải «{row.ProductName}»…", 0, indeterminate: true);
                     try
                     {
@@ -2020,12 +2668,13 @@ namespace tiktok_Omni
                         LogVideoReup($"Video reup tải video «{row.ProductName}»: {ex.Message}");
                     }
 
-                    _videoReupBindingList?.ResetBindings();
+                    InvalidateVideoReupGridRow(row);
                 }
             }
             finally
             {
                 SetVideoReupCaptionButtonsEnabled(true);
+                _videoReupBindingList?.ResetBindings();
             }
         }
 
@@ -2189,12 +2838,19 @@ namespace tiktok_Omni
         {
             if (_videoReupBindingList == null || dgvVideoReupInput == null)
             {
+                MessageBox.Show(
+                    this,
+                    "Bảng Video reup chưa khởi tạo. Hãy đóng app và mở lại.",
+                    "Video reup",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
                 return;
             }
 
             var n = _videoReupBindingList.Count + 1;
             _videoReupBindingList.Add(new VideoReupRowItem
             {
+                ProfileName = GetRunningProfileName(),
                 ProductName = "Video " + n,
                 Price = "N/A",
                 VideoUrl = string.Empty
@@ -2242,13 +2898,23 @@ namespace tiktok_Omni
 
             FlushVideoReupHookDraftFromEditor();
             FlushVideoReupVideoUrlFromEditor();
+            SyncVideoReupAudioModeFromUiToRow(row);
             var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            if (row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal)
+            {
+                LogVideoReup("Video reup hook: chế độ Phim — không cần thư viện nhạc .mp3.");
+            }
+
             if (!VideoReupRemixService.TryValidateHookGeminiStep(row, settings, out var preflightError))
             {
                 row.RemixStatus = "Lỗi";
                 row.RemixLastError = preflightError;
                 LogVideoReup("Video reup hook: " + preflightError);
-                SetVideoReupProgress("lỗi — kiểm tra Cài đặt / nhạc .mp3", 0);
+                SetVideoReupProgress(
+                    row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal
+                        ? "lỗi — kiểm tra AI API Key"
+                        : "lỗi — kiểm tra Cài đặt / nhạc .mp3",
+                    0);
                 _videoReupBindingList?.ResetBindings();
                 return;
             }
@@ -2270,7 +2936,7 @@ namespace tiktok_Omni
                     LogVideoReup,
                     CancellationToken.None).ConfigureAwait(true);
 
-                RefreshVideoReupMusicCombo();
+                await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
                 if (!string.IsNullOrWhiteSpace(row.ReupSuggestedMusicFile) && cbVideoReupMusic?.Items.Contains(row.ReupSuggestedMusicFile) == true)
                 {
                     cbVideoReupMusic.SelectedItem = row.ReupSuggestedMusicFile;
@@ -2281,7 +2947,7 @@ namespace tiktok_Omni
                 LogVideoReup(regenerateLabel
                     ? "Video reup hook: Gemini đã ghi lại hook vào cột «Hook» của dòng đang chọn (+ gợi ý nhạc)."
                     : "Video reup hook: Gemini đã ghi hook vào cột «Hook» của dòng đang chọn (+ gợi ý nhạc).");
-                SetVideoReupProgress("Hook OK — có thể bấm Lyria hoặc «Tạo video thành phẩm»", 100);
+                SetVideoReupProgress("Hook OK — có thể bấm Voiceover hoặc «Tạo video thành phẩm»", 100);
                 _videoReupBindingList?.ResetBindings();
             }
             catch (Exception ex)
@@ -2302,38 +2968,38 @@ namespace tiktok_Omni
         {
             if (!TryGetVideoReupSelectedRow(out var row))
             {
-                LogVideoReup("Video reup Lyria: chọn một dòng trong bảng.");
+                LogVideoReup("Video reup voiceover: chọn một dòng trong bảng.");
                 return;
             }
 
             FlushVideoReupHookDraftFromEditor();
             FlushVideoReupVideoUrlFromEditor();
             var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            if (!VideoReupRemixService.TryValidateLyriaAudioStep(row, settings, out var preflightError))
+            if (!VideoReupRemixService.TryValidateVoiceoverAudioStep(row, settings, out var preflightError))
             {
                 row.RemixStatus = "Lỗi";
                 row.RemixLastError = preflightError;
-                LogVideoReup("Video reup Lyria: " + preflightError);
-                SetVideoReupProgress("lỗi — thiếu hook / Lyria / FFmpeg", 0);
+                LogVideoReup("Video reup voiceover: " + preflightError);
+                SetVideoReupProgress("lỗi — thiếu hook / FFmpeg", 0);
                 _videoReupBindingList?.ResetBindings();
                 return;
             }
 
             SetVideoReupCaptionButtonsEnabled(false);
-            row.RemixStatus = "Lyria…";
+            row.RemixStatus = "Voiceover…";
             row.RemixLastError = string.Empty;
             _videoReupBindingList?.ResetBindings();
-            SetVideoReupProgress("Lyria: đang đọc hook → WAV…", 0, indeterminate: true);
+            SetVideoReupProgress("Voiceover: đang đọc hook → MP3/WAV…", 0, indeterminate: true);
             try
             {
-                await _videoReupRemixService.BuildLyriaHookAudioAsync(
+                await _videoReupRemixService.BuildVoiceoverHookAudioAsync(
                     row,
                     settings,
                     _affiliateHunter,
                     LogVideoReup,
                     CancellationToken.None).ConfigureAwait(true);
                 row.RemixStatus = "Âm thanh hook OK";
-                LogVideoReup("Video reup Lyria: đã tạo WAV hook — chọn nhạc rồi «Tạo video thành phẩm».");
+                LogVideoReup("Video reup voiceover: đã tạo hook — MP3: " + (row.HookAudioPath ?? "") + " — chọn nhạc rồi «Tạo video thành phẩm».");
                 SetVideoReupProgress("Âm thanh hook OK", 100);
                 _videoReupBindingList?.ResetBindings();
             }
@@ -2341,8 +3007,8 @@ namespace tiktok_Omni
             {
                 row.RemixStatus = "Lỗi";
                 row.RemixLastError = ex.Message;
-                LogVideoReup("Video reup Lyria lỗi: " + ex.Message);
-                SetVideoReupProgress("lỗi Lyria", 0);
+                LogVideoReup("Video reup voiceover lỗi: " + ex.Message);
+                SetVideoReupProgress("lỗi voiceover", 0);
                 _videoReupBindingList?.ResetBindings();
             }
             finally
@@ -2368,7 +3034,7 @@ namespace tiktok_Omni
             }
         }
 
-        /// <summary>Tự chạy đủ bước: tải → Gemini (nếu thiếu hook) → Lyria → ghép MP4.</summary>
+        /// <summary>Tự chạy đủ bước: tải → Gemini (nếu thiếu hook) → voiceover → ghép MP4.</summary>
         private async Task<VideoReupRemixResult> RunVideoReupFullPipelineAsync(VideoReupRowItem row, AppSettings settings)
         {
             if (row == null)
@@ -2376,9 +3042,20 @@ namespace tiktok_Omni
                 throw new ArgumentNullException(nameof(row));
             }
 
+            SyncVideoReupAudioModeFromUiToRow(row);
+
             if (!VideoReupRemixService.LooksLikeHttpVideoUrl(row.VideoUrl))
             {
                 throw new InvalidOperationException("URL video không hợp lệ — cần link TikTok http(s).");
+            }
+
+            if (_renderHistoryStore.Contains(row.VideoUrl))
+            {
+                LogVideoReup("[DUPLICATE] Video này đã được xử lý.");
+                row.RemixStatus = "Trùng (đã render)";
+                row.RemixLastError = "URL đã có trong render_history.json";
+                _videoReupBindingList?.ResetBindings();
+                throw new InvalidOperationException("[DUPLICATE] Video này đã được xử lý.");
             }
 
             if (!await TryEnsureVideoReupFfmpegAsync(settings, saveSettings: true).ConfigureAwait(true))
@@ -2394,8 +3071,39 @@ namespace tiktok_Omni
             await VideoReupEnsureDownloadWithGateAsync(row, settings).ConfigureAwait(true);
             LogVideoReup("Video reup [1/4]: đã tải video nguồn.");
             SetVideoReupProgress("Bước 1/4: xong", 25);
+            await RefreshReupPreviewForRowAsync(row, "Đã tải video nguồn — xem panel bên phải").ConfigureAwait(true);
 
-            if (string.IsNullOrWhiteSpace((row.ReupHookDraft ?? string.Empty).Trim()))
+            ApplyReupVisualHookSettingsToRow(row);
+            if (row.UseVisualHookSfx)
+            {
+                row.RemixStatus = "Bước 2-3/4: Hook SFX 3s…";
+                _videoReupBindingList?.ResetBindings();
+                SetVideoReupProgress("Bước 2-3/4: chèn Hook SFX 3 giây…", 55, indeterminate: true);
+                var ffmpeg = settings.FfmpegPath;
+
+                var stage = row.ReupStageFolder;
+                if (string.IsNullOrWhiteSpace(stage))
+                {
+                    stage = Path.Combine(Path.GetTempPath(), "tiktok_Omni_reup_" + Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(stage);
+                    row.ReupStageFolder = stage;
+                }
+
+                var hookWav = Path.Combine(stage, "visual_hook_3s.wav");
+                await VisualHookService.PrepareThreeSecondHookWavAsync(
+                    row.VisualHookSfxPath,
+                    hookWav,
+                    ffmpeg,
+                    LogVideoReup,
+                    CancellationToken.None).ConfigureAwait(true);
+                row.ReupHookAudioPath = hookWav;
+                row.HookAudioPath = row.VisualHookSfxPath;
+                row.LastHookDurationUsedSec = VisualHookService.HookDurationSeconds;
+                row.ReupHookDraft = string.Empty;
+                LogVideoReup("Video reup [2-3/4]: Hook SFX 3s đã sẵn sàng (bỏ qua Gemini + voiceover).");
+                SetVideoReupProgress("Bước 2-3/4: xong (SFX)", 75);
+            }
+            else if (string.IsNullOrWhiteSpace((row.ReupHookDraft ?? string.Empty).Trim()))
             {
                 if (!VideoReupRemixService.TryValidateHookGeminiStep(row, settings, out var geminiPre))
                 {
@@ -2412,7 +3120,7 @@ namespace tiktok_Omni
                     _geminiService,
                     LogVideoReup,
                     CancellationToken.None).ConfigureAwait(true);
-                RefreshVideoReupMusicCombo();
+                await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
                 if (!string.IsNullOrWhiteSpace(row.ReupSuggestedMusicFile) && cbVideoReupMusic?.Items.Contains(row.ReupSuggestedMusicFile) == true)
                 {
                     cbVideoReupMusic.SelectedItem = row.ReupSuggestedMusicFile;
@@ -2428,17 +3136,20 @@ namespace tiktok_Omni
                 SetVideoReupProgress("Bước 2/4: bỏ qua (đã có hook)", 50);
             }
 
-            row.RemixStatus = "Bước 3/4: Lyria hook…";
-            _videoReupBindingList?.ResetBindings();
-            SetVideoReupProgress("Bước 3/4: Lyria đọc hook…", 65, indeterminate: true);
-            await _videoReupRemixService.BuildLyriaHookAudioAsync(
-                row,
-                settings,
-                _affiliateHunter,
-                LogVideoReup,
-                CancellationToken.None).ConfigureAwait(true);
-            LogVideoReup("Video reup [3/4]: Lyria đã tạo âm thanh hook.");
-            SetVideoReupProgress("Bước 3/4: xong", 75);
+            if (!row.UseVisualHookSfx)
+            {
+                row.RemixStatus = "Bước 3/4: Voiceover hook…";
+                _videoReupBindingList?.ResetBindings();
+                SetVideoReupProgress("Bước 3/4: Voiceover đọc hook…", 65, indeterminate: true);
+                await _videoReupRemixService.BuildVoiceoverHookAudioAsync(
+                    row,
+                    settings,
+                    _affiliateHunter,
+                    LogVideoReup,
+                    CancellationToken.None).ConfigureAwait(true);
+                LogVideoReup("Video reup [3/4]: Voiceover đã tạo âm thanh hook.");
+                SetVideoReupProgress("Bước 3/4: xong", 75);
+            }
 
             SyncVideoReupMusicFromComboToRow(row);
             if (!VideoReupRemixService.TryValidateFinalRenderStep(row, settings, out var renderPre))
@@ -2457,6 +3168,8 @@ namespace tiktok_Omni
                 CancellationToken.None).ConfigureAwait(true);
             LogVideoReup("Video reup [4/4]: render xong.");
             SetVideoReupProgress("Hoàn tất", 100);
+            row.LastRemixOutputPath = result.OutputPath ?? string.Empty;
+            await RefreshReupPreviewForRowAsync(row, "Thành phẩm — bấm «Phát thành phẩm» hoặc double-click khung").ConfigureAwait(true);
             return result;
         }
 
@@ -2470,6 +3183,7 @@ namespace tiktok_Omni
 
             FlushVideoReupHookDraftFromEditor();
             FlushVideoReupVideoUrlFromEditor();
+            SyncVideoReupAudioModeFromUiToRow(row);
             var settings = await _configManager.LoadAsync().ConfigureAwait(true);
             LogVideoReup("Video reup — kiểm tra trước khi tạo:\r\n" + VideoReupRemixService.DescribePipelineBlockers(row, settings));
             SetVideoReupProgress("Bắt đầu pipeline 4 bước…", 5);
@@ -2481,6 +3195,7 @@ namespace tiktok_Omni
             try
             {
                 var result = await RunVideoReupFullPipelineAsync(row, settings).ConfigureAwait(true);
+                _renderHistoryStore.AddSuccess(row.VideoUrl);
                 row.LastRemixOutputPath = result.OutputPath ?? string.Empty;
                 row.LastSourceVideoDurationSec = result.SourceDurationSeconds;
                 row.LastRemixOutputVideoDurationSec = result.OutputFileDurationSeconds;
@@ -2489,7 +3204,23 @@ namespace tiktok_Omni
                 row.RemixLastError = string.Empty;
                 LogVideoReup($"Video reup: thành phẩm → {row.LastRemixOutputPath} (≈{result.OutputFileDurationSeconds:0.##}s).");
                 SetVideoReupProgress("Xong — xem cột MP4 remix", 100);
+                await RefreshReupPreviewForRowAsync(row, "Render xong — khung hình thành phẩm").ConfigureAwait(true);
                 _videoReupBindingList?.ResetBindings();
+
+                var forwardDialog = MessageBox.Show(
+                    this,
+                    "Video đã Render xong xịn xò! Ông có muốn đẩy thẳng sang Tab Đăng Tự Động luôn không?",
+                    "Chuyển tiếp cực mượt",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (forwardDialog == DialogResult.Yes)
+                {
+                    ForwardToAutoPost(
+                        row.LastRemixOutputPath,
+                        row.ProductName,
+                        row.Hashtags,
+                        cbRunningProfile?.SelectedItem?.ToString());
+                }
             }
             catch (Exception ex)
             {
@@ -2499,62 +3230,6 @@ namespace tiktok_Omni
                 LogVideoReup("Gợi ý:\r\n" + VideoReupRemixService.DescribePipelineBlockers(row, settings));
                 SetVideoReupProgress("lỗi — xem cột Lỗi và log", 0);
                 _videoReupBindingList?.ResetBindings();
-            }
-            finally
-            {
-                SetVideoReupCaptionButtonsEnabled(true);
-            }
-        }
-
-        private async void btnVideoReupRenderBatch_Click(object sender, EventArgs e)
-        {
-            var list = GetVideoReupSelectedRowsOrdered();
-            if (list.Count == 0)
-            {
-                LogVideoReup("Video reup render lô: chọn ít nhất một dòng trong bảng (Ctrl+click nhiều dòng).");
-                return;
-            }
-
-            FlushVideoReupHookDraftFromEditor();
-            FlushVideoReupVideoUrlFromEditor();
-            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            SetVideoReupCaptionButtonsEnabled(false);
-            var ok = 0;
-            var fail = 0;
-            try
-            {
-                for (var i = 0; i < list.Count; i++)
-                {
-                    var row = list[i];
-                    var batchPct = list.Count > 0 ? (int)Math.Round((double)i / list.Count * 100) : 0;
-                    SetVideoReupProgress($"Lô [{i + 1}/{list.Count}]: «{row.ProductName}»", batchPct);
-                    LogVideoReup($"Video reup lô [{i + 1}/{list.Count}]: «{row.ProductName}»…");
-                    LogVideoReup(VideoReupRemixService.DescribePipelineBlockers(row, settings));
-                    try
-                    {
-                        var result = await RunVideoReupFullPipelineAsync(row, settings).ConfigureAwait(true);
-                        row.LastRemixOutputPath = result.OutputPath ?? string.Empty;
-                        row.LastSourceVideoDurationSec = result.SourceDurationSeconds;
-                        row.LastRemixOutputVideoDurationSec = result.OutputFileDurationSeconds;
-                        row.LastHookDurationUsedSec = result.HookDurationSecondsUsed;
-                        row.RemixStatus = "Xong";
-                        row.RemixLastError = string.Empty;
-                        LogVideoReup($"Video reup lô: xong «{row.ProductName}» → {row.LastRemixOutputPath} (≈{result.OutputFileDurationSeconds:0.##}s).");
-                        ok++;
-                    }
-                    catch (Exception ex)
-                    {
-                        row.RemixStatus = "Lỗi";
-                        row.RemixLastError = ex.Message;
-                        LogVideoReup($"Video reup lô lỗi «{row.ProductName}»: {ex.Message}");
-                        fail++;
-                    }
-
-                    _videoReupBindingList?.ResetBindings();
-                }
-
-                LogVideoReup($"Video reup lô: hoàn tất — thành công {ok}, lỗi {fail} (tổng {list.Count} dòng).");
-                SetVideoReupProgress($"Lô xong — OK {ok}, lỗi {fail}", fail > 0 ? 0 : 100);
             }
             finally
             {
@@ -2922,22 +3597,10 @@ namespace tiktok_Omni
                 return;
             }
 
-            var keyword = string.IsNullOrWhiteSpace(_lastHuntKeyword)
-                ? (_affiliateKeywordsPlaceholderActive ? "default" : (txtAffiliateKeywords?.Text ?? "default"))
-                : _lastHuntKeyword;
-            var safeKeyword = SanitizePathSegment(keyword);
-            if (string.IsNullOrWhiteSpace(safeKeyword))
-            {
-                safeKeyword = "default";
-            }
-
-            var saveDir = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "downloads", safeKeyword));
-            Directory.CreateDirectory(saveDir);
-            Log("[Download] Thư mục lưu file: " + saveDir);
             RefreshAffiliateDownloadFolderHint();
             _affiliateDownloadingBatch = true;
             _affiliateDownloadBatchCts?.Dispose();
-            _affiliateDownloadBatchCts = new CancellationTokenSource();
+            _affiliateDownloadBatchCts = RegisterActiveJobCancellation();
             var token = _affiliateDownloadBatchCts.Token;
             var originalBtnText = btnDownloadSelectedAffiliate.Text;
             btnDownloadSelectedAffiliate.Enabled = true;
@@ -2956,6 +3619,11 @@ namespace tiktok_Omni
                     }
 
                     var url = (candidate.VideoUrl ?? string.Empty).Trim();
+                    var nick = ProfileScopedPaths.ResolveProfileFromCandidate(candidate);
+                    var saveDir = ProfileScopedPaths.GetDownloadsKeywordFolder(
+                        candidate,
+                        SanitizeAffiliateKeywordForFolder(candidate));
+                    Log($"[Download] ({i + 1}/{rows.Count}) nick «{nick}» → {saveDir}");
                     using (var rowCts = CancellationTokenSource.CreateLinkedTokenSource(token))
                     {
                         rowCts.CancelAfter(TimeSpan.FromMinutes(5));
@@ -2995,8 +3663,8 @@ namespace tiktok_Omni
             {
                 btnDownloadSelectedAffiliate.Text = originalBtnText;
                 _affiliateDownloadingBatch = false;
-                _affiliateDownloadBatchCts?.Dispose();
                 _affiliateDownloadBatchCts = null;
+                DisposeActiveJobCancellation();
                 btnHuntAffiliates.Enabled = true;
                 btnStopHunt.Enabled = false;
                 dgvAffiliateResults_SelectionChanged(dgvAffiliateResults, EventArgs.Empty);
@@ -3026,21 +3694,54 @@ namespace tiktok_Omni
         /// <summary>Thư mục con của «downloads» theo từ khoá quét (giống nút Tải video).</summary>
         private string GetAffiliateVideoSaveDirectory()
         {
-            var keyword = string.IsNullOrWhiteSpace(_lastHuntKeyword)
-                ? (_affiliateKeywordsPlaceholderActive ? "default" : (txtAffiliateKeywords?.Text ?? "default").Trim())
-                : _lastHuntKeyword.Trim();
-            if (string.IsNullOrWhiteSpace(keyword))
+            if (TryGetSingleSelectedAffiliateCandidate(out var selected))
             {
-                keyword = "default";
+                return ProfileScopedPaths.GetDownloadsKeywordFolder(
+                    selected,
+                    SanitizeAffiliateKeywordForFolder(selected));
             }
 
-            var safeKeyword = SanitizePathSegment(keyword);
-            if (string.IsNullOrWhiteSpace(safeKeyword))
+            if (_lastHuntKeywordEntries != null && _lastHuntKeywordEntries.Count == 1)
             {
-                safeKeyword = "default";
+                var entry = _lastHuntKeywordEntries[0];
+                return ProfileScopedPaths.GetDownloadsKeywordFolder(
+                    entry.ProfileName,
+                    SanitizePathSegment(entry.Keyword) ?? "default");
             }
 
-            return Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "downloads", safeKeyword));
+            var pendingEntries = ParseAffiliateKeywordEntriesFromUi();
+            if (pendingEntries.Count == 1)
+            {
+                var entry = pendingEntries[0];
+                return ProfileScopedPaths.GetDownloadsKeywordFolder(
+                    entry.ProfileName,
+                    SanitizePathSegment(entry.Keyword) ?? "default");
+            }
+
+            if (pendingEntries.Count > 1)
+            {
+                var profile = GetAffiliateHuntProfileFromUi();
+                return $"(nhiều từ khoá — lưu dưới Downloads\\{profile}\\<từ_khoá> — chọn 1 hàng để xem đường dẫn cụ thể)";
+            }
+
+            return "(chọn Profile + từ khoá trước khi quét — hoặc chọn 1 hàng trên lưới để xem đường dẫn)";
+        }
+
+        private bool TryGetSingleSelectedAffiliateCandidate(out AffiliateCandidate candidate)
+        {
+            candidate = null;
+            if (dgvAffiliateResults?.SelectedRows == null || dgvAffiliateResults.SelectedRows.Count != 1)
+            {
+                return false;
+            }
+
+            if (dgvAffiliateResults.SelectedRows[0]?.DataBoundItem is AffiliateCandidate c)
+            {
+                candidate = c;
+                return true;
+            }
+
+            return false;
         }
 
         private ToolTip _tipAffiliateDownloadPath;
@@ -3055,8 +3756,12 @@ namespace tiktok_Omni
             try
             {
                 var dir = GetAffiliateVideoSaveDirectory();
-                lnkAffiliateDownloadFolder.Tag = dir;
-                var shortPath = EllipsisMiddlePath(dir, 105);
+                lnkAffiliateDownloadFolder.Tag = Directory.Exists(dir) || dir.Contains(Path.DirectorySeparatorChar) || dir.Contains(':')
+                    ? dir
+                    : null;
+                var shortPath = dir.StartsWith("(", StringComparison.Ordinal)
+                    ? dir
+                    : EllipsisMiddlePath(dir, 105);
                 lnkAffiliateDownloadFolder.Text = "📁 Thư mục tải video (bấm để mở): " + shortPath;
                 if (_tipAffiliateDownloadPath == null)
                 {
@@ -3081,9 +3786,17 @@ namespace tiktok_Omni
         private void LnkAffiliateDownloadFolder_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
             var dir = (lnkAffiliateDownloadFolder?.Tag as string)?.Trim();
-            if (string.IsNullOrWhiteSpace(dir))
+            if (string.IsNullOrWhiteSpace(dir) || dir.StartsWith("(", StringComparison.Ordinal))
             {
-                dir = GetAffiliateVideoSaveDirectory();
+                if (!TryGetSingleSelectedAffiliateCandidate(out var selected))
+                {
+                    Log("[Affiliate] Chọn đúng 1 dòng trên lưới để mở thư mục tải theo nick của dòng đó.");
+                    return;
+                }
+
+                dir = ProfileScopedPaths.GetDownloadsKeywordFolder(
+                    selected,
+                    SanitizeAffiliateKeywordForFolder(selected));
             }
 
             try
@@ -3141,7 +3854,7 @@ namespace tiktok_Omni
                 btnDownloadSelectedAffiliate.Enabled = videoSelected > 0 && !_affiliateDownloadingBatch;
             }
 
-            RefreshAffiliateDeepDiveButtonState();
+            RefreshAffiliateToolbarButtons();
         }
 
         private async Task<bool> OpenAffiliateRowAsync(DataGridViewRow row)
@@ -3267,7 +3980,6 @@ namespace tiktok_Omni
             var errorRow = _affiliateDeepDiveErrorColumnVisible
                 && candidate != null
                 && !string.IsNullOrWhiteSpace(candidate.LastDeepDiveError);
-
             if (string.Equals(prop, "ProductName", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(prop, "SourceKeyword", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(prop, "Hashtags", StringComparison.OrdinalIgnoreCase)
@@ -3314,7 +4026,7 @@ namespace tiktok_Omni
                 var text = e.Value?.ToString();
                 if (string.IsNullOrWhiteSpace(text))
                 {
-                    e.Value = "(Chưa phân tích — bấm 🔍 Deep Dive)";
+                    e.Value = "(Chưa có script — Sinh Script / Deep Dive)";
                     e.FormattingApplied = true;
                     e.CellStyle.ForeColor = Color.Gray;
                     e.CellStyle.Font = new Font(dgvAffiliateResults.Font, FontStyle.Italic);
@@ -3409,10 +4121,28 @@ namespace tiktok_Omni
             {
                 long n = 0;
                 if (e.Value != null) long.TryParse(e.Value.ToString(), out n);
-                if (n <= 0 && (candidate == null || candidate.MetricsCapturedAtUtc == DateTime.MinValue))
+                var pendingMetrics = candidate != null
+                                     && candidate.MetricsCapturedAtUtc == DateTime.MinValue
+                                     && string.IsNullOrWhiteSpace(candidate.LastMetricsError);
+                var metricsFailed = candidate != null && !string.IsNullOrWhiteSpace(candidate.LastMetricsError);
+
+                if (n <= 0 && pendingMetrics && (_affiliateAutoEnrichRunning || _huntCancellation != null))
+                {
+                    e.Value = "⏳";
+                    e.CellStyle.ForeColor = Color.FromArgb(150, 170, 210);
+                    row.Cells[e.ColumnIndex].ToolTipText = "Đang lấy số liệu TikWM…";
+                }
+                else if (n <= 0 && metricsFailed)
+                {
+                    e.Value = "!";
+                    e.CellStyle.ForeColor = Color.FromArgb(255, 170, 120);
+                    row.Cells[e.ColumnIndex].ToolTipText = candidate.LastMetricsError;
+                }
+                else if (n <= 0 && (candidate == null || candidate.MetricsCapturedAtUtc == DateTime.MinValue))
                 {
                     e.Value = "—";
                     e.CellStyle.ForeColor = Color.DimGray;
+                    row.Cells[e.ColumnIndex].ToolTipText = "Chưa có số liệu — bật «Tự động enrich» hoặc chuột phải → Refresh số liệu.";
                 }
                 else
                 {
@@ -3517,35 +4247,6 @@ namespace tiktok_Omni
             return ((int)(diff.TotalDays / 365)) + " năm trước";
         }
 
-        private void btnPushHighQualityToAiVideoGen_Click(object sender, EventArgs e)
-        {
-            var source = _affiliateAllResults ?? new List<AffiliateCandidate>();
-            var threshold = (int)(numAffiliateMinSafety?.Value ?? 75);
-            var highQuality = source
-                .Where(x => x != null)
-                .Where(x => !string.IsNullOrWhiteSpace(x.ImageUrl))
-                .Where(x => !string.IsNullOrWhiteSpace(x.Price) && !string.Equals(x.Price.Trim(), "N/A", StringComparison.OrdinalIgnoreCase))
-                .Where(x => x.SafetyScore >= threshold)
-                .ToList();
-
-            if (highQuality.Count == 0)
-            {
-                Log($"Không có sản phẩm high-quality (score>={threshold}, có ảnh + có giá).");
-                return;
-            }
-
-            _aiVideoGenInputBuffer = highQuality.Select(item => new AiVideoGenInputItem
-            {
-                ProductName = (item.ProductName ?? string.Empty).Trim(),
-                Price = (item.Price ?? string.Empty).Trim(),
-                ImageUrl = (item.ImageUrl ?? string.Empty).Trim()
-            }).ToList();
-
-            Log($"Đã push {highQuality.Count} sản phẩm high-quality sang AI Video Gen.");
-            RefreshAiVideoGenInputGrid();
-            tabMain.SelectedTab = tabAiVideoGen;
-        }
-
         private void RefreshAffiliateGridByQualityFilter()
         {
             if (_affiliateBindingList == null)
@@ -3574,11 +4275,30 @@ namespace tiktok_Omni
                 rows = source.Where(x => x != null).ToList();
             }
 
+            var huntProfileScope = GetAffiliateHuntProfileFromUi();
+            var gridProfileFilter = !string.IsNullOrWhiteSpace(huntProfileScope)
+                ? huntProfileScope
+                : _affiliateGridProfileScope;
+            if (!string.IsNullOrWhiteSpace(gridProfileFilter))
+            {
+                rows = rows
+                    .Where(x => string.Equals(
+                        ProfileScopedPaths.ResolveProfileName(x.ProfileName),
+                        gridProfileFilter,
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
             SortAffiliateCandidatesByViewsDescending(rows);
 
             foreach (var item in rows)
             {
                 _affiliateBindingList.Add(item);
+            }
+
+            if (rows.Count == 0 && source.Count > 0 && !string.IsNullOrWhiteSpace(gridProfileFilter))
+            {
+                Log($"[Affiliate] Có {source.Count} dòng trong bộ nhớ nhưng không khớp profile lưới «{gridProfileFilter}» — chọn đúng Profile trên dòng trên cùng.");
             }
         }
 
@@ -3614,31 +4334,10 @@ namespace tiktok_Omni
 
 
 
-        private void RefreshAiVideoGenInputGrid()
-        {
-            if (_aiVideoGenBindingList == null)
-            {
-                return;
-            }
-
-            _aiVideoGenBindingList.Clear();
-            foreach (var item in _aiVideoGenInputBuffer)
-            {
-                _aiVideoGenBindingList.Add(new AiVideoGenInputItem
-                {
-                    ProductName = item.ProductName,
-                    Price = item.Price,
-                    ImageUrl = item.ImageUrl
-                });
-            }
-
-            _aiVideoScriptBindingList?.Clear();
-            txtAiVideoGenPrompt.Text = string.Empty;
-        }
-
         private async void btnGenerateGeminiPrompt_Click(object sender, EventArgs e)
         {
-            if (_aiVideoGenInputBuffer == null || _aiVideoGenInputBuffer.Count == 0)
+            var slideshowItems = GetSlideshowItemsForRender();
+            if (slideshowItems.Count == 0)
             {
                 Log("AI Video Gen: chưa có dữ liệu sản phẩm. Hãy bấm 'Đẩy sang AI Video Gen' từ tab Affiliate Hunter.");
                 return;
@@ -3654,30 +4353,16 @@ namespace tiktok_Omni
                     return;
                 }
 
-                var lines = new List<string>();
-                for (var i = 0; i < _aiVideoGenInputBuffer.Count; i++)
-                {
-                    var x = _aiVideoGenInputBuffer[i];
-                    lines.Add($"{i + 1}. Tên: {x.ProductName}; Giá: {x.Price}; Ảnh: {x.ImageUrl}");
-                }
-                var productLines = string.Join(Environment.NewLine, lines);
-
-                var prompt = "Bạn là biên kịch TikTok chuyên viết kịch bản bán hàng theo dạng kể chuyện. " +
-                             "Hãy viết DUY NHẤT 1 kịch bản tiếng Việt dài khoảng 30-45 giây, dựa trên danh sách sản phẩm bên dưới. " +
-                             "Yêu cầu bắt buộc: " +
-                             "1) Mở đầu có tình huống đời thường gây tò mò trong 2-3 câu đầu; " +
-                             "2) Có yếu tố hài hước HOẶC kịch tính nhẹ, tự nhiên, không lố; " +
-                             "3) Lồng được lợi ích chính của sản phẩm vào mạch chuyện; " +
-                             "4) Có câu chốt CTA mềm mại ở cuối; " +
-                             "5) Trình bày thành đoạn thoại liền mạch, dễ đọc voice-over, không dùng markdown, không đánh số mục. " +
-                             "Danh sách sản phẩm:" + Environment.NewLine + productLines;
-
                 var gemini = new GeminiService();
-                var script = await gemini.GenerateScriptAsync(
-                    prompt,
+                var script = await gemini.GenerateAffiliateExperienceScriptAsync(
+                    "slideshow",
+                    slideshowItems,
+                    slideshowItems[0],
                     settings.AiProvider,
                     settings.AiApiKey,
-                    settings.AiModel);
+                    settings.AiModel,
+                    CancellationToken.None,
+                    GetSelectedGeminiStyleTemplate()).ConfigureAwait(true);
 
                 txtAiVideoGenPrompt.Text = script ?? string.Empty;
                 Log("AI Video Gen: đã tạo prompt/script bằng Gemini.");
@@ -3708,64 +4393,42 @@ namespace tiktok_Omni
 
         private async void btnStartAutoPost_Click(object sender, EventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(txtAutoPostFolder.Text) || !Directory.Exists(txtAutoPostFolder.Text))
+            ClearAutoPostValidationHighlights();
+            if (!ValidateAutoPostContext(out var contextError))
             {
-                Log("Auto Post: thư mục video không hợp lệ.");
+                Log("Auto Post: " + contextError);
+                ApplyAutoPostValidationHighlights(CollectAutoPostValidationIssues());
+                if (!string.IsNullOrWhiteSpace(contextError))
+                {
+                    MessageBox.Show(this, contextError, "Đăng đa kênh", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+
                 return;
             }
 
-            var explicitVideoPath = GetSelectedAutoPostVideoFullPath();
-            if (string.IsNullOrWhiteSpace(explicitVideoPath) &&
-                !EnumerateVideoFilesInFolder(txtAutoPostFolder.Text.Trim()).Any())
+            if (!TryBuildOmnichannelAutoPostPlan(out var plan, out var planError))
             {
-                Log("Auto Post: không có file video (.mp4, .mov, …) trong thư mục.");
+                Log("Auto Post: " + planError);
+                if (!string.IsNullOrWhiteSpace(planError))
+                {
+                    MessageBox.Show(this, planError, "Đăng đa kênh", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
                 return;
             }
 
-            if (chkAutoPostVideoApproved != null && !chkAutoPostVideoApproved.Checked)
-            {
-                Log("Auto Post: hãy xem video và tick \"Tôi đã xem và duyệt video\" trước khi đăng.");
-                MessageBox.Show(
-                    this,
-                    "Vui lòng xem video (nút \"Xem video\") và tick xác nhận đã duyệt trước khi đăng.",
-                    "Đăng tự động",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            var captionDraft = txtAutoPostCaption?.Text ?? string.Empty;
-            var finalCaption = BuildFinalAutoPostCaptionBody(captionDraft, txtAutoPostHashtags?.Text ?? string.Empty);
-            if (string.IsNullOrWhiteSpace(finalCaption))
-            {
-                Log("Auto Post: chưa có caption — hãy tạo bằng Gemini hoặc nhập tay.");
-                return;
-            }
-
-            var uploadOnly = chkAutoPostUploadOnly?.Checked ?? false;
-
-            var policySettings = await _configManager.LoadAsync();
-            var profile = cbAutoPostProfile?.SelectedItem?.ToString() ?? string.Empty;
-            var captionPreview = BuildAutoPostCaptionPreview(
-                txtAutoPostFolder.Text.Trim(),
-                txtAutoPostHashtags.Text.Trim(),
-                explicitVideoPath,
-                captionDraft.Trim());
-            var videoFingerprintSource = BuildAutoPostFingerprintSource(
-                txtAutoPostFolder.Text.Trim(),
-                captionPreview,
-                txtAutoPostHashtags.Text.Trim(),
-                profile,
-                explicitVideoPath);
-            var postFingerprint = DuplicateGuardManager.ComputeSha256Fingerprint(videoFingerprintSource);
-            var isDuplicatePost = await _duplicateGuardManager.ExistsRecentAsync("post", postFingerprint, TimeSpan.FromDays(7));
-            if (isDuplicatePost)
+            if (await _duplicateGuardManager.ExistsRecentAsync("post", plan.PostFingerprint, TimeSpan.FromDays(7)).ConfigureAwait(true))
             {
                 Log("[SAFEGUARD] Phát hiện nội dung Auto Post trùng trong 7 ngày gần đây. Đã chặn để tránh spam.");
                 return;
             }
 
-            var postRisk = _safetyScoreService.ScoreAutoPost(captionPreview, txtAutoPostHashtags.Text.Trim(), txtAutoPostFolder.Text.Trim(), profile);
+            var policySettings = await _configManager.LoadAsync().ConfigureAwait(true);
+            var postRisk = _safetyScoreService.ScoreAutoPost(
+                plan.CombinedCaptionPreview,
+                plan.TikTokHashtags,
+                plan.VideoFolder,
+                plan.Profile);
             var forcePrePostApproval = policySettings.AlwaysRequirePrePostApproval ?? true;
             var postScoreThreshold = policySettings.BlockPostingSafetyScoreBelow;
             var mustApprovePost = forcePrePostApproval || postRisk.Score < postScoreThreshold || postRisk.RequiresManualApproval;
@@ -3775,31 +4438,49 @@ namespace tiktok_Omni
                 {
                     JobType = ApprovalJobType.AutoPost,
                     Status = ApprovalStatus.Pending,
-                    Profile = profile,
-                    Title = "Auto Post - Requires Approval",
+                    Profile = plan.Profile,
+                    Title = "Auto Post đa kênh - Requires Approval",
                     PayloadJson = JsonConvert.SerializeObject(new AutoPostApprovalPayload
                     {
-                        VideoFolder = txtAutoPostFolder.Text.Trim(),
-                        Hashtags = txtAutoPostHashtags.Text.Trim(),
-                        Profile = profile,
-                        VideoFilePath = explicitVideoPath,
-                        CaptionFull = finalCaption,
-                        UploadOnlyNoPublish = uploadOnly
+                        VideoFolder = plan.VideoFolder,
+                        Hashtags = plan.TikTokHashtags,
+                        Profile = ProfileScopedPaths.ResolveProfileName(plan.Profile),
+                        ProfileName = ProfileScopedPaths.ResolveProfileName(plan.Profile),
+                        VideoFilePath = plan.VideoFilePath,
+                        CaptionFull = plan.TikTokCaption,
+                        UploadOnlyNoPublish = plan.TikTokUploadOnly,
+                        PostTikTok = plan.PostTikTok,
+                        PostFacebook = plan.PostFacebook,
+                        PostYouTube = plan.PostYouTube,
+                        FacebookCaption = plan.FacebookCaption,
+                        FacebookHashtags = plan.FacebookHashtags,
+                        FacebookAttachShopeeLink = plan.FacebookAttachShopeeLink,
+                        FacebookShopeeLink = OmnichannelAutoPostFields.NormalizeLink(plan.FacebookShopeeLink),
+                        YouTubeTitle = plan.YouTubeTitle,
+                        YouTubeDescription = plan.YouTubeDescription,
+                        AffiliateLink = OmnichannelAutoPostFields.NormalizeLink(plan.AffiliateLink),
+                        ProductId = OmnichannelAutoPostFields.NormalizeLink(plan.ProductId)
                     }),
                     SafetyScore = postRisk.Score,
                     RequiresManualApproval = true,
                     RiskReasons = string.Join("; ", postRisk.Reasons),
-                    OriginalPreview = captionPreview
-                });
-                Log($"[APPROVAL] Auto Post đã đưa vào hàng duyệt (score {postRisk.Score}).");
+                    OriginalPreview = plan.CombinedCaptionPreview,
+                    CanAttachAffiliate = false,
+                    TargetAffiliateLink = OmnichannelAutoPostFields.NormalizeLink(plan.AffiliateLink),
+                    TargetProductId = OmnichannelAutoPostFields.NormalizeLink(plan.ProductId),
+                    AffiliateLink = OmnichannelAutoPostFields.NormalizeLink(plan.AffiliateLink),
+                    ProductId = OmnichannelAutoPostFields.NormalizeLink(plan.ProductId)
+                }).ConfigureAwait(true);
+                Log($"[APPROVAL] Auto Post đa kênh đã đưa vào hàng duyệt (score {postRisk.Score}).");
                 if (policySettings.AutoRunApprovedQueue ?? false)
                 {
-                    await AutoRunApprovedQueueItemsAsync();
+                    await AutoRunApprovedQueueItemsAsync().ConfigureAwait(true);
                 }
                 else
                 {
                     btnOpenApprovalQueue_Click(this, EventArgs.Empty);
                 }
+
                 return;
             }
 
@@ -3807,60 +4488,278 @@ namespace tiktok_Omni
             _autoPostCancellation?.Dispose();
             _autoPostCancellation = new CancellationTokenSource();
 
+            var policyForPost = await _configManager.LoadAsync().ConfigureAwait(true);
+            var postPayload = new AutoPostJobPayload
+            {
+                VideoFolder = plan.VideoFolder,
+                VideoFilePath = plan.VideoFilePath,
+                Profile = plan.Profile,
+                PostTikTok = plan.PostTikTok,
+                PostFacebook = plan.PostFacebook,
+                PostYouTube = plan.PostYouTube,
+                TikTokCaption = plan.TikTokCaption,
+                TikTokHashtags = plan.TikTokHashtags,
+                TikTokUploadOnly = plan.TikTokUploadOnly,
+                FacebookCaption = plan.FacebookCaption,
+                FacebookHashtags = plan.FacebookHashtags,
+                FacebookAttachShopeeLink = plan.FacebookAttachShopeeLink,
+                FacebookShopeeLink = OmnichannelAutoPostFields.NormalizeLink(plan.FacebookShopeeLink),
+                YouTubeTitle = plan.YouTubeTitle,
+                YouTubeDescription = plan.YouTubeDescription,
+                PostFingerprint = plan.PostFingerprint,
+                CombinedCaptionPreview = plan.CombinedCaptionPreview,
+                StorageRootPath = policyForPost.StorageRootPath ?? string.Empty,
+                VideoTypeFolder = GetSelectedAutoPostVideoType().ToString(),
+                AffiliateLink = OmnichannelAutoPostFields.NormalizeLink(plan.AffiliateLink),
+                ProductId = OmnichannelAutoPostFields.NormalizeLink(plan.ProductId)
+            };
+
+            var postJob = new OmniJob
+            {
+                Kind = OmniJobKind.AutoPost,
+                Title = "Auto Post đa kênh",
+                ProfileName = ProfileScopedPaths.ResolveProfileName(plan.Profile),
+                PayloadJson = JsonConvert.SerializeObject(postPayload),
+                MaxRetries = 2,
+                Tag = _autoPostCancellation
+            };
+            OmniJobMetadataHelper.ApplyAffiliateFields(postJob, plan.AffiliateLink, plan.ProductId);
+            if (_autoPostInboxJob != null)
+            {
+                OmniJobMetadataHelper.CopyAffiliateFields(_autoPostInboxJob, postJob);
+            }
+            _activeAutoPostJob = postJob;
+            _globalJobQueue.Enqueue(postJob);
+            Log("[JobQueue] Auto Post đã vào hàng đợi.");
+        }
+
+        private bool TryBuildOmnichannelAutoPostPlan(out OmnichannelAutoPostPlan plan, out string errorMessage)
+        {
+            plan = null;
+            errorMessage = string.Empty;
+
+            var postTikTok = chkAutoPostEnableTikTok?.Checked ?? false;
+            var postFacebook = chkAutoPostEnableFacebook?.Checked ?? false;
+            var postYouTube = chkAutoPostEnableYouTube?.Checked ?? false;
+            if (!postTikTok && !postFacebook && !postYouTube)
+            {
+                errorMessage = "Chưa bật kênh nào — tick «Bật đăng lên kênh này» ở TikTok, Facebook hoặc YouTube.";
+                return false;
+            }
+
+            var videoFolder = (txtAutoPostFolder?.Text ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(videoFolder) || !Directory.Exists(videoFolder))
+            {
+                errorMessage = "Thư mục video không hợp lệ.";
+                return false;
+            }
+
+            var explicitVideoPath = GetSelectedAutoPostVideoFullPath();
+            if (string.IsNullOrWhiteSpace(explicitVideoPath) &&
+                !EnumerateVideoFilesInFolder(videoFolder).Any())
+            {
+                errorMessage = "Không có file video (.mp4, .mov, …) trong thư mục.";
+                return false;
+            }
+
+            if (chkAutoPostVideoApproved != null && !chkAutoPostVideoApproved.Checked)
+            {
+                errorMessage = "Hãy xem video và tick «Tôi đã xem và duyệt video» trước khi đăng.";
+                return false;
+            }
+
+            var tikTokCaption = BuildFinalAutoPostCaptionBody(
+                txtAutoPostCaption?.Text ?? string.Empty,
+                txtAutoPostHashtags?.Text ?? string.Empty);
+            var facebookCaption = BuildFinalAutoPostCaptionBody(
+                txtAutoPostFbCaption?.Text ?? string.Empty,
+                txtAutoPostFbHashtags?.Text ?? string.Empty);
+            var youtubeTitle = (txtAutoPostYtTitle?.Text ?? string.Empty).Trim();
+            var youtubeDescription = (txtAutoPostYtDescription?.Text ?? string.Empty).Trim();
+
+            if (postTikTok && string.IsNullOrWhiteSpace(tikTokCaption))
+            {
+                errorMessage = "TikTok: chưa có caption — tạo bằng Gemini hoặc nhập tay.";
+                return false;
+            }
+
+            if (postFacebook && string.IsNullOrWhiteSpace(facebookCaption))
+            {
+                errorMessage = "Facebook: chưa có caption — nhập hoặc dùng AI viết caption FB.";
+                return false;
+            }
+
+            if (postYouTube && string.IsNullOrWhiteSpace(youtubeTitle))
+            {
+                errorMessage = "YouTube: chưa có tiêu đề ngắn (< 60 ký tự).";
+                return false;
+            }
+
+            var profile = ProfileScopedPaths.ResolveProfileName(cbAutoPostProfile?.SelectedItem?.ToString());
             try
             {
-                Log("Auto Post started...");
-                await _tikTokAutomation.AutoPostUpToProductLinkAsync(
-                    txtAutoPostFolder.Text.Trim(),
-                    txtAutoPostHashtags.Text.Trim(),
+                OneClickPipelineService.ValidateAutoPostInboxOnly(
+                    _storageRootPathCache,
                     profile,
-                    _autoPostCancellation.Token,
-                    Log,
-                    explicitVideoPath,
-                    finalCaption,
-                    clickPublish: !uploadOnly);
-                await _duplicateGuardManager.AddAsync(new DuplicateGuardRecord
-                {
-                    Type = "post",
-                    Fingerprint = postFingerprint,
-                    Profile = profile,
-                    Summary = captionPreview
-                });
-                if (uploadOnly)
-                {
-                    Log("Đã upload xong, mời ông gắn link Affiliate tay và nhấn Đăng");
-                    MessageBox.Show(
-                        this,
-                        "Đã upload xong, mời ông gắn link Affiliate tay và nhấn Đăng.",
-                        "Đăng tự động",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                }
-                else
-                {
-                    Log("Luồng đăng đã chạy — kiểm tra trạng thái video trên TikTok.");
-                    MessageBox.Show(
-                        this,
-                        "Đã gửi lệnh đăng bài (nếu có captcha, hãy xử lý trong trình duyệt rồi bot sẽ tiếp tục). Kiểm tra kết quả trên TikTok.",
-                        "Đăng tự động",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                Log("Auto Post stopped.");
+                    videoFolder,
+                    explicitVideoPath);
             }
             catch (Exception ex)
             {
-                Log("Auto Post failed: " + ex.Message);
+                errorMessage = ex.Message;
+                return false;
             }
-            finally
+
+            var tikTokHashtags = (txtAutoPostHashtags?.Text ?? string.Empty).Trim();
+            var facebookHashtags = (txtAutoPostFbHashtags?.Text ?? string.Empty).Trim();
+            var captionDraft = (txtAutoPostCaption?.Text ?? string.Empty).Trim();
+
+            var previewParts = new List<string>();
+            if (postTikTok)
             {
-                btnStartAutoPost.Enabled = true;
-                _autoPostCancellation?.Dispose();
-                _autoPostCancellation = null;
+                previewParts.Add("[TikTok] " + BuildAutoPostCaptionPreview(videoFolder, tikTokHashtags, explicitVideoPath, captionDraft));
             }
+
+            if (postFacebook)
+            {
+                previewParts.Add("[Facebook] " + facebookCaption);
+            }
+
+            if (postYouTube)
+            {
+                previewParts.Add("[YouTube] " + youtubeTitle + " | " + youtubeDescription);
+            }
+
+            var combinedPreview = string.Join(" || ", previewParts);
+            var fingerprintSource = BuildAutoPostFingerprintSource(
+                videoFolder,
+                combinedPreview,
+                tikTokHashtags + "|" + facebookHashtags + "|" + youtubeTitle,
+                profile,
+                explicitVideoPath) +
+                "|tiktok=" + postTikTok +
+                "|facebook=" + postFacebook +
+                "|youtube=" + postYouTube;
+
+            plan = new OmnichannelAutoPostPlan
+            {
+                VideoFolder = videoFolder,
+                VideoFilePath = explicitVideoPath,
+                Profile = profile,
+                PostTikTok = postTikTok,
+                PostFacebook = postFacebook,
+                PostYouTube = postYouTube,
+                TikTokCaption = tikTokCaption,
+                TikTokHashtags = tikTokHashtags,
+                TikTokUploadOnly = chkAutoPostUploadOnly?.Checked ?? false,
+                FacebookCaption = facebookCaption,
+                FacebookHashtags = facebookHashtags,
+                FacebookAttachShopeeLink = ResolveAutoPostFacebookAttachShopeeForPlan(),
+                FacebookShopeeLink = ResolveAutoPostFacebookShopeeLinkForPlan(),
+                YouTubeTitle = youtubeTitle,
+                YouTubeDescription = youtubeDescription,
+                CombinedCaptionPreview = combinedPreview,
+                PostFingerprint = DuplicateGuardManager.ComputeSha256Fingerprint(fingerprintSource),
+                AffiliateLink = ResolveAutoPostAffiliateLinkForPlan(),
+                ProductId = ResolveAutoPostProductIdForPlan()
+            };
+
+            return true;
+        }
+
+        private string ResolveAutoPostAffiliateLinkForPlan()
+        {
+            if (chkEnableAffiliateLink != null && !chkEnableAffiliateLink.Checked)
+            {
+                return string.Empty;
+            }
+
+            var manualLink = OmnichannelAutoPostFields.NormalizeLink(txtAutoPostAffiliateLink?.Text);
+            if (!string.IsNullOrWhiteSpace(manualLink))
+            {
+                return manualLink;
+            }
+
+            return OmnichannelAutoPostFields.NormalizeLink(_autoPostInboxJob?.AffiliateLink);
+        }
+
+        private string ResolveAutoPostProductIdForPlan()
+        {
+            if (chkEnableAffiliateLink != null && !chkEnableAffiliateLink.Checked)
+            {
+                return string.Empty;
+            }
+
+            return OmnichannelAutoPostFields.NormalizeLink(_autoPostInboxJob?.ProductId);
+        }
+
+        private bool ResolveAutoPostFacebookAttachShopeeForPlan()
+        {
+            return chkAutoPostFbAttachShopee?.Checked ?? false;
+        }
+
+        private string ResolveAutoPostFacebookShopeeLinkForPlan()
+        {
+            if (chkAutoPostFbAttachShopee == null || !chkAutoPostFbAttachShopee.Checked)
+            {
+                return string.Empty;
+            }
+
+            var fbLink = OmnichannelAutoPostFields.NormalizeLink(txtAutoPostFbShopeeLink?.Text);
+            if (OmnichannelAutoPostFields.IsShopeeProductUrl(fbLink))
+            {
+                return fbLink;
+            }
+
+            var tikTokLink = ResolveAutoPostAffiliateLinkForPlan();
+            if (OmnichannelAutoPostFields.IsShopeeProductUrl(tikTokLink))
+            {
+                return tikTokLink;
+            }
+
+            return string.Empty;
+        }
+
+        private async Task<string> RunOmnichannelAutoPostSequenceAsync(OmnichannelAutoPostPlan plan, CancellationToken cancellationToken)
+        {
+            if (plan == null)
+            {
+                throw new ArgumentNullException(nameof(plan));
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(false);
+            var payload = new AutoPostJobPayload
+            {
+                VideoFolder = plan.VideoFolder,
+                VideoFilePath = plan.VideoFilePath,
+                Profile = plan.Profile,
+                PostTikTok = plan.PostTikTok,
+                PostFacebook = plan.PostFacebook,
+                PostYouTube = plan.PostYouTube,
+                TikTokCaption = plan.TikTokCaption,
+                TikTokHashtags = plan.TikTokHashtags,
+                TikTokUploadOnly = plan.TikTokUploadOnly,
+                FacebookCaption = plan.FacebookCaption,
+                FacebookHashtags = plan.FacebookHashtags,
+                FacebookAttachShopeeLink = plan.FacebookAttachShopeeLink,
+                FacebookShopeeLink = OmnichannelAutoPostFields.NormalizeLink(plan.FacebookShopeeLink),
+                YouTubeTitle = plan.YouTubeTitle,
+                YouTubeDescription = plan.YouTubeDescription,
+                PostFingerprint = plan.PostFingerprint,
+                CombinedCaptionPreview = plan.CombinedCaptionPreview,
+                StorageRootPath = settings.StorageRootPath ?? string.Empty,
+                AffiliateLink = OmnichannelAutoPostFields.NormalizeLink(plan.AffiliateLink),
+                ProductId = OmnichannelAutoPostFields.NormalizeLink(plan.ProductId)
+            };
+
+            if (chkEnableAffiliateLink != null && !chkEnableAffiliateLink.Checked)
+            {
+                payload.AffiliateLink = string.Empty;
+                payload.ProductId = string.Empty;
+            }
+
+            return await _socialAutomation.RunOmnichannelAutoPostAsync(payload, cancellationToken, Log)
+                .ConfigureAwait(false);
         }
 
         private async void btnGenerateGeminiCaption_Click(object sender, EventArgs e)
@@ -3911,6 +4810,126 @@ namespace tiktok_Omni
             }
         }
 
+        private async void btnGenerateGeminiCaptionFb_Click(object sender, EventArgs e)
+        {
+            var explicitPath = GetSelectedAutoPostVideoFullPath();
+            if (string.IsNullOrWhiteSpace(explicitPath) || !File.Exists(explicitPath))
+            {
+                Log("Caption Facebook: chọn file video trong danh sách trước.");
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync();
+            if (string.IsNullOrWhiteSpace(settings.AiApiKey))
+            {
+                Log("Caption Facebook: chưa cấu hình AI API Key trong Cài đặt.");
+                return;
+            }
+
+            btnGenerateGeminiCaptionFb.Enabled = false;
+            try
+            {
+                Log("Caption Facebook (Gemini): đang tạo...");
+                var styleKey = GetSelectedAutoPostCaptionStyleKey();
+                var text = await _geminiService.GenerateTikTokCaptionFromVideoAsync(
+                    explicitPath,
+                    styleKey,
+                    settings.AiProvider,
+                    settings.AiApiKey,
+                    settings.AiModel,
+                    CancellationToken.None).ConfigureAwait(true);
+
+                if (txtAutoPostFbCaption != null)
+                {
+                    txtAutoPostFbCaption.Text = text ?? string.Empty;
+                }
+
+                Log(string.IsNullOrWhiteSpace(text)
+                    ? "Caption Facebook: kết quả trống."
+                    : "Caption Facebook: đã điền — chỉnh lại cho phù hợp Reels/Page nếu cần.");
+            }
+            catch (Exception ex)
+            {
+                Log("Caption Facebook lỗi: " + ex.Message);
+            }
+            finally
+            {
+                btnGenerateGeminiCaptionFb.Enabled = true;
+            }
+        }
+
+        private async void btnGenerateGeminiCaptionYoutube_Click(object sender, EventArgs e)
+        {
+            var explicitPath = GetSelectedAutoPostVideoFullPath();
+            if (string.IsNullOrWhiteSpace(explicitPath) || !File.Exists(explicitPath))
+            {
+                Log("YouTube SEO: chọn file video trong danh sách trước.");
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync();
+            if (string.IsNullOrWhiteSpace(settings.AiApiKey))
+            {
+                Log("YouTube SEO: chưa cấu hình AI API Key trong Cài đặt.");
+                return;
+            }
+
+            btnGenerateGeminiCaptionYoutube.Enabled = false;
+            try
+            {
+                Log("YouTube SEO (Gemini): đang tạo tiêu đề & mô tả...");
+                var styleKey = GetSelectedAutoPostCaptionStyleKey();
+                var text = await _geminiService.GenerateTikTokCaptionFromVideoAsync(
+                    explicitPath,
+                    styleKey,
+                    settings.AiProvider,
+                    settings.AiApiKey,
+                    settings.AiModel,
+                    CancellationToken.None).ConfigureAwait(true);
+
+                ApplyYoutubeShortsMetadataFromGemini(text);
+                Log(string.IsNullOrWhiteSpace(text)
+                    ? "YouTube SEO: kết quả trống."
+                    : "YouTube SEO: đã tách tiêu đề (<60 ký tự) và mô tả — hãy chỉnh sửa.");
+            }
+            catch (Exception ex)
+            {
+                Log("YouTube SEO lỗi: " + ex.Message);
+            }
+            finally
+            {
+                btnGenerateGeminiCaptionYoutube.Enabled = true;
+            }
+        }
+
+        private void ApplyYoutubeShortsMetadataFromGemini(string raw)
+        {
+            if (txtAutoPostYtTitle == null || txtAutoPostYtDescription == null)
+            {
+                return;
+            }
+
+            var normalized = (raw ?? string.Empty).Replace("\r\n", "\n").Trim();
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                txtAutoPostYtTitle.Clear();
+                txtAutoPostYtDescription.Clear();
+                return;
+            }
+
+            var lines = normalized.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var titleSource = lines.Length > 0 ? lines[0].Trim() : normalized;
+            if (titleSource.Length > 60)
+            {
+                titleSource = titleSource.Substring(0, 60).TrimEnd();
+            }
+
+            txtAutoPostYtTitle.Text = titleSource;
+            txtAutoPostYtDescription.Text = lines.Length > 1
+                ? string.Join(Environment.NewLine, lines.Skip(1).Select(l => l.Trim()))
+                : normalized;
+        }
+
         private void btnPreviewAutoPostVideo_Click(object sender, EventArgs e)
         {
             var path = GetSelectedAutoPostVideoFullPath();
@@ -3940,7 +4959,9 @@ namespace tiktok_Omni
             btnCloseAutoPostBrowser.Enabled = false;
             try
             {
-                await _tikTokAutomation.CloseAutoPostBrowserAsync(Log);
+                await WithBrowserLockAsync(
+                    _ => _tikTokAutomation.CloseAutoPostBrowserAsync(Log),
+                    CancellationToken.None).ConfigureAwait(true);
             }
             catch (Exception ex)
             {
@@ -3994,7 +5015,7 @@ namespace tiktok_Omni
                         return;
                     }
 
-                    File.WriteAllText(dialog.FileName, text);
+                    File.WriteAllText(dialog.FileName, text, TextFileEncoding.Utf8NoBom);
                     Log("AI Video Gen: đã lưu prompt ra file " + dialog.FileName);
                 }
             }
@@ -4006,16 +5027,17 @@ namespace tiktok_Omni
 
         private async void btnRenderAiVideo_Click(object sender, EventArgs e)
         {
-            if (_aiVideoGenInputBuffer == null || _aiVideoGenInputBuffer.Count == 0)
+            var renderItems = GetSlideshowItemsForRender();
+            if (renderItems.Count == 0)
             {
-                Log("AI Video Gen: chưa có sản phẩm đầu vào.");
+                Log("AI Video Gen: chưa có sản phẩm đầu vào (Slideshow).");
                 return;
             }
 
             SyncSelectedScriptFromEditor();
             var script = txtAiVideoGenPrompt?.Text?.Trim() ?? string.Empty;
             var hasReviewScripts = _aiVideoScriptBindingList != null &&
-                                   _aiVideoScriptBindingList.Count == _aiVideoGenInputBuffer.Count &&
+                                   _aiVideoScriptBindingList.Count == renderItems.Count &&
                                    _aiVideoScriptBindingList.All(x => !string.IsNullOrWhiteSpace(x.Script));
             var perItemScripts = hasReviewScripts
                 ? _aiVideoScriptBindingList.Select(x => (x.Script ?? string.Empty).Trim()).ToList()
@@ -4040,15 +5062,20 @@ namespace tiktok_Omni
 
             var safetyScript = hasReviewScripts ? fingerprintScript : script;
             var settingsPolicy = await _configManager.LoadAsync();
-            var profile = cbRunningProfile?.SelectedItem?.ToString() ?? string.Empty;
-            var renderFingerprint = BuildRenderFingerprint(fingerprintScript, _aiVideoGenInputBuffer, profile);
+            var profile = ResolvePrimaryProfileFromAiBuffer(renderItems);
+            var renderProfiles = renderItems
+                .Select(x => ProfileScopedPaths.ResolveProfileName(x.ProfileName))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            Log($"AI Video Gen render — nick DNA: {string.Join(", ", renderProfiles)}");
+            var renderFingerprint = BuildRenderFingerprint(fingerprintScript, renderItems, profile);
             var isDuplicateRender = await _duplicateGuardManager.ExistsRecentAsync("render", renderFingerprint, TimeSpan.FromDays(7));
             if (isDuplicateRender)
             {
                 Log("[SAFEGUARD] Kịch bản + bộ sản phẩm này đã render gần đây (7 ngày). Đã chặn để tránh video trùng.");
                 return;
             }
-            var renderRisk = _safetyScoreService.ScoreRender(safetyScript, _aiVideoGenInputBuffer, profile);
+            var renderRisk = _safetyScoreService.ScoreRender(safetyScript, renderItems, profile);
             var forcePreRenderApproval = settingsPolicy.AlwaysRequirePreRenderApproval ?? false;
             var mustApproveRender = forcePreRenderApproval || renderRisk.RequiresManualApproval;
             if (mustApproveRender)
@@ -4062,7 +5089,8 @@ namespace tiktok_Omni
                     PayloadJson = JsonConvert.SerializeObject(new RenderApprovalPayload
                     {
                         Script = safetyScript,
-                        Profile = profile
+                        Profile = ProfileScopedPaths.ResolveProfileName(profile),
+                        ProfileName = ProfileScopedPaths.ResolveProfileName(profile)
                     }),
                     SafetyScore = renderRisk.Score,
                     RequiresManualApproval = true,
@@ -4086,71 +5114,66 @@ namespace tiktok_Omni
             _aiVideoGenCancellation?.Dispose();
             _aiVideoGenCancellation = new CancellationTokenSource();
 
-            try
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            settings.VideoTransitionDurationSeconds = (double)numAiTransitionDuration.Value;
+            settings.VideoTextSize = (int)numAiTextSize.Value;
+            settings.VideoMusicVolume = (int)numAiMusicVolume.Value;
+            await _configManager.SaveAsync(settings).ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+
+            ResetAiRenderSlotProgress();
+            foreach (var rp in renderProfiles)
             {
-                Log("AI Video Gen: bắt đầu render video thực tế...");
-                var settings = await _configManager.LoadAsync();
-                settings.VideoTransitionDurationSeconds = (double)numAiTransitionDuration.Value;
-                settings.VideoTextSize = (int)numAiTextSize.Value;
-                settings.VideoMusicVolume = (int)numAiMusicVolume.Value;
-                await _configManager.SaveAsync(settings);
+                ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(settings.StorageRootPath, rp);
+            }
 
-                ResetAiRenderSlotProgress();
-                var outputPaths = await _videoProcessingService.GenerateProductVideosAsync(
-                    _aiVideoGenInputBuffer,
-                    script,
-                    perItemScripts,
-                    settings,
-                    Log,
-                    UpdateAiRenderProgress,
-                    _aiVideoGenCancellation.Token);
-                await _duplicateGuardManager.AddAsync(new DuplicateGuardRecord
+            var renderPayload = new RenderVideoJobPayload
+            {
+                ProfileName = profile,
+                SharedScript = script,
+                PerItemScripts = hasReviewScripts ? perItemScripts : null,
+                Products = renderItems,
+                RenderFingerprint = renderFingerprint,
+                TransitionSeconds = settings.VideoTransitionDurationSeconds,
+                TextSize = settings.VideoTextSize,
+                MusicVolume = settings.VideoMusicVolume,
+                StorageRootPath = settings.StorageRootPath ?? string.Empty,
+                UseMultiVoiceNarration = UseMultiVoiceNarrationEnabled(),
+                AffiliateLink = renderItems.FirstOrDefault()?.AffiliateLink ?? string.Empty,
+                ProductId = renderItems.FirstOrDefault()?.ProductId ?? string.Empty,
+                StyleTemplate = GetSelectedGeminiStyleTemplate().ToString()
+            };
+
+            var renderJob = new OmniJob
+            {
+                Kind = OmniJobKind.RenderVideo,
+                Title = "Render AI (" + renderPayload.Products.Count + " SP)",
+                ProfileName = renderPayload.ProfileName,
+                PayloadJson = JsonConvert.SerializeObject(renderPayload),
+                MaxRetries = 1,
+                Tag = _aiVideoGenCancellation,
+                AffiliateLink = renderPayload.AffiliateLink,
+                ProductId = renderPayload.ProductId
+            };
+            ScoreAndApplyAiVideoGenSafety(renderItems, safetyScript);
+            foreach (var item in renderItems)
+            {
+                if (item != null)
                 {
-                    Type = "render",
-                    Fingerprint = renderFingerprint,
-                    Profile = profile,
-                    Summary = $"batch:{outputPaths.Count}"
-                });
-
-                if (outputPaths.Count > 0)
-                {
-                    Log($"AI Video Gen: render hoàn tất {outputPaths.Count} video.");
-                    foreach (var path in outputPaths)
-                    {
-                        Log("AI Video Gen: output -> " + path);
-                    }
-
-                    _ = SendNotificationAsync(
-                        "AI Video Render Completed",
-                        $"Đã render xong {outputPaths.Count} video. Kiểm tra output trong thư mục generated_videos.",
-                        "video_render_completed",
-                        "info");
+                    item.PipelineStatus = "Chờ";
                 }
-                else
-                {
-                    Log("AI Video Gen: không có video output.");
-                }
             }
-            catch (OperationCanceledException)
-            {
-                Log("AI Video Gen: đã dừng render.");
-            }
-            catch (Exception ex)
-            {
-                Log("AI Video Gen render thất bại: " + ex.Message);
-            }
-            finally
-            {
-                btnRenderAiVideo.Enabled = true;
-                btnGenerateGeminiPrompt.Enabled = true;
-                _aiVideoGenCancellation?.Dispose();
-                _aiVideoGenCancellation = null;
-            }
+
+            SyncBuffersToGrids();
+            _activeRenderJob = renderJob;
+            _globalJobQueue.Enqueue(renderJob);
+            Log("[JobQueue] Render đã vào hàng đợi.");
         }
 
         private async void btnReviewScriptBeforeRender_Click(object sender, EventArgs e)
         {
-            if (_aiVideoGenInputBuffer == null || _aiVideoGenInputBuffer.Count == 0)
+            var slideshowItems = GetSlideshowItemsForRender();
+            if (slideshowItems.Count == 0)
             {
                 Log("AI Video Gen: chưa có dữ liệu sản phẩm để review script.");
                 return;
@@ -4167,31 +5190,22 @@ namespace tiktok_Omni
                     return;
                 }
 
-                var selectedItems = _aiVideoGenInputBuffer.Take(10).ToList();
-                if (_aiVideoGenInputBuffer.Count > 10)
+                var selectedItems = slideshowItems.Take(10).ToList();
+                if (slideshowItems.Count > 10)
                 {
                     Log("AI Video Gen: chỉ tạo review script cho 10 sản phẩm đầu tiên mỗi lượt.");
                 }
 
-                var lines = new List<string>();
-                for (var i = 0; i < selectedItems.Count; i++)
-                {
-                    var x = selectedItems[i];
-                    lines.Add($"{i + 1}. Tên: {x.ProductName}; Giá: {x.Price}; Ảnh: {x.ImageUrl}");
-                }
-
-                var prompt = "Bạn là biên kịch TikTok kể chuyện bán hàng. Hãy tạo script storytelling tiếng Việt cho TỪNG sản phẩm riêng biệt. " +
-                             "Mỗi script dài khoảng 30-45 giây, giọng tự nhiên, có mở cảnh đời thường, nêu lợi ích sản phẩm và CTA mềm. " +
-                             "Trả về DUY NHẤT JSON ARRAY, không markdown, không giải thích. " +
-                             "Mỗi phần tử gồm: index (số thứ tự sản phẩm), script (chuỗi). " +
-                             "Danh sách sản phẩm:\n" + string.Join("\n", lines);
-
                 var gemini = new GeminiService();
-                var raw = await gemini.GenerateScriptAsync(
-                    prompt,
+                var raw = await gemini.GenerateAffiliateExperienceScriptAsync(
+                    "per-product",
+                    selectedItems,
+                    selectedItems[0],
                     settings.AiProvider,
                     settings.AiApiKey,
-                    settings.AiModel);
+                    settings.AiModel,
+                    CancellationToken.None,
+                    GeminiStyleTemplate.Review).ConfigureAwait(true);
 
                 var generated = ParseReviewScripts(raw, selectedItems);
                 _aiVideoScriptBindingList.Clear();
@@ -4222,68 +5236,85 @@ namespace tiktok_Omni
 
         private async void btnRunAffiliateDeepVideo_Click(object sender, EventArgs e)
         {
-            if (_aiVideoGenInputBuffer == null || _aiVideoGenInputBuffer.Count < 4)
+            var top4 = GetDeepDiveOrderedScenesForRender();
+            if (top4.Count < 4)
             {
                 Log("Affiliate Deep Video: cần ít nhất 4 ảnh của cùng 1 sản phẩm.");
                 return;
             }
 
+            var firstName = (top4[0]?.ProductName ?? string.Empty).Trim();
+            if (top4.Any(x => !string.Equals((x?.ProductName ?? string.Empty).Trim(), firstName, StringComparison.OrdinalIgnoreCase)))
+            {
+                Log("Affiliate Deep Video: 4 ảnh đầu phải thuộc cùng một sản phẩm (ProductName giống nhau).");
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+            var category = (top4[0]?.Category ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(category))
+            {
+                category = "AffiliateDeep";
+            }
+
+            foreach (var item in top4)
+            {
+                if (item != null)
+                {
+                    item.PipelineStatus = "Chờ";
+                    item.ProfileName = string.IsNullOrWhiteSpace(item.ProfileName) ? profile : item.ProfileName;
+                }
+            }
+
+            ScoreAndApplyAiVideoGenSafety(top4, txtAiVideoGenPrompt?.Text?.Trim());
+            SyncBuffersToGrids();
+
             btnRunAffiliateDeepVideo.Enabled = false;
             btnRenderAiVideo.Enabled = false;
             btnGenerateGeminiPrompt.Enabled = false;
             btnReviewScriptBeforeRender.Enabled = false;
+            ResetAiRenderSlotProgress();
+            UpdateSinglePipelineProgress(2, "Đã xếp hàng Deep render…");
 
-            try
+            var job = new OmniJob
             {
-                var firstName = (_aiVideoGenInputBuffer[0]?.ProductName ?? string.Empty).Trim();
-                var top4 = _aiVideoGenInputBuffer.Take(4).ToList();
-                if (top4.Any(x => !string.Equals((x?.ProductName ?? string.Empty).Trim(), firstName, StringComparison.OrdinalIgnoreCase)))
+                Kind = OmniJobKind.AffiliateDeepRender,
+                Title = "Affiliate Deep — " + firstName,
+                ProfileName = profile,
+                PayloadJson = JsonConvert.SerializeObject(new AffiliateDeepRenderJobPayload
                 {
-                    Log("Affiliate Deep Video: 4 ảnh đầu phải thuộc cùng một sản phẩm (ProductName giống nhau).");
-                    return;
-                }
+                    ProfileName = profile,
+                    ProductName = firstName,
+                    Category = category,
+                    Products = top4,
+                    StorageRootPath = settings.StorageRootPath ?? string.Empty,
+                    SafetyScore = top4[0]?.SafetyScore ?? 100,
+                    UseMultiVoiceNarration = UseMultiVoiceNarrationEnabled(),
+                    AffiliateLink = top4[0]?.AffiliateLink ?? string.Empty,
+                    ProductId = top4[0]?.ProductId ?? string.Empty
+                }),
+                MaxRetries = 1,
+                AffiliateLink = top4[0]?.AffiliateLink ?? string.Empty,
+                ProductId = top4[0]?.ProductId ?? string.Empty
+            };
 
-                var settings = await _configManager.LoadAsync();
-                Log("Affiliate Deep Video: bắt đầu pipeline 4 ảnh -> AI image -> motion prompt -> Veo 3...");
-                ResetAiRenderSlotProgress();
-                UpdateSlotProgress(1, 5, "Luồng 1: Tạo ảnh");
-                var result = await _videoProcessingService.GenerateAffiliateProductVideoAsync(
-                    top4,
-                    settings,
-                    Log,
-                    CancellationToken.None,
-                    (percent, stage) => UpdateSinglePipelineProgress(percent, stage));
-
-                Log("Affiliate Deep Video: hoàn tất.");
-                for (var i = 0; i < result.SceneVideos.Count; i++)
-                {
-                    var scene = result.SceneVideos[i];
-                    Log($"Scene {scene.Index}: clip -> {scene.SceneVideoPath}");
-                }
-                Log("Affiliate Deep Video: final -> " + result.FinalVideoPath);
-            }
-            catch (Exception ex)
-            {
-                Log("Affiliate Deep Video thất bại: " + ex.Message);
-            }
-            finally
-            {
-                btnRunAffiliateDeepVideo.Enabled = true;
-                btnRenderAiVideo.Enabled = true;
-                btnGenerateGeminiPrompt.Enabled = true;
-                btnReviewScriptBeforeRender.Enabled = true;
-            }
+            _activeAffiliateDeepRenderJobId = job.Id;
+            _globalJobQueue.Enqueue(job);
+            Log("[JobQueue] Affiliate Deep render đã vào hàng đợi (không chạy trên UI).");
         }
 
-        private void btnBrowseMascotImage_Click(object sender, EventArgs e)
+        private async void btnBrowseMascotImage_Click(object sender, EventArgs e)
         {
             using (var dialog = new OpenFileDialog())
             {
                 dialog.Filter = "Image Files|*.jpg;*.jpeg;*.png;*.webp;*.gif";
-                dialog.Title = "Chọn ảnh Linh vật/Người mẫu đại diện";
+                dialog.Title = "Chon anh Linh vat";
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
                     txtMascotImagePath.Text = dialog.FileName;
+                    await RunAutoDetectMouthAsync().ConfigureAwait(true);
                 }
             }
         }
@@ -4335,7 +5366,25 @@ namespace tiktok_Omni
                     File.Copy(files[i], target, true);
                 }
 
-                txtAvatarIdentityPack.Text = $"{profileDir} ({files.Count} ảnh)";
+                var pack = AvatarIdentityPackStore.LoadOrCreate(profile);
+                pack.IdentityImagePaths = Directory.GetFiles(profileDir)
+                    .Where(x =>
+                    {
+                        var name = Path.GetFileName(x) ?? string.Empty;
+                        if (name.Equals("identity_pack.json", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return false;
+                        }
+
+                        var ext = Path.GetExtension(x).ToLowerInvariant();
+                        return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif";
+                    })
+                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                AvatarIdentityPackStore.Save(profile, pack);
+                _mascotIdentityPackConfig = pack;
+                SyncMascotIdentityPackUi(profile, pack.IdentityImagePaths);
+                SyncMouthPathsToUi();
                 Log($"AvatarVault: đã lưu Bộ nhận diện cho profile '{profile}' với {files.Count} ảnh.");
             }
         }
@@ -4356,57 +5405,90 @@ namespace tiktok_Omni
                 return;
             }
 
-            btnRunMascotChannelPipeline.Enabled = false;
-            btnRunAffiliateDeepVideo.Enabled = false;
-            btnRenderAiVideo.Enabled = false;
-            btnGenerateGeminiPrompt.Enabled = false;
-            btnReviewScriptBeforeRender.Enabled = false;
-            btnSelectAvatarIdentityPack.Enabled = false;
-            btnPreviewMascotVariants.Enabled = false;
-            try
+            var profileName = GetSelectedMascotProfileName();
+            var identityPack = LoadAvatarIdentityPackForProfile(profileName);
+            if (identityPack.Count < 3 || identityPack.Count > 5)
             {
-                var settings = await _configManager.LoadAsync();
-                var identityPack = LoadAvatarIdentityPackForProfile(cbRunningProfile?.SelectedItem?.ToString());
-                if (identityPack.Count < 3 || identityPack.Count > 5)
+                Log("Mascot Story Pipeline: Bộ nhận diện chưa hợp lệ. Hãy chọn 3-5 ảnh trong AvatarVault.");
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var mascotStyle = ResolveMascotStyleForProfile(profileName, settings);
+
+            Log("Mascot Story Pipeline: xếp hàng Job Queue — nick «" + profileName + "»" +
+                (string.IsNullOrWhiteSpace(mascotStyle) ? "" : " | style: " + mascotStyle));
+            ResetAiRenderSlotProgress();
+            UpdateSinglePipelineProgress(2, "Đã xếp hàng…");
+
+            var lipPack = BuildMascotLipSyncPackForEnqueue();
+            EnqueueMascotStoryJob(new MascotStoryJobPayload
+            {
+                MascotImagePath = mascotImagePath,
+                ChannelTheme = channelTheme,
+                ProfileName = profileName,
+                MascotStyle = mascotStyle,
+                IdentityImagePaths = identityPack,
+                SceneCount = GetSelectedMascotSceneCount(),
+                StorageRootPath = settings.StorageRootPath ?? string.Empty,
+                UseLipSync = chkMascotUseLipSync?.Checked ?? false,
+                MouthClosedPath = lipPack.MouthClosedPath ?? string.Empty,
+                MouthOpenSmallPath = lipPack.MouthOpenSmallPath ?? string.Empty,
+                MouthOpenPath = lipPack.MouthOpenPath ?? string.Empty,
+                MouthOverlayX = lipPack.MouthOverlayX,
+                MouthOverlayY = lipPack.MouthOverlayY,
+                MouthOverlayScale = lipPack.MouthOverlayScale,
+                UseEmotionalRemix = true,
+                UseVisualHookSfx = chkMascotUseVisualHookSfx?.Checked == true,
+                VisualHookSfxPath = (txtMascotVisualHookSfx?.Text ?? string.Empty).Trim()
+            });
+        }
+
+        private string GetSelectedMascotProfileName()
+        {
+            var name = cbMascotProfile?.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = cbRunningProfile?.SelectedItem?.ToString();
+            }
+
+            return ProfileScopedPaths.ResolveProfileName(name);
+        }
+
+        private static string ResolveMascotStyleForProfile(string profileName, AppSettings settings)
+        {
+            var nick = ProfileScopedPaths.ResolveProfileName(profileName);
+            var fromSettings = settings?.Profiles?.FirstOrDefault(p =>
+                p != null && string.Equals((p.Name ?? string.Empty).Trim(), nick, StringComparison.OrdinalIgnoreCase));
+            var style = (fromSettings?.MascotPersonality ?? fromSettings?.MascotStyle ?? string.Empty).Trim();
+            return style;
+        }
+
+        private void RefreshMascotProfileCombo(AppSettings settings)
+        {
+            if (cbMascotProfile == null)
+            {
+                return;
+            }
+
+            var previous = cbMascotProfile.SelectedItem?.ToString();
+            cbMascotProfile.Items.Clear();
+            cbMascotProfile.Items.Add("default");
+            foreach (var profile in settings?.Profiles ?? new List<AutomationProfile>())
+            {
+                var name = (profile?.Name ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(name) || cbMascotProfile.Items.Contains(name))
                 {
-                    Log("Mascot Story Pipeline: Bộ nhận diện chưa hợp lệ. Hãy chọn 3-5 ảnh trong AvatarVault.");
-                    return;
+                    continue;
                 }
 
-                Log("Mascot Story Pipeline: bắt đầu tạo 4 phân cảnh từ ảnh đại diện...");
-                ResetAiRenderSlotProgress();
-                UpdateSlotProgress(1, 5, "Luồng 1: Tạo ảnh");
-                var result = await _videoProcessingService.GenerateMascotChannelVideoAsync(
-                    mascotImagePath,
-                    channelTheme,
-                    identityPack,
-                    GetSelectedMascotSceneCount(),
-                    settings,
-                    Log,
-                    CancellationToken.None,
-                    (percent, stage) => UpdateSinglePipelineProgress(percent, stage));
+                cbMascotProfile.Items.Add(name);
+            }
 
-                Log("Mascot Story Pipeline: hoàn tất.");
-                foreach (var scene in result.Scenes)
-                {
-                    Log($"Scene {scene.Index}: {scene.SceneVideoPath}");
-                }
-                Log("Mascot Story Pipeline final -> " + result.FinalVideoPath);
-            }
-            catch (Exception ex)
-            {
-                Log("Mascot Story Pipeline thất bại: " + ex.Message);
-            }
-            finally
-            {
-                btnRunMascotChannelPipeline.Enabled = true;
-                btnRunAffiliateDeepVideo.Enabled = true;
-                btnRenderAiVideo.Enabled = true;
-                btnGenerateGeminiPrompt.Enabled = true;
-                btnReviewScriptBeforeRender.Enabled = true;
-                btnSelectAvatarIdentityPack.Enabled = true;
-                btnPreviewMascotVariants.Enabled = true;
-            }
+            var target = string.IsNullOrWhiteSpace(previous) ? "default" : previous.Trim();
+            var index = cbMascotProfile.Items.IndexOf(target);
+            cbMascotProfile.SelectedIndex = index >= 0 ? index : 0;
         }
 
         private async void btnPreviewMascotVariants_Click(object sender, EventArgs e)
@@ -4429,14 +5511,16 @@ namespace tiktok_Omni
             try
             {
                 var settings = await _configManager.LoadAsync();
-                var identityPack = LoadAvatarIdentityPackForProfile(cbRunningProfile?.SelectedItem?.ToString());
+                var profileName = GetSelectedMascotProfileName();
+                var identityPack = LoadAvatarIdentityPackForProfile(profileName);
                 if (identityPack.Count < 3 || identityPack.Count > 5)
                 {
                     Log("Preview biến thể: Bộ nhận diện chưa hợp lệ. Hãy chọn 3-5 ảnh.");
                     return;
                 }
 
-                Log("Preview biến thể: đang tạo 4 ảnh tham chiếu trước khi chạy Veo...");
+                var mascotStyle = ResolveMascotStyleForProfile(profileName, settings);
+                Log("Preview biến thể: đang tạo ảnh tham chiếu (Gemini kịch bản + Veo)…");
                 var preview = await _videoProcessingService.GenerateMascotVariantPreviewAsync(
                     mascotImagePath,
                     channelTheme,
@@ -4444,7 +5528,8 @@ namespace tiktok_Omni
                     GetSelectedMascotSceneCount(),
                     settings,
                     Log,
-                    CancellationToken.None);
+                    CancellationToken.None,
+                    mascotStyle);
                 BindMascotPreviewImages(preview.PreviewImagePaths, preview.SceneScripts);
                 Log($"Preview biến thể: đã hiển thị {preview.PreviewImagePaths.Count} ảnh.");
             }
@@ -4467,39 +5552,218 @@ namespace tiktok_Omni
                 return;
             }
 
-            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            LogPhilosophy("Triết lý — kiểm tra:\r\n" + PhilosophyVideoService.DescribeBlockers(settings));
-
             btnRunPhilosophyVideo.Enabled = false;
-            SetPhilosophyProgress("Bắt đầu…", 5);
             try
             {
-                var result = await _philosophyVideoService.GenerateAsync(
-                    input,
-                    settings,
-                    LogPhilosophy,
-                    (status, pct) => SetPhilosophyProgress(status, pct),
-                    CancellationToken.None).ConfigureAwait(true);
-
-                await _configManager.SaveAsync(settings).ConfigureAwait(true);
-                if (txtFfmpegPath != null && !string.IsNullOrWhiteSpace(settings.FfmpegPath))
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                LogPhilosophy("Triết lý — kiểm tra:\r\n" + PhilosophyVideoService.DescribeBlockers(settings));
+                if (!PhilosophyVideoPipelineService.TryValidatePrerequisites(settings, out var preErr))
                 {
-                    txtFfmpegPath.Text = settings.FfmpegPath;
+                    LogPhilosophy("Triết lý: " + preErr);
+                    return;
                 }
 
-                LogPhilosophy($"Triết lý: xong → {result.OutputPath} (≈{result.DurationSeconds:0.##}s).");
-                LogPhilosophy("Quote: " + result.Quote);
-                SetPhilosophyProgress("Xong — mở thư mục Output", 100);
-            }
-            catch (Exception ex)
-            {
-                LogPhilosophy("Triết lý lỗi: " + ex.Message);
-                SetPhilosophyProgress("lỗi — xem log", 0);
+                await EnqueuePhilosophyJobsFromLinesAsync(new[] { input }, GetSelectedPhilosophyProfileName(), settings)
+                    .ConfigureAwait(true);
+                SetPhilosophyProgress("Đã xếp hàng render…", 5);
             }
             finally
             {
                 btnRunPhilosophyVideo.Enabled = true;
             }
+        }
+
+        private async void btnPhilosophyImportFromFile_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new OpenFileDialog
+            {
+                Title = "Nhập danh sách quote",
+                Filter = "Text (*.txt)|*.txt|All files|*.*",
+                Multiselect = false
+            })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                string[] lines;
+                try
+                {
+                    lines = File.ReadAllLines(dlg.FileName, TextFileEncoding.Utf8);
+                }
+                catch (Exception ex)
+                {
+                    LogPhilosophy("Không đọc được file: " + ex.Message);
+                    return;
+                }
+
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                if (!PhilosophyVideoPipelineService.TryValidatePrerequisites(settings, out var preErr))
+                {
+                    LogPhilosophy("Triết lý: " + preErr);
+                    return;
+                }
+
+                var profile = GetSelectedPhilosophyProfileName();
+                var count = await EnqueuePhilosophyJobsFromLinesAsync(lines, profile, settings).ConfigureAwait(true);
+                LogPhilosophy($"Đã nhập {count} quote từ file → hàng đợi job (nick «{profile}»).");
+                SetPhilosophyProgress($"Đã xếp {count} job…", 5);
+            }
+        }
+
+        private string GetSelectedPhilosophyProfileName()
+        {
+            var name = cbPhilosophyProfile?.SelectedItem?.ToString();
+            return ProfileScopedPaths.ResolveProfileName(name);
+        }
+
+        private async Task<int> EnqueuePhilosophyJobsFromLinesAsync(string[] lines, string profileName, AppSettings settings)
+        {
+            var profile = PhilosophyProfileAssets.ResolveProfile(settings, profileName);
+            var quotes = (lines ?? Array.Empty<string>())
+                .Select(l => (l ?? string.Empty).Trim())
+                .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#"))
+                .ToList();
+
+            if (quotes.Count == 0)
+            {
+                LogPhilosophy("Không có dòng quote hợp lệ (bỏ dòng trống và dòng # comment).");
+                return 0;
+            }
+
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var nick = ProfileScopedPaths.ResolveProfileName(profile.Name);
+            var enqueued = 0;
+            foreach (var quote in quotes)
+            {
+                var payload = new PhilosophyVideoJobPayload
+                {
+                    QuoteText = quote,
+                    ProfileName = nick,
+                    VoiceId = profile.VoiceId ?? string.Empty,
+                    VideoStyle = profile.VideoStyle ?? string.Empty,
+                    StorageRootPath = settings.StorageRootPath ?? string.Empty,
+                    ScheduledPostUtc = DateTime.UtcNow.AddHours(2)
+                };
+                var shortTitle = quote.Length > 40 ? quote.Substring(0, 40) + "…" : quote;
+                EnqueuePhilosophyJob(payload, "Triết lý: " + shortTitle);
+                enqueued++;
+            }
+
+            await Task.CompletedTask.ConfigureAwait(false);
+            return enqueued;
+        }
+
+        private void EnqueuePhilosophyJob(PhilosophyVideoJobPayload payload, string title)
+        {
+            if (payload == null)
+            {
+                return;
+            }
+
+            var job = new OmniJob
+            {
+                Kind = OmniJobKind.PhilosophyVideo,
+                Title = title,
+                ProfileName = payload.ProfileName,
+                PayloadJson = JsonConvert.SerializeObject(payload),
+                MaxRetries = 1,
+                Tag = _aiVideoGenCancellation
+            };
+
+            _globalJobQueue.Enqueue(job);
+            TrackPhilosophyJob(job.Id, payload, title);
+            Log($"[JobQueue] Đã đẩy job Triết lý vào hàng đợi: {title}");
+        }
+
+        private void RefreshPhilosophyPrereqLabel(AppSettings settings = null)
+        {
+            if (lblPhilosophyPrereq == null || lblPhilosophyPrereq.IsDisposed)
+            {
+                return;
+            }
+
+            if (settings == null)
+            {
+                _ = RefreshPhilosophyPrereqLabelAsync();
+                return;
+            }
+
+            void Apply()
+            {
+                var blockers = PhilosophyVideoService.DescribeBlockers(settings);
+                var ready = PhilosophyVideoPipelineService.TryValidatePrerequisites(settings, out _);
+                lblPhilosophyPrereq.ForeColor = ready
+                    ? Color.FromArgb(120, 220, 160)
+                    : Color.FromArgb(255, 180, 120);
+                lblPhilosophyPrereq.Text = ready
+                    ? "✓ Sẵn sàng tạo video — nhập quote bên dưới rồi bấm «Tạo video (1 quote)»."
+                    : "⚠ Cần cấu hình trước (tab Cài đặt):\r\n" + blockers.Replace("\r\n", "  •  ");
+            }
+
+            if (lblPhilosophyPrereq.InvokeRequired)
+            {
+                lblPhilosophyPrereq.Invoke(new Action(Apply));
+                return;
+            }
+
+            Apply();
+        }
+
+        private async Task RefreshPhilosophyPrereqLabelAsync()
+        {
+            try
+            {
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                RefreshPhilosophyPrereqLabel(settings);
+            }
+            catch
+            {
+                RefreshPhilosophyPrereqLabel(new AppSettings());
+            }
+        }
+
+        private void btnPhilosophyOpenAssets_Click(object sender, EventArgs e)
+        {
+            var profile = GetSelectedPhilosophyProfileName();
+            var assetsDir = PhilosophyProfileAssets.GetAssetsRoot(profile);
+            try
+            {
+                Directory.CreateDirectory(assetsDir);
+                Process.Start(new ProcessStartInfo(assetsDir) { UseShellExecute = true });
+                LogPhilosophy("Đã mở thư mục Assets: " + assetsDir);
+            }
+            catch (Exception ex)
+            {
+                LogPhilosophy("Không mở được thư mục Assets: " + ex.Message);
+            }
+        }
+
+        private void RefreshPhilosophyProfileCombo(AppSettings settings)
+        {
+            if (cbPhilosophyProfile == null)
+            {
+                return;
+            }
+
+            var previous = cbPhilosophyProfile.SelectedItem?.ToString();
+            cbPhilosophyProfile.Items.Clear();
+            cbPhilosophyProfile.Items.Add("default");
+            foreach (var profile in settings?.Profiles ?? new List<AutomationProfile>())
+            {
+                var name = (profile?.Name ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(name) || cbPhilosophyProfile.Items.Contains(name))
+                {
+                    continue;
+                }
+
+                cbPhilosophyProfile.Items.Add(name);
+            }
+
+            var target = string.IsNullOrWhiteSpace(previous) ? "default" : previous.Trim();
+            var index = cbPhilosophyProfile.Items.IndexOf(target);
+            cbPhilosophyProfile.SelectedIndex = index >= 0 ? index : 0;
         }
 
         private void LogPhilosophy(string message)
@@ -4571,117 +5835,66 @@ namespace tiktok_Omni
             SetPhilosophyProgress("sẵn sàng", 0);
         }
 
-        private void tabAiVideoGenModes_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            ApplyAiVideoGenModeUiVisibility();
-            AttachAiRenderProgressPanelToSelectedModeTab();
-            if (tabAiVideoGenModes?.SelectedTab != null && ReferenceEquals(tabAiVideoGenModes.SelectedTab, tabAiModeVideoReup))
-            {
-                RefreshVideoReupMusicCombo();
-            }
-        }
-
-        private void AttachAiRenderProgressPanelToSelectedModeTab()
-        {
-            if (pnlAiRenderProgress == null || tabAiVideoGenModes?.SelectedTab == null)
-            {
-                return;
-            }
-
-            if (InvokeRequired)
-            {
-                BeginInvoke(new Action(AttachAiRenderProgressPanelToSelectedModeTab));
-                return;
-            }
-
-            const int progLabelLeft = 8;
-            const int progLabelWidth = 200;
-            const int progBarMaxWidth = 260;
-
-            var page = tabAiVideoGenModes.SelectedTab;
-            pnlAiRenderProgress.SuspendLayout();
-            pnlAiRenderProgress.Parent = page;
-            pnlAiRenderProgress.Dock = DockStyle.Bottom;
-            pnlAiRenderProgress.Height = 68;
-            pnlAiRenderProgress.SendToBack();
-            pnlAiRenderProgress.ResumeLayout();
-
-            var hdr = pnlAiRenderProgress.Controls.Find("lblAiRenderProgressHeader", false);
-            if (hdr != null && hdr.Length > 0)
-            {
-                hdr[0].Width = Math.Max(80, Math.Min(560, pnlAiRenderProgress.ClientSize.Width - 16));
-            }
-
-            var barW = Math.Min(progBarMaxWidth, Math.Max(96, pnlAiRenderProgress.ClientSize.Width - progLabelLeft - progLabelWidth - 18));
-            if (pbAiRenderSlot1 != null)
-            {
-                pbAiRenderSlot1.Width = barW;
-            }
-
-            if (pbAiRenderSlot2 != null)
-            {
-                pbAiRenderSlot2.Width = barW;
-            }
-
-            if (pbAiRenderSlot3 != null)
-            {
-                pbAiRenderSlot3.Width = barW;
-            }
-
-            // Video reup: hướng dẫn nằm dưới panel tiến độ (cả hai Dock Bottom — hint sát đáy tab).
-            if (ReferenceEquals(page, tabAiModeVideoReup) && lblVideoReupHint != null)
-            {
-                lblVideoReupHint.Dock = DockStyle.Bottom;
-                lblVideoReupHint.Height = 102;
-                if (lblVideoReupHint.Parent != page)
-                {
-                    lblVideoReupHint.Parent = page;
-                }
-
-                page.Controls.SetChildIndex(pnlAiRenderProgress, Math.Max(0, page.Controls.Count - 2));
-                page.Controls.SetChildIndex(lblVideoReupHint, page.Controls.Count - 1);
-            }
-        }
-
         private void ApplyAiVideoGenModeUiVisibility()
         {
-            if (tabAiVideoGenModes == null)
-            {
-                return;
-            }
-
-            var idx = tabAiVideoGenModes.SelectedIndex;
+            var idx = GetSelectedAiVideoGenModeIndex();
             var showProductGrid = idx == 0 || idx == 1;
 
             if (lblAiVideoGenProductsTitle != null)
             {
                 lblAiVideoGenProductsTitle.Visible = showProductGrid;
-            }
-
-            if (dgvAiVideoGenInput != null)
-            {
-                dgvAiVideoGenInput.Visible = showProductGrid;
-            }
-
-            if (lblAiVideoGenProductBlockHint != null)
-            {
                 if (showProductGrid)
                 {
-                    lblAiVideoGenProductBlockHint.Visible = false;
-                }
-                else if (idx == 4)
-                {
-                    lblAiVideoGenProductBlockHint.Visible = true;
-                    lblAiVideoGenProductBlockHint.Text =
-                        "Video reup: URL + hook trong bảng; «Render video» nhúng phụ đề karaoke đoạn hook (Gemini timeline nếu có API key). «Render lô» (Ctrl). Slideshow không dùng cho reup.";
-                }
-                else
-                {
-                    lblAiVideoGenProductBlockHint.Visible = true;
-                    lblAiVideoGenProductBlockHint.Text =
-                        "Tab Mascot Story và Triết lý/Quote không dùng bảng sản phẩm slideshow. Chọn tab «Slideshow sản phẩm», «Affiliate chuyên sâu» hoặc «Video reup» khi cần dữ liệu từ Săn Affiliate.";
+                    lblAiVideoGenProductsTitle.Text = idx == 0
+                        ? "Bảng sản phẩm (Slideshow) — chọn dòng, rồi dùng nút bên dưới"
+                        : "Bảng sản phẩm (Affiliate chuyên) — cần ≥4 ảnh cùng tên SP";
                 }
             }
+
+            if (chkAiVideoGenCurrentProfileOnly != null)
+            {
+                chkAiVideoGenCurrentProfileOnly.Visible = showProductGrid;
+            }
+
+            if (pnlAiVideoGenProductArea != null)
+            {
+                pnlAiVideoGenProductArea.Visible = showProductGrid;
+            }
+
+            if (pnlSlideshowGridHost != null)
+            {
+                pnlSlideshowGridHost.Visible = idx == 0;
+            }
+
+            if (pnlDeepDiveGridHost != null)
+            {
+                pnlDeepDiveGridHost.Visible = idx == 1;
+            }
+
+            if (pnlManualInput != null)
+            {
+                pnlManualInput.Visible = showProductGrid && idx == 0;
+            }
+
+            if (pnlAffiliateDeepStoryboardHost != null)
+            {
+                pnlAffiliateDeepStoryboardHost.Visible = idx == 1;
+            }
+
+            if (pnlAiVideoGenScriptHost != null)
+            {
+                pnlAiVideoGenScriptHost.Visible = showProductGrid;
+            }
+
+            SyncAiVideoGenActionBarForMode(idx);
+
+            SyncProductGridVisibilityForMode(idx);
+
+            ApplyAffiliateDeepControlHosts(idx);
+
+            ApplyAiVideoGenShellLayout(showProductGrid, idx);
+
+            RefreshAiVideoGenModeIndicator();
 
             var showScriptBlock = idx == 0 || idx == 1;
             if (dgvAiVideoScriptReview != null)
@@ -4692,6 +5905,89 @@ namespace tiktok_Omni
             if (txtAiVideoGenPrompt != null)
             {
                 txtAiVideoGenPrompt.Visible = showScriptBlock;
+            }
+        }
+
+        /// <summary>
+        /// Slideshow/Affiliate: bảng sản phẩm Fill + khối mode Dock Bottom (~300px).
+        /// Mascot/Triết lý/Reup: khối mode chiếm toàn bộ tab (tránh vùng trống ~60% màn hình).
+        /// </summary>
+        private void ApplyAiVideoGenShellLayout(bool showProductGrid, int modeTabIndex)
+        {
+            if (tabAiVideoGen == null || pnlAiVideoGenStickyHost == null || _aiVideoGenLayoutGuard)
+            {
+                return;
+            }
+
+            _aiVideoGenLayoutGuard = true;
+            tabAiVideoGen.SuspendLayout();
+            try
+            {
+                if (tblAiVideoGenRoot == null)
+                {
+                    WireAiVideoGenTabTableLayout();
+                }
+
+                ApplyAiVideoGenTableRowHeights(showProductGrid, modeTabIndex);
+                AttachAiRenderProgressPanelToSelectedModePanel();
+                if (modeTabIndex == (int)AiVideoGenMode.Philosophy)
+                {
+                    EnsureProductionQueueGridBandHeight(dgvPhilosophyQueue);
+                }
+                else if (modeTabIndex == (int)AiVideoGenMode.Mascot)
+                {
+                    EnsureProductionQueueGridBandHeight(dgvMascotQueue);
+                }
+                else if (modeTabIndex == (int)AiVideoGenMode.VideoReup)
+                {
+                    LayoutVideoReupShell();
+                }
+            }
+            finally
+            {
+                tabAiVideoGen.ResumeLayout(true);
+                _aiVideoGenLayoutGuard = false;
+            }
+        }
+
+        private void SyncAiVideoGenActionBarForMode(int modeTabIndex)
+        {
+            if (tblAiVideoGenActionInner == null)
+            {
+                return;
+            }
+
+            var showSlideshowActions = modeTabIndex == 0;
+            var showDeepActions = modeTabIndex == 1;
+
+            if (pnlAiVideoGenReadinessHost != null)
+            {
+                pnlAiVideoGenReadinessHost.Visible = showSlideshowActions;
+            }
+
+            if (lblSlideshowReadiness != null)
+            {
+                lblSlideshowReadiness.Visible = showSlideshowActions;
+            }
+
+            if (lblAffiliateDeepReadiness != null)
+            {
+                lblAffiliateDeepReadiness.Visible = showDeepActions;
+            }
+
+            if (pnlAffiliateDeepReadinessHost != null)
+            {
+                pnlAffiliateDeepReadinessHost.Visible = showDeepActions;
+            }
+
+            if (pnlSlideshowActionBar != null)
+            {
+                pnlSlideshowActionBar.Visible = showSlideshowActions;
+            }
+
+            if (pnlAiVideoGenActionBar != null)
+            {
+                pnlAiVideoGenActionBar.Visible = showSlideshowActions || showDeepActions;
             }
         }
 
@@ -4718,28 +6014,30 @@ namespace tiktok_Omni
 
         private List<string> LoadAvatarIdentityPackForProfile(string profileName)
         {
-            var profileDir = EnsureAvatarVaultProfileDirectory(profileName);
-            var files = Directory.GetFiles(profileDir)
-                .Where(x =>
-                {
-                    var ext = (Path.GetExtension(x) ?? string.Empty).ToLowerInvariant();
-                    return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" || ext == ".gif";
-                })
-                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            txtAvatarIdentityPack.Text = $"{profileDir} ({files.Count} ảnh)";
-            return files;
-        }
-
-        private int GetSelectedMascotSceneCount()
-        {
-            var text = cbMascotSceneCount?.SelectedItem?.ToString() ?? "4";
-            if (int.TryParse(text, out var value) && (value == 4 || value == 6 || value == 8))
+            _mascotIdentityPackConfig = AvatarIdentityPackStore.LoadOrCreate(profileName);
+            var files = AvatarIdentityPackStore.SyncIdentityImagesFromVault(profileName);
+            if (files.Count >= 3)
             {
-                return value;
+                _mascotIdentityPackConfig.IdentityImagePaths = files;
             }
 
-            return 4;
+            SyncMascotIdentityPackUi(profileName, files);
+            SyncMouthPathsToUi();
+            return files.Count >= 3 ? files : (_mascotIdentityPackConfig.IdentityImagePaths ?? new List<string>());
+        }
+
+        private static int GetSelectedMascotSceneCount() => 4;
+
+        private static PictureBox CreateMascotPreviewBoxDocked()
+        {
+            return new PictureBox
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(4),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                BackColor = Color.FromArgb(20, 22, 28),
+                BorderStyle = BorderStyle.None
+            };
         }
 
         private static PictureBox CreateMascotPreviewBox(Point location)
@@ -4820,7 +6118,8 @@ namespace tiktok_Omni
                 return;
             }
 
-            var identityPack = LoadAvatarIdentityPackForProfile(cbRunningProfile?.SelectedItem?.ToString());
+            var profileName = GetSelectedMascotProfileName();
+            var identityPack = LoadAvatarIdentityPackForProfile(profileName);
             if (identityPack.Count < 3 || identityPack.Count > 5)
             {
                 Log("Regenerate scene: Bộ nhận diện chưa hợp lệ (cần 3-5 ảnh).");
@@ -4831,6 +6130,7 @@ namespace tiktok_Omni
             try
             {
                 var settings = await _configManager.LoadAsync();
+                var mascotStyle = ResolveMascotStyleForProfile(profileName, settings);
                 var sceneScript = _mascotPreviewSceneScripts[idx];
                 Log($"Regenerate scene {idx + 1}: đang gọi Gemini tạo lại ảnh + prompt...");
                 var regen = await _videoProcessingService.RegenerateMascotSceneAsync(
@@ -4840,7 +6140,8 @@ namespace tiktok_Omni
                     sceneScript,
                     settings,
                     Log,
-                    CancellationToken.None);
+                    CancellationToken.None,
+                    mascotStyle);
 
                 while (_mascotPreviewImagePaths.Count <= idx)
                 {
@@ -4985,6 +6286,53 @@ namespace tiktok_Omni
             return output;
         }
 
+        private void DgvAiVideoScriptReview_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
+        {
+            if (dgvAiVideoScriptReview?.Columns == null || dgvAiVideoScriptReview.Columns.Count == 0)
+            {
+                return;
+            }
+
+            dgvAiVideoScriptReview.EnableHeadersVisualStyles = false;
+            dgvAiVideoScriptReview.ColumnHeadersHeight = AppGridHeaderHeight;
+            dgvAiVideoScriptReview.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            dgvAiVideoScriptReview.DefaultCellStyle.Font = AppInputFont;
+            ApplyAppGridHeaderChrome(dgvAiVideoScriptReview);
+
+            foreach (DataGridViewColumn col in dgvAiVideoScriptReview.Columns)
+            {
+                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                col.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
+                col.SortMode = DataGridViewColumnSortMode.NotSortable;
+
+                var name = col.DataPropertyName ?? string.Empty;
+                if (string.Equals(name, "Index", StringComparison.OrdinalIgnoreCase))
+                {
+                    col.HeaderText = "#";
+                    col.FillWeight = 8f;
+                    col.MinimumWidth = 36;
+                }
+                else if (string.Equals(name, "ProductName", StringComparison.OrdinalIgnoreCase))
+                {
+                    col.HeaderText = "Sản phẩm";
+                    col.FillWeight = 40f;
+                    col.MinimumWidth = 96;
+                }
+                else if (string.Equals(name, "Price", StringComparison.OrdinalIgnoreCase))
+                {
+                    col.HeaderText = "Giá";
+                    col.FillWeight = 16f;
+                    col.MinimumWidth = 64;
+                }
+                else if (string.Equals(name, "Script", StringComparison.OrdinalIgnoreCase))
+                {
+                    col.HeaderText = "Script";
+                    col.FillWeight = 36f;
+                    col.MinimumWidth = 120;
+                }
+            }
+        }
+
         private void dgvAiVideoScriptReview_SelectionChanged(object sender, EventArgs e)
         {
             LoadSelectedReviewScriptToEditor();
@@ -5111,6 +6459,13 @@ namespace tiktok_Omni
                     label.ForeColor = Color.Gainsboro;
                 }
             }
+
+            if (ReferenceEquals(tabMain?.SelectedTab, tabAiVideoGen)
+                && !string.IsNullOrWhiteSpace(labelText)
+                && labelText.IndexOf("đang chờ", StringComparison.Ordinal) < 0)
+            {
+                SetStatusStripText(labelText);
+            }
         }
 
 
@@ -5118,7 +6473,9 @@ namespace tiktok_Omni
         private void ToggleSecretVisibility(TextBox textBox, Button toggleButton)
         {
             textBox.UseSystemPasswordChar = !textBox.UseSystemPasswordChar;
-            toggleButton.Text = textBox.UseSystemPasswordChar ? "Show" : "Hide";
+            toggleButton.Text = textBox.UseSystemPasswordChar
+                ? LocalizeDisplayText("Show")
+                : LocalizeDisplayText("Hide");
         }
 
         private void HookSettingValidationEvents()
@@ -5126,7 +6483,7 @@ namespace tiktok_Omni
             txtAiProvider.TextChanged += (sender, e) => ValidateSettingsInputs();
             txtAiModel.TextChanged += (sender, e) => ValidateSettingsInputs();
             txtVeoEndpoint.TextChanged += (sender, e) => ValidateSettingsInputs();
-            txtLyriaEndpoint.TextChanged += (sender, e) => ValidateSettingsInputs();
+            txtTtsEndpoint.TextChanged += (sender, e) => ValidateSettingsInputs();
             txtFfmpegPath.TextChanged += (sender, e) => ValidateSettingsInputs();
         }
 
@@ -5148,14 +6505,14 @@ namespace tiktok_Omni
 
             if (!IsValidHttpUrl(txtVeoEndpoint.Text))
             {
-                lblSettingsValidation.Text = "Veo Endpoint must be a valid http/https URL.";
+                lblSettingsValidation.Text = "URL gateway Veo phải là URL http/https hợp lệ.";
                 btnSaveSettings.Enabled = false;
                 return false;
             }
 
-            if (!IsValidHttpUrl(txtLyriaEndpoint.Text))
+            if (!IsValidHttpUrl(txtTtsEndpoint.Text))
             {
-                lblSettingsValidation.Text = "Lyria Endpoint must be a valid http/https URL.";
+                lblSettingsValidation.Text = "URL gateway TTS phải là URL http/https hợp lệ.";
                 btnSaveSettings.Enabled = false;
                 return false;
             }
@@ -5225,83 +6582,6 @@ namespace tiktok_Omni
             return decimalValue;
         }
 
-        private const int WatchSecondsUiMax = 10800; // 180 minutes — must match NumericUpDown maximum (minutes) × 60
-
-        private static string FormatWatchRangeForQueue(int secMin, int secMax)
-        {
-            var a = Math.Round(secMin / 60.0m, 2);
-            var b = Math.Round(secMax / 60.0m, 2);
-            return string.Format(CultureInfo.InvariantCulture, "{0:0.##}-{1:0.##} m", a, b);
-        }
-
-        private static void ParseWatchRangeToSeconds(string watchRange, out int watchMin, out int watchMax)
-        {
-            watchMin = 7;
-            watchMax = 18;
-            if (string.IsNullOrWhiteSpace(watchRange))
-            {
-                return;
-            }
-
-            var wr = watchRange.Trim();
-
-            if (wr.EndsWith(" m", StringComparison.OrdinalIgnoreCase))
-            {
-                var core = wr.Substring(0, wr.Length - 2).Trim();
-                var parts = core.Split('-');
-                if (parts.Length == 2 &&
-                    decimal.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var minM) &&
-                    decimal.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var maxM))
-                {
-                    watchMin = Math.Max(3, (int)Math.Round((double)minM * 60));
-                    watchMax = Math.Max(watchMin, (int)Math.Round((double)maxM * 60));
-                }
-
-                return;
-            }
-
-            var legacy = wr;
-            if (legacy.EndsWith("s", StringComparison.OrdinalIgnoreCase))
-            {
-                legacy = legacy.Substring(0, legacy.Length - 1);
-            }
-
-            var legacyParts = legacy.Split('-');
-            if (legacyParts.Length == 2 &&
-                int.TryParse(legacyParts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var smin) &&
-                int.TryParse(legacyParts[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var smax))
-            {
-                watchMin = Math.Max(3, smin);
-                watchMax = Math.Max(watchMin, smax);
-            }
-        }
-
-        private static int ReadWatchSecondsFromUi(NumericUpDown ctrl)
-        {
-            if (ctrl == null)
-            {
-                return 7;
-            }
-
-            return Math.Max(3, (int)Math.Round((double)ctrl.Value * 60));
-        }
-
-        private static int ReadWatchSecondsFromUiOrDefault(NumericUpDown ctrl, int defaultSeconds)
-        {
-            return ctrl == null ? defaultSeconds : ReadWatchSecondsFromUi(ctrl);
-        }
-
-        private static void ApplyWatchSecondsToUi(NumericUpDown ctrl, int seconds)
-        {
-            if (ctrl == null || seconds <= 0)
-            {
-                return;
-            }
-
-            var minutes = Math.Round(seconds / 60.0m, 2);
-            ctrl.Value = minutes < ctrl.Minimum ? ctrl.Minimum : (minutes > ctrl.Maximum ? ctrl.Maximum : minutes);
-        }
-
         private List<AutomationProfile> BuildProxyProfilesFromGrid()
         {
             var proxies = new List<AutomationProfile>();
@@ -5327,7 +6607,12 @@ namespace tiktok_Omni
                     ProxyPort = proxy.ProxyPort < 0 ? 0 : proxy.ProxyPort,
                     TikTokUniqueId = (proxy.TikTokUniqueId ?? string.Empty).Trim(),
                     TikTokNickname = (proxy.TikTokNickname ?? string.Empty).Trim(),
-                    TikTokUserId = (proxy.TikTokUserId ?? string.Empty).Trim()
+                    FacebookName = (proxy.FacebookName ?? string.Empty).Trim(),
+                    YouTubeName = (proxy.YouTubeName ?? string.Empty).Trim(),
+                    TikTokUserId = (proxy.TikTokUserId ?? string.Empty).Trim(),
+                    VoiceId = (proxy.VoiceId ?? string.Empty).Trim(),
+                    VideoStyle = (proxy.VideoStyle ?? string.Empty).Trim(),
+                    MascotStyle = (proxy.MascotStyle ?? string.Empty).Trim()
                 };
 
                 if (string.IsNullOrWhiteSpace(item.Name) &&
@@ -5338,7 +6623,11 @@ namespace tiktok_Omni
                     string.IsNullOrWhiteSpace(item.ProxyPass) &&
                     string.IsNullOrWhiteSpace(item.TikTokUniqueId) &&
                     string.IsNullOrWhiteSpace(item.TikTokNickname) &&
-                    string.IsNullOrWhiteSpace(item.TikTokUserId))
+                    string.IsNullOrWhiteSpace(item.FacebookName) &&
+                    string.IsNullOrWhiteSpace(item.YouTubeName) &&
+                    string.IsNullOrWhiteSpace(item.TikTokUserId) &&
+                    string.IsNullOrWhiteSpace(item.VoiceId) &&
+                    string.IsNullOrWhiteSpace(item.VideoStyle))
                 {
                     continue;
                 }
@@ -5369,7 +6658,12 @@ namespace tiktok_Omni
                 ViewportHeight = proxy.ViewportHeight,
                 TikTokUniqueId = proxy.TikTokUniqueId,
                 TikTokNickname = proxy.TikTokNickname,
-                TikTokUserId = proxy.TikTokUserId
+                FacebookName = proxy.FacebookName,
+                YouTubeName = proxy.YouTubeName,
+                TikTokUserId = proxy.TikTokUserId,
+                VoiceId = proxy.VoiceId ?? string.Empty,
+                VideoStyle = proxy.VideoStyle ?? string.Empty,
+                MascotStyle = proxy.MascotStyle ?? string.Empty
             };
         }
 
@@ -5428,7 +6722,14 @@ namespace tiktok_Omni
             }
 
             RefillAutoPostProfileItems(settings);
+            RefreshPhilosophyProfileCombo(settings);
+            RefreshHuntProductProfileCombo(settings);
+            RefreshAffiliateHuntProfileCombo(settings);
+            RefreshPhilosophyPrereqLabel(settings);
+            RefreshAiVideoGenModeReadinessLabels();
+            RefreshMascotProfileCombo(settings);
             SelectRunningProfileInUi(previous);
+            ApplyProfileScope(previous ?? GetRunningProfileName());
         }
 
         private void RefillAutoPostProfileItems(AppSettings settings)
@@ -5496,6 +6797,26 @@ namespace tiktok_Omni
                 cbAutoPostVideoFile.Items.Add(new AutoPostVideoItem(Path.GetFileName(path), path));
             }
 
+            if (!string.IsNullOrWhiteSpace(preferredFullPath) && File.Exists(preferredFullPath))
+            {
+                var alreadyListed = false;
+                for (var i = 1; i < cbAutoPostVideoFile.Items.Count; i++)
+                {
+                    if (cbAutoPostVideoFile.Items[i] is AutoPostVideoItem listed &&
+                        string.Equals(listed.FullPath, preferredFullPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        alreadyListed = true;
+                        break;
+                    }
+                }
+
+                if (!alreadyListed)
+                {
+                    cbAutoPostVideoFile.Items.Add(
+                        new AutoPostVideoItem(Path.GetFileName(preferredFullPath), preferredFullPath));
+                }
+            }
+
             if (cbAutoPostVideoFile.Items.Count <= 1)
             {
                 cbAutoPostVideoFile.SelectedIndex = 0;
@@ -5551,8 +6872,23 @@ namespace tiktok_Omni
 
         private void TabMain_SelectedIndexChanged(object sender, EventArgs e)
         {
+            HighlightSidebarForSelectedTab();
             var tab = tabMain?.SelectedTab;
             SetStatusStripText(tab == null ? "tiktok_Omni" : $"Đang xem: {tab.Text}");
+            if (tab != null && ReferenceEquals(tab, tabAiVideoGen))
+            {
+                ApplyAiVideoGenModeUiVisibility();
+            }
+
+            if (tab != null && ReferenceEquals(tab, tabRevenueDashboard))
+            {
+                _ = RefreshRevenueDashboardUiAsync();
+            }
+
+            if (tab != null && ReferenceEquals(tab, tabAutoPost))
+            {
+                RefreshAutoPostTabOnEnter();
+            }
         }
 
         private void SetStatusStripText(string text)
@@ -5564,6 +6900,7 @@ namespace tiktok_Omni
 
             void Apply()
             {
+                tslStatusMain.ForeColor = Color.Gainsboro;
                 tslStatusMain.Text = text ?? string.Empty;
             }
 
@@ -5577,38 +6914,225 @@ namespace tiktok_Omni
             }
         }
 
-        private void TabMain_DrawItem(object sender, DrawItemEventArgs e)
+        private async Task<Dictionary<string, bool>> PerformSystemHealthCheckAsync()
         {
-            var tab = tabMain.TabPages[e.Index];
-            var background = e.State.HasFlag(DrawItemState.Selected)
-                ? Color.FromArgb(76, 110, 245)
-                : Color.FromArgb(40, 44, 54);
-            using (var brush = new SolidBrush(background))
-            {
-                e.Graphics.FillRectangle(brush, e.Bounds);
-            }
-
-            TextRenderer.DrawText(
-                e.Graphics,
-                tab.Text,
-                Font,
-                e.Bounds,
-                Color.WhiteSmoke,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            return await _systemHealthCheckService.PerformSystemHealthCheckAsync().ConfigureAwait(false);
         }
 
-        private async void btnStartWarmup_Click(object sender, EventArgs e)
+        private async Task RunStartupSystemHealthCheckAsync()
         {
-            if (_isWarmupQueueRunning)
+            try
             {
-                Log("Queue is running. Stop queue before manual warm-up.");
+                SetStatusStripText("Đang kiểm tra hệ thống (FFmpeg, yt-dlp, API, lưu trữ)…");
+                var health = await PerformSystemHealthCheckAsync().ConfigureAwait(true);
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action(() => ApplySystemHealthToUi(health)));
+                }
+                else
+                {
+                    ApplySystemHealthToUi(health);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("[Health] Kiểm tra hệ thống thất bại: " + ex.Message);
+            }
+        }
+
+        private void ApplySystemHealthToUi(Dictionary<string, bool> health)
+        {
+            _systemHealth = health ?? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            bool Ok(string key) => _systemHealth.TryGetValue(key, out var v) && v;
+
+            var ffmpegOk = Ok("ffmpeg");
+            var ytdlpOk = Ok("ytdlp");
+            var apiOk = Ok("api_keys");
+            var storageOk = Ok("storage");
+
+            var failures = new List<string>();
+            if (!ffmpegOk)
+            {
+                failures.Add("FFmpeg");
+            }
+
+            if (!ytdlpOk)
+            {
+                failures.Add("yt-dlp");
+            }
+
+            if (!apiOk)
+            {
+                failures.Add("API Keys");
+            }
+
+            if (!storageOk)
+            {
+                failures.Add("Thư mục lưu");
+            }
+
+            if (failures.Count > 0 && tslStatusMain != null)
+            {
+                tslStatusMain.ForeColor = Color.FromArgb(255, 90, 90);
+                tslStatusMain.Text = "⚠ Cảnh báo: " + string.Join(", ", failures) + " — một số chức năng đã tắt.";
+            }
+            else
+            {
+                SetStatusStripText("Hệ thống sẵn sàng — FFmpeg, yt-dlp, API, lưu trữ OK.");
+            }
+
+            if (btnHuntAffiliates != null)
+            {
+                btnHuntAffiliates.Enabled = storageOk;
+            }
+
+            if (btnDownloadSelectedAffiliate != null)
+            {
+                btnDownloadSelectedAffiliate.Enabled = ffmpegOk && storageOk;
+            }
+
+            if (btnGenerateGeminiPrompt != null)
+            {
+                btnGenerateGeminiPrompt.Enabled = apiOk;
+            }
+
+            if (btnReviewScriptBeforeRender != null)
+            {
+                btnReviewScriptBeforeRender.Enabled = apiOk;
+            }
+
+            if (btnRenderAiVideo != null)
+            {
+                btnRenderAiVideo.Enabled = ffmpegOk && apiOk && storageOk;
+            }
+
+            if (btnRunAffiliateDeepVideo != null)
+            {
+                btnRunAffiliateDeepVideo.Enabled = ffmpegOk && apiOk && storageOk;
+            }
+
+            if (btnRunPhilosophyVideo != null)
+            {
+                btnRunPhilosophyVideo.Enabled = ffmpegOk && apiOk && storageOk;
+            }
+
+            if (btnPhilosophyImportFromFile != null)
+            {
+                btnPhilosophyImportFromFile.Enabled = ffmpegOk && apiOk && storageOk;
+            }
+
+            if (btnRunMascotChannelPipeline != null)
+            {
+                btnRunMascotChannelPipeline.Enabled = ffmpegOk && apiOk && storageOk;
+            }
+
+            if (btnPreviewMascotVariants != null)
+            {
+                btnPreviewMascotVariants.Enabled = apiOk;
+            }
+
+            var pipelineReady = ffmpegOk && apiOk && storageOk;
+            SetVideoReupPipelineControlsEnabled(pipelineReady);
+            SetVideoReupDataEntryControlsEnabled(true);
+            RefreshVideoReupReadinessLabel(null);
+            RefreshAiVideoGenModeReadinessLabels(ffmpegOk, apiOk, storageOk);
+            RefreshHealthReadinessPanel(health);
+            UpdateHealthOpenSettingsButton(health);
+
+            if (btnStartAutoPost != null)
+            {
+                btnStartAutoPost.Enabled = storageOk;
+                RefreshAutoPostStartButtonState();
+            }
+
+            Log("[Health] FFmpeg=" + (ffmpegOk ? "OK" : "FAIL") +
+                " | yt-dlp=" + (ytdlpOk ? "OK" : "FAIL") +
+                " | API=" + (apiOk ? "OK" : "FAIL") +
+                " | Storage=" + (storageOk ? "OK" : "FAIL"));
+        }
+
+        private void InitializeVideoReupDraftAutoSave()
+        {
+            if (_videoReupBindingList == null)
+            {
                 return;
             }
 
-            var state = BuildWarmupStateFromUi();
-
-            await RunWarmupAsync(state, false);
+            _videoReupBindingList.ListChanged += VideoReupBindingList_ListChanged;
+            _videoReupDraftTimer?.Stop();
+            _videoReupDraftTimer?.Dispose();
+            _videoReupDraftTimer = new System.Windows.Forms.Timer { Interval = 30000 };
+            _videoReupDraftTimer.Tick += VideoReupDraftTimer_Tick;
+            _videoReupDraftTimer.Start();
         }
+
+        private void VideoReupBindingList_ListChanged(object sender, ListChangedEventArgs e)
+        {
+            if (e.ListChangedType == ListChangedType.Reset && !_videoReupDraftDirty)
+            {
+                return;
+            }
+
+            _videoReupDraftDirty = true;
+        }
+
+        private void VideoReupDraftTimer_Tick(object sender, EventArgs e)
+        {
+            if (!_videoReupDraftDirty)
+            {
+                return;
+            }
+
+            FlushVideoReupDraftToDisk();
+        }
+
+        private void FlushVideoReupDraftToDisk()
+        {
+            if (_videoReupBindingList == null)
+            {
+                return;
+            }
+
+            _videoReupDraftStore.Save(_videoReupBindingList.ToList());
+            _videoReupDraftDirty = false;
+        }
+
+        private void LoadVideoReupDraftIntoGrid()
+        {
+            if (_videoReupBindingList == null)
+            {
+                return;
+            }
+
+            var rows = _videoReupDraftStore.Load();
+            if (rows.Count == 0)
+            {
+                return;
+            }
+
+            _videoReupBindingList.RaiseListChangedEvents = false;
+            try
+            {
+                _videoReupBindingList.Clear();
+                foreach (var row in rows)
+                {
+                    if (row != null)
+                    {
+                        row.ProfileName = ProfileScopedPaths.ResolveProfileName(row.ProfileName);
+                        _videoReupBindingList.Add(row);
+                    }
+                }
+            }
+            finally
+            {
+                _videoReupBindingList.RaiseListChangedEvents = true;
+                _videoReupBindingList.ResetBindings();
+            }
+
+            _videoReupDraftDirty = false;
+            LogVideoReup($"Video reup: đã khôi phục {rows.Count} dòng từ draft_reup.json.");
+        }
+
 
         private bool TryGetSelectedProfileFromSettingsGrid(out string profileName)
         {
@@ -5667,14 +7191,19 @@ namespace tiktok_Omni
 
         private async void btnOpenTikTokLoginBrowser_Click(object sender, EventArgs e)
         {
-            if (!TryGetSelectedProfileFromSettingsGrid(out var profileName)) return;
+            if (!TryGetSelectedProfileFromSettingsGrid(out var profileName))
+            {
+                return;
+            }
 
             var gridRow = dgvProxyProfiles.SelectedRows[0];
             var profile = gridRow.DataBoundItem as AutomationProfile;
             if (profile == null) return;
 
-            // Đặt con trỏ chuột quay rõ ràng trên UI Thread
             this.Cursor = Cursors.WaitCursor;
+            UseWaitCursor = true;
+            try
+            {
             Log($"[LOGIN] Bắt đầu mở Chrome cho nick: {profileName}...");
             if (tslStatusMain != null) tslStatusMain.Text = $"Đang chờ bạn đăng nhập TikTok cho nick: {profileName}...";
 
@@ -5684,93 +7213,121 @@ namespace tiktok_Omni
             BrowserAutomation.EnsureLegacySessionMigratedForSharedProfile(profile, profileName, Log);
             Log($"[LOGIN] user-data-dir: {sharedUserDataDir}");
 
-            await Task.Run(() =>
-            {
-                ChromeOptions options = new ChromeOptions();
-                options.AddArgument($"--user-data-dir={sharedUserDataDir}");
-                options.AddArgument("--disable-dev-shm-usage");
-                options.AddArgument("--no-sandbox");
-                options.AddArgument("--disable-blink-features=AutomationControlled");
-                options.AddExcludedArgument("enable-automation");
-
-                if (!string.IsNullOrWhiteSpace(profile.ProxyHost) && profile.ProxyPort > 0)
+            await WithBrowserLockAsync(
+                async ct =>
                 {
-                    options.AddArgument($"--proxy-server={profile.ProxyHost}:{profile.ProxyPort}");
-                }
-
-                using (IWebDriver driver = new ChromeDriver(options))
-                {
-                    driver.Navigate().GoToUrl("https://www.tiktok.com/login");
-                    bool isLoggedIn = false;
-
-                    // Vòng lặp chờ đăng nhập (Check Cookie sessionid)
-                    while (true)
-                    {
-                        try
+                    await Task.Run(
+                        async () =>
                         {
-                            var title = driver.Title; // Kích hoạt Exception nếu user tắt Chrome
-                            var sessionCookie = driver.Manage().Cookies.GetCookieNamed("sessionid");
-                            if (sessionCookie != null)
+                            var proxyServer = string.Empty;
+                            if (!string.IsNullOrWhiteSpace(profile.ProxyHost) && profile.ProxyPort > 0)
                             {
-                                isLoggedIn = true;
-                                break;
-                            }
-                            Thread.Sleep(2000);
-                        }
-                        catch
-                        {
-                            break; // Trình duyệt bị đóng thủ công
-                        }
-                    }
+                                proxyServer = profile.ProxyHost.Trim();
+                                if (proxyServer.IndexOf(':') < 0)
+                                {
+                                    proxyServer = proxyServer + ":" + profile.ProxyPort;
+                                }
 
-                    if (isLoggedIn)
-                    {
-                        this.Invoke(new Action(() => Log("[LOGIN] Đăng nhập thành công! Đang chuyển hướng lấy thông tin...")));
-
-                        try
-                        {
-                            // Truy cập /profile, TikTok sẽ tự động redirect về /@username của bạn
-                            driver.Navigate().GoToUrl("https://www.tiktok.com/profile");
-
-                            // Chờ quá trình redirect hoàn tất (khi URL xuất hiện chữ /@)
-                            for (int i = 0; i < 15; i++)
-                            {
-                                if (driver.Url.Contains("/@")) break;
-                                Thread.Sleep(1000);
+                                if (!proxyServer.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                                    !proxyServer.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+                                    !proxyServer.StartsWith("socks5://", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    proxyServer = "http://" + proxyServer;
+                                }
                             }
 
-                            // Lấy Username từ URL (Tuyệt đối chính xác)
-                            string currentUrl = driver.Url;
-                            if (currentUrl.Contains("/@"))
+                            using (var driver = SeleniumChromeLaunchHelper.CreateLoginChromeDriver(
+                                sharedUserDataDir,
+                                proxyServer,
+                                m => Invoke(new Action(() => Log(m)))))
                             {
-                                string uid = currentUrl.Substring(currentUrl.IndexOf("/@") + 2).Split('?')[0].Split('/')[0];
-                                profile.TikTokUniqueId = uid;
-                            }
+                                driver.Navigate().GoToUrl("https://www.tiktok.com/login");
+                                var isLoggedIn = false;
 
-                            // Lấy Tên hiển thị từ tiêu đề kênh
-                            Thread.Sleep(2000);
-                            string jsCode = @"
+                                while (true)
+                                {
+                                    ct.ThrowIfCancellationRequested();
+                                    try
+                                    {
+                                        _ = driver.Title;
+                                        var sessionCookie = driver.Manage().Cookies.GetCookieNamed("sessionid");
+                                        if (sessionCookie != null)
+                                        {
+                                            isLoggedIn = true;
+                                            break;
+                                        }
+
+                                        await Task.Delay(2000, ct).ConfigureAwait(false);
+                                    }
+                                    catch
+                                    {
+                                        break;
+                                    }
+                                }
+
+                                if (isLoggedIn)
+                                {
+                                    Invoke(new Action(() =>
+                                        Log("[LOGIN] Đăng nhập thành công! Đang chuyển hướng lấy thông tin...")));
+
+                                    try
+                                    {
+                                        driver.Navigate().GoToUrl("https://www.tiktok.com/profile");
+                                        for (var i = 0; i < 15; i++)
+                                        {
+                                            ct.ThrowIfCancellationRequested();
+                                            if (driver.Url.Contains("/@"))
+                                            {
+                                                break;
+                                            }
+
+                                            await Task.Delay(1000, ct).ConfigureAwait(false);
+                                        }
+
+                                        var currentUrl = driver.Url;
+                                        if (currentUrl.Contains("/@"))
+                                        {
+                                            var uid = currentUrl.Substring(currentUrl.IndexOf("/@", StringComparison.Ordinal) + 2)
+                                                .Split('?')[0]
+                                                .Split('/')[0];
+                                            profile.TikTokUniqueId = uid;
+                                        }
+
+                                        await Task.Delay(2000, ct).ConfigureAwait(false);
+                                        const string jsCode = @"
                         try {
                             let nameEl = document.querySelector('h1[data-e2e=""user-title""]');
                             return nameEl ? nameEl.innerText : '';
                         } catch(e) { return ''; }
                     ";
-                            var js = (IJavaScriptExecutor)driver;
-                            string nickName = js.ExecuteScript(jsCode)?.ToString() ?? "";
+                                        var js = (IJavaScriptExecutor)driver;
+                                        var nickName = js.ExecuteScript(jsCode)?.ToString() ?? string.Empty;
 
-                            profile.TikTokNickname = string.IsNullOrWhiteSpace(nickName) ? profile.TikTokUniqueId : nickName;
-                            if (string.IsNullOrWhiteSpace(profile.TikTokUserId)) profile.TikTokUserId = "ID_" + DateTime.Now.Ticks;
-                        }
-                        catch { /* Bỏ qua lỗi ngầm nếu mạng chập chờn */ }
-                    }
-
-                    driver.Quit(); // Lấy xong TỰ TẮT CHROME
-                }
-            });
+                                        profile.TikTokNickname = string.IsNullOrWhiteSpace(nickName)
+                                            ? profile.TikTokUniqueId
+                                            : nickName;
+                                        if (string.IsNullOrWhiteSpace(profile.TikTokUserId))
+                                        {
+                                            profile.TikTokUserId = "ID_" + DateTime.Now.Ticks;
+                                        }
+                                    }
+                                    catch
+                                    {
+                                        // ignored
+                                    }
+                                }
+                            }
+                        },
+                        ct).ConfigureAwait(false);
+                },
+                CancellationToken.None).ConfigureAwait(true);
 
             // DÙNG INVOKE ĐỂ XỬ LÝ LẠI GIAO DIỆN TRÊN LUỒNG CHÍNH
             this.Invoke(new Action(async () =>
             {
+                profile.IsTTLoggedIn = !string.IsNullOrWhiteSpace(profile.TikTokUniqueId);
+                await _socialAutomation.RefreshLoginStatusFromDiskAsync(profileName, profile, Log)
+                    .ConfigureAwait(true);
                 if (_proxyProfileBindingList != null) _proxyProfileBindingList.ResetItem(gridRow.Index);
                 dgvProxyProfiles.Refresh();
                 await SaveProfilesFromGridAsync();
@@ -5789,6 +7346,36 @@ namespace tiktok_Omni
                     dgvProxyProfiles.Rows[gridRow.Index + 1].Selected = true;
                 }
             }));
+            }
+            catch (InvalidOperationException ex)
+            {
+                Invoke(new Action(() =>
+                {
+                    Log("[LOGIN] " + ex.Message);
+                    MessageBox.Show(this, ex.Message, "Không mở được Chrome", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }));
+            }
+            catch (Exception ex)
+            {
+                Invoke(new Action(() =>
+                {
+                    Log("[LOGIN] Lỗi: " + ex.Message);
+                    MessageBox.Show(
+                        this,
+                        "Không mở được Chrome:\n" + ex.Message,
+                        "Lỗi đăng nhập TikTok",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }));
+            }
+            finally
+            {
+                Invoke(new Action(() =>
+                {
+                    Cursor = Cursors.Default;
+                    UseWaitCursor = false;
+                }));
+            }
         }
 
         private void btnCheckBrowserProfileHealth_Click(object sender, EventArgs e)
@@ -5842,426 +7429,330 @@ namespace tiktok_Omni
             var row = dgvProxyProfiles.SelectedRows[0];
             if (row?.DataBoundItem is AutomationProfile profile && !string.IsNullOrWhiteSpace(profile.Name))
             {
-                SelectRunningProfileInUi(profile.Name.Trim());
+                var name = profile.Name.Trim();
+                SelectRunningProfileInUi(name);
+                ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(_storageRootPathCache, name);
+                Log("[Storage] Đã đảm bảo thư mục Original / Processed / Reup / Failed cho profile «" + name + "».");
+                RefreshProfileLoginStateFromDisk(profile, persist: false);
+                dgvProxyProfiles.InvalidateRow(row.Index);
             }
         }
 
-        private void btnQueueWarmup_Click(object sender, EventArgs e)
+        private void dgvProxyProfiles_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
         {
-            var state = BuildWarmupStateFromUi();
-            const int defaultRetries = 2;
-            _warmupQueueScheduler.Enqueue(state, maxRetries: defaultRetries);
-            _warmupQueueBindingList.Add(new WarmupQueueUiItem
-            {
-                Profile = state.RunningProfileName,
-                Keywords = state.Keywords,
-                Videos = state.VideoCount,
-                WatchRange = FormatWatchRangeForQueue(state.WatchSecondsMin, state.WatchSecondsMax),
-                AutoComment = state.AutoComment,
-                DryRun = state.DryRun,
-                Status = "Pending",
-                RetryCount = 0,
-                MaxRetries = defaultRetries,
-                LastError = string.Empty,
-                CreatedAtUtc = DateTime.UtcNow,
-                NextRetryAtUtc = null
-            });
-            RefreshWarmupQueueStatus();
-            Log($"[QUEUE] Added warm-up job for profile '{state.RunningProfileName}'.");
-            _ = SaveWarmupQueueSnapshotAsync();
-        }
-
-        private async void btnStartWarmupQueue_Click(object sender, EventArgs e)
-        {
-            if (_isWarmupQueueRunning)
+            if (dgvProxyProfiles == null || e.RowIndex < 0 || e.ColumnIndex < 0)
             {
                 return;
             }
 
-            if (_warmupQueueScheduler.QueueCount == 0)
+            var col = dgvProxyProfiles.Columns[e.ColumnIndex];
+            if (col == null)
             {
-                Log("[QUEUE] No jobs to run.");
                 return;
             }
-            SyncSchedulerFromUi();
 
-            _isWarmupQueueRunning = true;
-            _pauseNowRequested = false;
-            btnStartWarmupQueue.Enabled = false;
-            btnStopWarmupQueue.Enabled = true;
-            btnPauseWarmupQueue.Enabled = !_isWarmupQueuePaused;
-            btnResumeWarmupQueue.Enabled = _isWarmupQueuePaused;
-            btnPauseNowWarmupQueue.Enabled = true;
-            btnStartWarmup.Enabled = false;
-            btnQueueWarmup.Enabled = false;
-            btnResumeWarmup.Enabled = false;
-            _warmupQueueCancellation?.Dispose();
-            _warmupQueueCancellation = new CancellationTokenSource();
-            RefreshWarmupQueueStatus();
+            var row = dgvProxyProfiles.Rows[e.RowIndex];
+            if (!(row?.DataBoundItem is AutomationProfile profile))
+            {
+                return;
+            }
 
+            bool? loggedIn = col.Name switch
+            {
+                "colProfileIsTTLoggedIn" => profile.IsTTLoggedIn,
+                "colProfileIsFBLoggedIn" => profile.IsFBLoggedIn,
+                "colProfileIsYTLoggedIn" => profile.IsYTLoggedIn,
+                _ => null
+            };
+
+            if (!loggedIn.HasValue)
+            {
+                return;
+            }
+
+            e.Value = loggedIn.Value ? "\u2713" : "\u2717";
+            e.FormattingApplied = true;
+            e.CellStyle.BackColor = loggedIn.Value ? Color.FromArgb(28, 92, 52) : Color.FromArgb(92, 38, 38);
+            e.CellStyle.ForeColor = Color.White;
+            e.CellStyle.SelectionBackColor = e.CellStyle.BackColor;
+            e.CellStyle.SelectionForeColor = Color.White;
+        }
+
+        private void dgvProxyProfiles_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            e.ThrowException = false;
+            if (e.ColumnIndex < 0 || e.RowIndex < 0 || dgvProxyProfiles == null)
+            {
+                return;
+            }
+
+            var col = dgvProxyProfiles.Columns[e.ColumnIndex];
+            if (col?.DataPropertyName == "ProxyPort" &&
+                dgvProxyProfiles.Rows[e.RowIndex].DataBoundItem is AutomationProfile profile)
+            {
+                profile.ProxyPort = 0;
+            }
+        }
+
+        private void RefreshProfileLoginStateFromDisk(AutomationProfile profile, bool persist)
+        {
+            if (profile == null || string.IsNullOrWhiteSpace(profile.Name))
+            {
+                return;
+            }
+
+            var probe = ProfileSessionProbe.ProbeFromDisk(profile, profile.Name.Trim());
+            ProfileSessionProbe.ApplyToProfile(profile, probe);
+            if (persist)
+            {
+                _ = PersistProfileLoginFlagsAsync(profile);
+            }
+        }
+
+        private void RefreshAllProfileLoginStatesFromDisk(bool persist)
+        {
+            if (_proxyProfileBindingList == null)
+            {
+                return;
+            }
+
+            foreach (var profile in _proxyProfileBindingList)
+            {
+                if (profile == null || string.IsNullOrWhiteSpace(profile.Name))
+                {
+                    continue;
+                }
+
+                RefreshProfileLoginStateFromDisk(profile, persist: false);
+            }
+
+            dgvProxyProfiles?.Refresh();
+            if (persist)
+            {
+                _ = SaveProfilesFromGridAsync();
+            }
+        }
+
+        private async Task PersistProfileLoginFlagsAsync(AutomationProfile profile)
+        {
+            if (profile == null)
+            {
+                return;
+            }
+
+            await _configManager.UpdateProfileSocialLoginStatusAsync(
+                profile.Name,
+                profile.IsTTLoggedIn,
+                profile.IsFBLoggedIn,
+                profile.IsYTLoggedIn,
+                Log).ConfigureAwait(true);
+        }
+
+        private async void btnLoginAllSocial_Click(object sender, EventArgs e)
+        {
+            if (!TryGetSelectedProfileFromSettingsGrid(out var profileName))
+            {
+                return;
+            }
+
+            var gridRow = dgvProxyProfiles.SelectedRows[0];
+            var profile = gridRow.DataBoundItem as AutomationProfile;
+            if (profile == null)
+            {
+                return;
+            }
+
+            if (btnLoginAllSocial != null)
+            {
+                btnLoginAllSocial.Enabled = false;
+            }
+
+            UseWaitCursor = true;
+            Cursor = Cursors.WaitCursor;
+            var loginCts = RegisterActiveJobCancellation();
             try
             {
-                await _warmupQueueScheduler.RunAsync(
-                    RunWarmupQueueJobAsync,
-                    Log,
-                    _warmupQueueCancellation.Token,
-                    HandleQueueEvent,
-                    _ => SaveWarmupQueueSnapshotAsync());
-                Log("[QUEUE] All jobs processed.");
-            }
-            catch (OperationCanceledException)
-            {
-                Log("[QUEUE] Queue stopped by user.");
-            }
-            finally
-            {
-                _isWarmupQueueRunning = false;
-                _isWarmupQueuePaused = false;
-                _pauseNowRequested = false;
-                btnStartWarmupQueue.Enabled = true;
-                btnStopWarmupQueue.Enabled = false;
-                btnPauseWarmupQueue.Enabled = false;
-                btnResumeWarmupQueue.Enabled = false;
-                btnPauseNowWarmupQueue.Enabled = false;
-                btnStartWarmup.Enabled = true;
-                btnQueueWarmup.Enabled = true;
-                _warmupQueueCancellation?.Dispose();
-                _warmupQueueCancellation = null;
-                _currentQueueJobCancellation?.Dispose();
-                _currentQueueJobCancellation = null;
-                await _warmupQueueStateManager.SavePausedFlagAsync(false);
-                await RefreshResumeStateAsync();
-                RefreshWarmupQueueStatus();
-                _ = SaveWarmupQueueSnapshotAsync();
-            }
-        }
+                var probe = await _socialAutomation.LoginAllSocialAsync(
+                    profileName,
+                    profile,
+                    loginCts.Token,
+                    Log).ConfigureAwait(true);
 
-        private void btnStopWarmupQueue_Click(object sender, EventArgs e)
-        {
-            if (_warmupQueueCancellation == null)
-            {
-                return;
-            }
+                _proxyProfileBindingList?.ResetItem(gridRow.Index);
+                dgvProxyProfiles?.Refresh();
+                await SaveProfilesFromGridAsync().ConfigureAwait(true);
 
-            btnStopWarmupQueue.Enabled = false;
-            _warmupQueueCancellation.Cancel();
-            Log("[QUEUE] Stopping queue...");
-            _ = _warmupQueueStateManager.SavePausedFlagAsync(false);
-        }
-
-        private void btnPauseWarmupQueue_Click(object sender, EventArgs e)
-        {
-            if (!_isWarmupQueueRunning || _isWarmupQueuePaused)
-            {
-                return;
-            }
-
-            _isWarmupQueuePaused = true;
-            btnPauseWarmupQueue.Enabled = false;
-            btnResumeWarmupQueue.Enabled = true;
-            RefreshWarmupQueueStatus();
-            Log("[QUEUE] Pause requested. Queue will pause after current job.");
-            _ = _warmupQueueStateManager.SavePausedFlagAsync(true);
-        }
-
-        private void btnResumeWarmupQueue_Click(object sender, EventArgs e)
-        {
-            if (!_isWarmupQueueRunning || !_isWarmupQueuePaused)
-            {
-                return;
-            }
-
-            _isWarmupQueuePaused = false;
-            btnPauseWarmupQueue.Enabled = true;
-            btnResumeWarmupQueue.Enabled = false;
-            RefreshWarmupQueueStatus();
-            Log("[QUEUE] Queue resumed.");
-            _ = _warmupQueueStateManager.SavePausedFlagAsync(false);
-        }
-
-        private void btnPauseNowWarmupQueue_Click(object sender, EventArgs e)
-        {
-            if (!_isWarmupQueueRunning)
-            {
-                return;
-            }
-
-            _pauseNowRequested = true;
-            _isWarmupQueuePaused = true;
-            btnPauseWarmupQueue.Enabled = false;
-            btnResumeWarmupQueue.Enabled = true;
-            btnPauseNowWarmupQueue.Enabled = false;
-            _currentQueueJobCancellation?.Cancel();
-            RefreshWarmupQueueStatus();
-            Log("[QUEUE] Pause-now requested. Current job will be re-queued from latest progress.");
-            _ = _warmupQueueStateManager.SavePausedFlagAsync(true);
-        }
-
-        private void btnRemoveQueueJob_Click(object sender, EventArgs e)
-        {
-            if (dgvWarmupQueue?.SelectedRows == null || dgvWarmupQueue.SelectedRows.Count == 0)
-            {
-                Log("[QUEUE] Please select a queue job to remove.");
-                return;
-            }
-
-            if (_isWarmupQueueRunning)
-            {
-                Log("[QUEUE] Stop queue before removing jobs.");
-                return;
-            }
-
-            var selected = dgvWarmupQueue.SelectedRows[0]?.DataBoundItem as WarmupQueueUiItem;
-            if (selected == null)
-            {
-                return;
-            }
-
-            var state = BuildStateFromQueueRow(selected);
-            var removed = _warmupQueueScheduler.RemoveFirstMatching(state);
-            if (removed)
-            {
-                _warmupQueueBindingList.Remove(selected);
-                SyncSchedulerFromUi();
-                RefreshWarmupQueueStatus();
-                Log($"[QUEUE] Removed job for profile '{selected.Profile}'.");
-                _ = SaveWarmupQueueSnapshotAsync();
-            }
-        }
-
-        private void btnClearWarmupQueue_Click(object sender, EventArgs e)
-        {
-            if (_isWarmupQueueRunning)
-            {
-                Log("[QUEUE] Stop queue before clearing.");
-                return;
-            }
-
-            _warmupQueueScheduler.ClearPending();
-            _warmupQueueBindingList?.Clear();
-            RefreshWarmupQueueStatus();
-            Log("[QUEUE] Cleared all pending jobs.");
-            _ = SaveWarmupQueueSnapshotAsync();
-        }
-
-        private void btnMoveQueueJobUp_Click(object sender, EventArgs e)
-        {
-            MoveSelectedQueueRow(-1);
-        }
-
-        private void btnMoveQueueJobDown_Click(object sender, EventArgs e)
-        {
-            MoveSelectedQueueRow(1);
-        }
-
-        private async void btnResumeWarmup_Click(object sender, EventArgs e)
-        {
-            var state = await _warmupStateManager.LoadAsync();
-            if (state == null)
-            {
-                btnResumeWarmup.Enabled = false;
-                Log("No resumable warm-up state found.");
-                return;
-            }
-
-            ApplyWarmupStateToUi(state);
-            await RunWarmupAsync(state, true);
-        }
-
-        private async Task RunWarmupAsync(WarmupRunState state, bool isResume)
-        {
-            btnStartWarmup.Enabled = false;
-            btnResumeWarmup.Enabled = false;
-            btnStopWarmup.Enabled = true;
-            _warmupCancellation?.Dispose();
-            _warmupCancellation = new CancellationTokenSource();
-            _currentWarmupState = state;
-            UpdateWarmupProgress(state.CompletedCount, state.VideoCount);
-            await _warmupStateManager.SaveAsync(state);
-
-            try
-            {
-                Log(isResume
-                    ? $"Resuming warm-up from {state.CompletedCount}/{state.VideoCount}..."
-                    : "Warm-up started...");
-                await _tikTokAutomation.StartWarmupAsync(
-                    state.Keywords,
-                    state.VideoCount,
-                    state.AutoComment,
-                    state.DryRun,
-                    state.CompletedCount,
-                    state.WatchSecondsMin <= 0 ? ReadWatchSecondsFromUi(numWatchMin) : state.WatchSecondsMin,
-                    state.WatchSecondsMax <= 0 ? ReadWatchSecondsFromUi(numWatchMax) : state.WatchSecondsMax,
-                    _warmupCancellation.Token,
-                    Log,
-                    HandleWarmupProgressUpdate,
-                    state.RunningProfileName);
-                Log("Warm-up completed.");
-                await _warmupStateManager.ClearAsync();
-                _currentWarmupState = null;
-            }
-            catch (OperationCanceledException)
-            {
-                Log("Warm-up stopped by user.");
+                MessageBox.Show(
+                    this,
+                    "TikTok: " + (probe.TikTokLoggedIn ? "Đã login" : "Chưa") + "\n" +
+                    "Facebook: " + (probe.FacebookLoggedIn ? "Đã login" : "Chưa") + "\n" +
+                    "YouTube: " + (probe.YouTubeLoggedIn ? "Đã login" : "Chưa") +
+                    (probe.HasCookieDatabase ? string.Empty : "\n\n(Chưa thấy file Cookies — thử đăng nhập lại và đóng Chrome đúng cách.)"),
+                    "Đăng nhập 3 nền tảng",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                Log("Warm-up failed: " + ex.Message);
+                Log("[LOGIN/ALL] " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Đăng nhập 3 nền tảng", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
-                btnStartWarmup.Enabled = true;
-                btnStopWarmup.Enabled = false;
-                _warmupCancellation?.Dispose();
-                _warmupCancellation = null;
-                await RefreshResumeStateAsync();
+                UseWaitCursor = false;
+                Cursor = Cursors.Default;
+                DisposeActiveJobCancellation();
+                if (btnLoginAllSocial != null && !btnLoginAllSocial.IsDisposed)
+                {
+                    btnLoginAllSocial.Enabled = true;
+                }
             }
         }
 
-        private void btnStopWarmup_Click(object sender, EventArgs e)
+        private async void btnRefreshProfileLoginStatus_Click(object sender, EventArgs e)
         {
-            if (_warmupCancellation == null)
-            {
-                return;
-            }
-
-            btnStopWarmup.Enabled = false;
-            _warmupCancellation.Cancel();
-            Log("Stopping warm-up...");
-        }
-
-        private async Task RunWarmupQueueJobAsync(WarmupRunState state, CancellationToken cancellationToken)
-        {
-            if (state == null)
-            {
-                return;
-            }
-
-            await WaitIfQueuePausedAsync(cancellationToken);
-
-            _currentWarmupState = state;
-            UpdateWarmupProgress(0, state.VideoCount);
-            await _warmupStateManager.SaveAsync(state);
-            RefreshWarmupQueueStatus();
-
+            btnRefreshProfileLoginStatus.Enabled = false;
             try
             {
-                _currentQueueJobCancellation?.Dispose();
-                _currentQueueJobCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                await _tikTokAutomation.StartWarmupAsync(
-                    state.Keywords,
-                    state.VideoCount,
-                    state.AutoComment,
-                    state.DryRun,
-                    state.CompletedCount,
-                    state.WatchSecondsMin <= 0 ? 7 : state.WatchSecondsMin,
-                    state.WatchSecondsMax <= 0 ? Math.Max(7, state.WatchSecondsMin) : state.WatchSecondsMax,
-                    _currentQueueJobCancellation.Token,
-                    Log,
-                    HandleWarmupProgressUpdate,
-                    state.RunningProfileName);
-                await _warmupStateManager.ClearAsync();
-            }
-            catch (OperationCanceledException) when (_pauseNowRequested)
-            {
-                _pauseNowRequested = false;
-                if (state.CompletedCount < state.VideoCount)
-                {
-                    var resumeState = CloneWarmupState(state);
-                    _warmupQueueScheduler.EnqueueFront(resumeState, 2);
-                    _warmupQueueBindingList?.Insert(0, new WarmupQueueUiItem
-                    {
-                        Profile = resumeState.RunningProfileName,
-                        Keywords = resumeState.Keywords,
-                        Videos = resumeState.VideoCount,
-                        WatchRange = FormatWatchRangeForQueue(resumeState.WatchSecondsMin, resumeState.WatchSecondsMax),
-                        AutoComment = resumeState.AutoComment,
-                        DryRun = resumeState.DryRun,
-                        Status = "Pending",
-                        RetryCount = 0,
-                        MaxRetries = 2,
-                        LastError = string.Empty,
-                        CreatedAtUtc = DateTime.UtcNow
-                    });
-                    _ = SaveWarmupQueueSnapshotAsync();
-                }
-
-                throw new WarmupQueueRequeueException("Paused now and re-queued.");
+                RefreshAllProfileLoginStatesFromDisk(persist: true);
+                Log("[LOGIN] Đã quét lại Cookies/Local State cho tất cả profile trên lưới.");
             }
             finally
             {
-                _currentQueueJobCancellation?.Dispose();
-                _currentQueueJobCancellation = null;
-                _currentWarmupState = null;
-                RefreshWarmupQueueStatus();
+                btnRefreshProfileLoginStatus.Enabled = true;
             }
         }
 
-        private async Task WaitIfQueuePausedAsync(CancellationToken cancellationToken)
+        private async void btnLoginFacebook_Click(object sender, EventArgs e)
         {
-            while (_isWarmupQueuePaused)
+            if (!TryGetSelectedProfileFromSettingsGrid(out var profileName)) return;
+            var gridRow = dgvProxyProfiles.SelectedRows[0];
+            var profile = gridRow.DataBoundItem as AutomationProfile;
+            if (profile == null) return;
+
+            UseWaitCursor = true;
+            Cursor = Cursors.WaitCursor;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await Task.Delay(250, cancellationToken);
+                var ok = await _socialAutomation.LoginFacebookAsync(
+                    profileName,
+                    profile,
+                    CancellationToken.None,
+                    Log).ConfigureAwait(true);
+                await _socialAutomation.RefreshLoginStatusFromDiskAsync(profileName, profile, Log)
+                    .ConfigureAwait(true);
+                _proxyProfileBindingList?.ResetItem(gridRow.Index);
+                dgvProxyProfiles?.Refresh();
+                await SaveProfilesFromGridAsync().ConfigureAwait(true);
+                MessageBox.Show(
+                    this,
+                    ok ? "Facebook: đã phát hiện phiên đăng nhập." : "Chưa xác nhận đăng nhập Facebook.",
+                    "Đăng nhập Facebook",
+                    MessageBoxButtons.OK,
+                    ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                Log("[LOGIN/FB] " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Đăng nhập Facebook", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                UseWaitCursor = false;
+                Cursor = Cursors.Default;
             }
         }
 
-        private void HandleQueueEvent(WarmupQueueRunEvent eventInfo)
+        private async void btnLoginYouTube_Click(object sender, EventArgs e)
         {
-            if (eventInfo == null || _warmupQueueBindingList == null)
-            {
-                return;
-            }
+            if (!TryGetSelectedProfileFromSettingsGrid(out var profileName)) return;
+            var gridRow = dgvProxyProfiles.SelectedRows[0];
+            var profile = gridRow.DataBoundItem as AutomationProfile;
+            if (profile == null) return;
 
-            if (InvokeRequired)
+            UseWaitCursor = true;
+            Cursor = Cursors.WaitCursor;
+            try
             {
-                BeginInvoke(new Action<WarmupQueueRunEvent>(HandleQueueEvent), eventInfo);
-                return;
+                var ok = await _socialAutomation.LoginYouTubeAsync(
+                    profileName,
+                    profile,
+                    CancellationToken.None,
+                    Log).ConfigureAwait(true);
+                await _socialAutomation.RefreshLoginStatusFromDiskAsync(profileName, profile, Log)
+                    .ConfigureAwait(true);
+                _proxyProfileBindingList?.ResetItem(gridRow.Index);
+                dgvProxyProfiles?.Refresh();
+                await SaveProfilesFromGridAsync().ConfigureAwait(true);
+                MessageBox.Show(
+                    this,
+                    ok ? "YouTube: đã phát hiện phiên đăng nhập." : "Chưa xác nhận đăng nhập YouTube.",
+                    "Đăng nhập YouTube",
+                    MessageBoxButtons.OK,
+                    ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
-
-            var row = FindQueueRow(eventInfo.State);
-            if (row == null)
+            catch (Exception ex)
             {
-                return;
+                Log("[LOGIN/YT] " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Đăng nhập YouTube", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-
-            if (eventInfo.EventType == WarmupQueueEventType.Started)
+            finally
             {
-                row.Status = "Running";
+                UseWaitCursor = false;
+                Cursor = Cursors.Default;
             }
-            else if (eventInfo.EventType == WarmupQueueEventType.Retrying)
-            {
-                row.Status = $"Retry {eventInfo.Attempt}/{eventInfo.MaxRetries + 1}";
-                row.RetryCount = Math.Max(row.RetryCount, eventInfo.Attempt);
-                row.LastError = eventInfo.ErrorMessage ?? string.Empty;
-                row.NextRetryAtUtc = eventInfo.NextRetryAtUtc ?? DateTime.UtcNow.AddMinutes(5);
-            }
-            else if (eventInfo.EventType == WarmupQueueEventType.Completed ||
-                     eventInfo.EventType == WarmupQueueEventType.FailedPermanent ||
-                     eventInfo.EventType == WarmupQueueEventType.Skipped)
-            {
-                if (eventInfo.EventType == WarmupQueueEventType.FailedPermanent ||
-                    eventInfo.EventType == WarmupQueueEventType.Skipped)
-                {
-                    row.LastError = eventInfo.ErrorMessage ?? string.Empty;
-                }
-                if (eventInfo.EventType == WarmupQueueEventType.Skipped)
-                {
-                    row.Status = "Skipped";
-                }
-                row.NextRetryAtUtc = null;
-                _ = AppendQueueHistoryAsync(eventInfo, row);
-                _warmupQueueBindingList.Remove(row);
-                _ = SaveWarmupQueueSnapshotAsync();
-            }
-
-            dgvWarmupQueue?.Refresh();
-            RefreshWarmupQueueStatus();
         }
+
+        private VideoStorageType GetSelectedAutoPostVideoType()
+        {
+            if (cbAutoPostVideoType?.SelectedItem is VideoStorageType t)
+            {
+                return t;
+            }
+
+            return VideoStorageType.Reup;
+        }
+
+        private void SyncAutoPostFolderFromProfileAndType()
+        {
+            var profile = ProfileScopedPaths.ResolveProfileName(
+                cbAutoPostProfile?.SelectedItem?.ToString() ?? GetRunningProfileName());
+            var folder = ProfileScopedPaths.GetVideoTypeFolder(
+                _storageRootPathCache,
+                profile,
+                GetSelectedAutoPostVideoType(),
+                create: true);
+            if (txtAutoPostFolder != null)
+            {
+                txtAutoPostFolder.Text = folder;
+            }
+
+            RefreshAutoPostVideoCombo();
+        }
+
+        private void cbAutoPostProfile_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            SyncAutoPostFolderFromProfileAndType();
+        }
+
+        private void cbAutoPostVideoType_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            SyncAutoPostFolderFromProfileAndType();
+        }
+
 
         private async void Form1_Shown(object sender, EventArgs e)
         {
+            HighlightSidebarForSelectedTab();
+            ApplyGlobalLogChrome();
+
+            InitializeJobQueueInfrastructure();
+            _ = ResumeAsyncVeoTasksOnStartupAsync();
             await LoadSettingsIntoUiAsync();
+            await RunStartupSystemHealthCheckAsync().ConfigureAwait(true);
+            LoadVideoReupDraftIntoGrid();
+            LoadSlideshowDraftIntoBuffer();
+            _jobWorkerService?.RefreshConcurrencyLimit();
             await RefreshResumeStateAsync();
             await LoadWarmupQueueAsync();
             _warmupQueueHistory = await _warmupQueueHistoryManager.LoadAsync();
@@ -6271,7 +7762,14 @@ namespace tiktok_Omni
             _isWarmupQueuePaused = paused && (_warmupQueueScheduler?.QueueCount ?? 0) > 0;
             RefreshWarmupQueueStatus();
             SetStatusStripText(tabMain?.SelectedTab == null ? "tiktok_Omni" : $"Đang xem: {tabMain.SelectedTab.Text}");
+            HighlightSidebarForSelectedTab();
+            ApplyGlobalLogChrome();
+            if (ReferenceEquals(tabMain?.SelectedTab, tabAffiliateHunter))
+            {
+                EnsureAffiliateFiltersLayout();
+            }
             _ = WarmupBundledToolingInBackgroundAsync();
+            _ = TryDailyAffiliateRevenueFetchOnStartupAsync();
             if (_isWarmupQueuePaused)
             {
                 var autoResumeEnabled = chkAutoResumeQueueOnStartup?.Checked ?? true;
@@ -6290,20 +7788,200 @@ namespace tiktok_Omni
             }
         }
 
+        private const string DefaultVeoEndpointPlaceholder = "https://api.veo.example.com/v1/videos";
+        private const string DefaultTtsEndpointPlaceholder = "https://api.example.com/v1/tts/synthesize";
+
+        /// <summary>Tự điền mặc định + phát hiện ffmpeg/yt-dlp/nhạc khi mở Cài đặt. Trả về true nếu cần lưu file.</summary>
+        private static bool ApplySettingsAutoFillAndDetect(AppSettings settings, ICollection<string> notes)
+        {
+            if (settings == null)
+            {
+                return false;
+            }
+
+            var changed = false;
+            void Note(string line)
+            {
+                notes?.Add(line);
+            }
+
+            var aiUnset = string.IsNullOrWhiteSpace(settings.AiApiKey);
+            if (string.IsNullOrWhiteSpace(settings.AiProvider) ||
+                (aiUnset && string.Equals(settings.AiProvider, "gemini", StringComparison.OrdinalIgnoreCase)))
+            {
+                settings.AiProvider = "Google";
+                changed = true;
+                Note("AI Provider → Google");
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.AiModel) ||
+                (aiUnset && string.Equals(settings.AiModel, "gemini-2.0-flash", StringComparison.OrdinalIgnoreCase)))
+            {
+                settings.AiModel = "gemini-2.5-flash";
+                changed = true;
+                Note("AI Model → gemini-2.5-flash");
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.VeoEndpoint))
+            {
+                settings.VeoEndpoint = DefaultVeoEndpointPlaceholder;
+                changed = true;
+                Note("URL gateway Veo → placeholder (thay bằng URL API thật khi dùng Veo)");
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.TtsEndpoint))
+            {
+                settings.TtsEndpoint = DefaultTtsEndpointPlaceholder;
+                changed = true;
+                Note("URL gateway TTS → placeholder (thay bằng URL API TTS thật, tùy chọn)");
+            }
+
+            if (settings.BlockPostingSafetyScoreBelow <= 0)
+            {
+                settings.BlockPostingSafetyScoreBelow = 75;
+                changed = true;
+                Note("Điểm an toàn đăng bài → 75");
+            }
+
+            if (settings.WatchSecondsMin <= 0)
+            {
+                settings.WatchSecondsMin = 7;
+                changed = true;
+                Note("Thời gian xem tối thiểu → 7 giây");
+            }
+
+            if (settings.WatchSecondsMax <= 0)
+            {
+                settings.WatchSecondsMax = 18;
+                changed = true;
+                Note("Thời gian xem tối đa → 18 giây");
+            }
+
+            if (settings.WatchSecondsMax < settings.WatchSecondsMin)
+            {
+                settings.WatchSecondsMax = Math.Max(settings.WatchSecondsMin, 18);
+                changed = true;
+            }
+
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? ".";
+            if (string.IsNullOrWhiteSpace(settings.FfmpegPath))
+            {
+                var ffmpeg = FindBundledToolExecutable(
+                    "ffmpeg.exe",
+                    "ffmpeg.exe",
+                    Path.Combine("Tools", "ffmpeg", "bin", "ffmpeg.exe"),
+                    Path.Combine("Tools", "ffmpeg", "ffmpeg.exe"));
+                if (!string.IsNullOrWhiteSpace(ffmpeg))
+                {
+                    settings.FfmpegPath = ffmpeg;
+                    changed = true;
+                    Note("FFmpeg → " + ffmpeg);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.YtDlpPath))
+            {
+                var ytdlp = FindBundledToolExecutable("yt-dlp.exe", "yt-dlp.exe");
+                if (!string.IsNullOrWhiteSpace(ytdlp))
+                {
+                    settings.YtDlpPath = ytdlp;
+                    changed = true;
+                    Note("yt-dlp → " + ytdlp);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.VideoReupMusicLibraryPath))
+            {
+                var musicDir = Path.Combine(baseDir, "Music");
+                try
+                {
+                    musicDir = Path.GetFullPath(musicDir);
+                    Directory.CreateDirectory(musicDir);
+                    settings.VideoReupMusicLibraryPath = musicDir;
+                    changed = true;
+                    Note("Thư mục nhạc reup → " + musicDir);
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+
+            return changed;
+        }
+
+        private static string FindBundledToolExecutable(string fileName, params string[] relativePaths)
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? ".";
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var candidates = new List<string>();
+            void Add(string path)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    return;
+                }
+
+                try
+                {
+                    path = Path.GetFullPath(path);
+                }
+                catch
+                {
+                    return;
+                }
+
+                if (seen.Add(path))
+                {
+                    candidates.Add(path);
+                }
+            }
+
+            Add(Path.Combine(baseDir, fileName));
+            if (relativePaths != null)
+            {
+                foreach (var rel in relativePaths)
+                {
+                    Add(Path.Combine(baseDir, rel));
+                }
+            }
+
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path))
+                {
+                    return path;
+                }
+            }
+
+            return string.Empty;
+        }
+
         private async Task LoadSettingsIntoUiAsync()
         {
             try
             {
                 var settings = await _configManager.LoadAsync();
+                var autoNotes = new List<string>();
+                var autoFilled = ApplySettingsAutoFillAndDetect(settings, autoNotes);
+                if (autoFilled)
+                {
+                    await _configManager.SaveAsync(settings).ConfigureAwait(true);
+                }
+
                 txtAiProvider.Text = settings.AiProvider;
                 txtAiModel.Text = settings.AiModel;
                 txtAiApiKey.Text = settings.AiApiKey;
                 txtTwoCaptchaApiKey.Text = settings.TwoCaptchaApiKey;
                 txtVeoApiKey.Text = settings.VeoApiKey;
-                txtLyriaApiKey.Text = settings.LyriaApiKey;
+                txtTtsApiKey.Text = settings.TtsApiKey;
                 txtVeoEndpoint.Text = settings.VeoEndpoint;
-                txtLyriaEndpoint.Text = settings.LyriaEndpoint;
+                txtTtsEndpoint.Text = settings.TtsEndpoint;
                 txtFfmpegPath.Text = settings.FfmpegPath;
+                _storageRootPathCache = string.Empty;
+                ProfileScopedPaths.SetConfiguredStorageRoot(string.Empty);
+                settings.StorageRootPath = string.Empty;
+
                 if (txtYtDlpPath != null)
                 {
                     txtYtDlpPath.Text = settings.YtDlpPath ?? string.Empty;
@@ -6314,10 +7992,49 @@ namespace tiktok_Omni
                     txtVideoReupMusicLibraryPath.Text = settings.VideoReupMusicLibraryPath ?? string.Empty;
                 }
 
+                if (txtReupVisualHookSfx != null)
+                {
+                    txtReupVisualHookSfx.Text = settings.ReupVisualHookSfxPath ?? string.Empty;
+                }
+
+                if (chkReupUseVisualHookSfx != null)
+                {
+                    chkReupUseVisualHookSfx.Checked = settings.ReupUseVisualHookSfx;
+                }
+
+                if (cbGeminiStyleTemplate != null)
+                {
+                    var style = GeminiStyleTemplateExtensions.Parse(settings.GeminiStyleTemplate);
+                    cbGeminiStyleTemplate.SelectedItem = style;
+                }
+
                 chkAutoResumeQueueOnStartup.Checked = settings.AutoResumeQueueOnStartup ?? true;
-                chkAlwaysRequirePrePostApproval.Checked = settings.AlwaysRequirePrePostApproval ?? true;
-                chkAlwaysRequirePreRenderApproval.Checked = settings.AlwaysRequirePreRenderApproval ?? false;
-                chkAutoRunApprovedQueue.Checked = settings.AutoRunApprovedQueue ?? false;
+                if (chkAutoFetchAffiliateRevenueOnStartup != null)
+                {
+                    chkAutoFetchAffiliateRevenueOnStartup.Checked = settings.AutoFetchAffiliateRevenueOnStartup ?? false;
+                }
+                _suppressApprovalBehaviorPersist = true;
+                try
+                {
+                    if (chkAlwaysRequirePrePostApproval != null)
+                    {
+                        chkAlwaysRequirePrePostApproval.Checked = settings.AlwaysRequirePrePostApproval ?? true;
+                    }
+
+                    if (chkAlwaysRequirePreRenderApproval != null)
+                    {
+                        chkAlwaysRequirePreRenderApproval.Checked = settings.AlwaysRequirePreRenderApproval ?? false;
+                    }
+
+                    if (chkAutoRunApprovedQueue != null)
+                    {
+                        chkAutoRunApprovedQueue.Checked = settings.AutoRunApprovedQueue ?? false;
+                    }
+                }
+                finally
+                {
+                    _suppressApprovalBehaviorPersist = false;
+                }
                 if (chkAffiliateAutoEnrich != null)
                 {
                     chkAffiliateAutoEnrich.Checked = settings.AffiliateAutoEnrichEnabled;
@@ -6346,8 +8063,12 @@ namespace tiktok_Omni
 
                 UpdateAffiliateRankControlsEnabledState();
                 numBlockPostingSafetyScoreBelow.Value = ClampNumericValue(settings.BlockPostingSafetyScoreBelow, numBlockPostingSafetyScoreBelow);
-                numWatchMin.Value = ClampNumericValue(Math.Round(settings.WatchSecondsMin / 60.0, 2), numWatchMin);
-                numWatchMax.Value = ClampNumericValue(Math.Round(settings.WatchSecondsMax / 60.0, 2), numWatchMax);
+                if (numMaxConcurrentJobs != null)
+                {
+                    numMaxConcurrentJobs.Value = ClampNumericValue(settings.MaxConcurrentJobs, numMaxConcurrentJobs);
+                }
+                numWatchMin.Value = ClampNumericValue(settings.WatchSecondsMin, numWatchMin);
+                numWatchMax.Value = ClampNumericValue(settings.WatchSecondsMax, numWatchMax);
                 numAiTransitionDuration.Value = ClampNumericValue(settings.VideoTransitionDurationSeconds, numAiTransitionDuration);
                 numAiTextSize.Value = ClampNumericValue(settings.VideoTextSize, numAiTextSize);
                 numAiMusicVolume.Value = ClampNumericValue(settings.VideoMusicVolume, numAiMusicVolume);
@@ -6356,11 +8077,20 @@ namespace tiktok_Omni
                     numWatchMax.Value = numWatchMin.Value;
                 }
                 PopulateProfileBindingListFromSettings(settings);
+                RefreshAllProfileLoginStatesFromDisk(persist: false);
                 RefreshRunningProfileOptions(settings);
                 RefreshAutoPostVideoCombo();
+                SyncAutoPostFolderFromProfileAndType();
                 ValidateSettingsInputs();
-                RefreshVideoReupMusicCombo();
-                Log("Settings loaded.");
+                await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
+                if (autoFilled)
+                {
+                    Log("Settings loaded — đã tự điền và lưu: " + string.Join("; ", autoNotes));
+                }
+                else
+                {
+                    Log("Settings loaded.");
+                }
             }
             catch (Exception ex)
             {
@@ -6391,17 +8121,26 @@ namespace tiktok_Omni
                 settings.AiApiKey = txtAiApiKey.Text.Trim();
                 settings.TwoCaptchaApiKey = txtTwoCaptchaApiKey.Text.Trim();
                 settings.VeoApiKey = txtVeoApiKey.Text.Trim();
-                settings.LyriaApiKey = txtLyriaApiKey.Text.Trim();
+                settings.TtsApiKey = txtTtsApiKey.Text.Trim();
                 settings.VeoEndpoint = txtVeoEndpoint.Text.Trim();
-                settings.LyriaEndpoint = txtLyriaEndpoint.Text.Trim();
+                settings.TtsEndpoint = txtTtsEndpoint.Text.Trim();
                 settings.FfmpegPath = txtFfmpegPath.Text.Trim();
+                settings.StorageRootPath = string.Empty;
+                _storageRootPathCache = string.Empty;
+                ProfileScopedPaths.SetConfiguredStorageRoot(string.Empty);
                 settings.YtDlpPath = (txtYtDlpPath?.Text ?? string.Empty).Trim();
                 settings.VideoReupMusicLibraryPath = (txtVideoReupMusicLibraryPath?.Text ?? string.Empty).Trim();
+                settings.ReupVisualHookSfxPath = (txtReupVisualHookSfx?.Text ?? string.Empty).Trim();
+                settings.ReupUseVisualHookSfx = chkReupUseVisualHookSfx?.Checked ?? false;
+                settings.GeminiStyleTemplate = GetSelectedGeminiStyleTemplate().ToString();
                 settings.AutoResumeQueueOnStartup = chkAutoResumeQueueOnStartup?.Checked ?? true;
+                settings.AutoFetchAffiliateRevenueOnStartup = chkAutoFetchAffiliateRevenueOnStartup?.Checked ?? false;
                 settings.AlwaysRequirePrePostApproval = chkAlwaysRequirePrePostApproval?.Checked ?? true;
                 settings.AlwaysRequirePreRenderApproval = chkAlwaysRequirePreRenderApproval?.Checked ?? false;
                 settings.AutoRunApprovedQueue = chkAutoRunApprovedQueue?.Checked ?? false;
                 settings.BlockPostingSafetyScoreBelow = (int)(numBlockPostingSafetyScoreBelow?.Value ?? 75);
+                settings.MaxConcurrentJobs = (int)(numMaxConcurrentJobs?.Value ?? 2);
+                _jobWorkerService?.RefreshConcurrencyLimit();
                 var wMin = ReadWatchSecondsFromUi(numWatchMin);
                 var wMax = ReadWatchSecondsFromUi(numWatchMax);
                 settings.WatchSecondsMin = Math.Min(WatchSecondsUiMax, wMin);
@@ -6413,7 +8152,7 @@ namespace tiktok_Omni
 
                 await _configManager.SaveAsync(settings);
                 RefreshRunningProfileOptions(settings);
-                RefreshVideoReupMusicCombo();
+                await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
                 Log("Settings saved successfully.");
             }
             catch (Exception ex)
@@ -6426,34 +8165,82 @@ namespace tiktok_Omni
             }
         }
 
+        private static string TruncateSettingsTestMessage(string text, int maxLen = 900)
+        {
+            var s = (text ?? string.Empty).Trim();
+            if (s.Length <= maxLen)
+            {
+                return s;
+            }
+
+            return s.Substring(0, maxLen) + "…";
+        }
+
+        private static bool LooksLikePlaceholderApiEndpoint(string endpoint)
+        {
+            var u = (endpoint ?? string.Empty).Trim();
+            return u.IndexOf("example.com", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        /// <summary>Thông báo ngay trên màn Cài đặt + ghi log Auto Warmup.</summary>
+        private void NotifySettingsApiTest(string serviceName, bool success, bool warning, string detail)
+        {
+            var title = serviceName + (success ? " — Key hoạt động" : warning ? " — Cảnh báo" : " — Key không dùng được");
+            var icon = success
+                ? MessageBoxIcon.Information
+                : warning
+                    ? MessageBoxIcon.Warning
+                    : MessageBoxIcon.Error;
+            var body = string.IsNullOrWhiteSpace(detail)
+                ? (success ? "Kết nối API thành công." : "Không kết nối được API.")
+                : detail;
+            Log((success ? "[Test] " : warning ? "[Test cảnh báo] " : "[Test lỗi] ") + serviceName + ": " + body.Replace("\r\n", " "));
+            MessageBox.Show(this, TruncateSettingsTestMessage(body), title, MessageBoxButtons.OK, icon);
+        }
+
         private async void btnTestAi_Click(object sender, EventArgs e)
         {
             btnTestAi.Enabled = false;
+            var prevText = btnTestAi.Text;
+            btnTestAi.Text = "…";
             try
             {
                 if (string.IsNullOrWhiteSpace(txtAiApiKey.Text))
                 {
-                    Log("AI test failed: AI API key is empty.");
+                    NotifySettingsApiTest("AI (Gemini)", false, false, "Chưa nhập AI API Key.");
                     return;
                 }
 
                 var geminiService = new GeminiService();
                 var text = await geminiService.GenerateScriptAsync(
-                    "Return a short text: OK",
+                    "Trả lời đúng một từ: OK",
                     txtAiProvider.Text.Trim(),
                     txtAiApiKey.Text.Trim(),
-                    txtAiModel.Text.Trim());
+                    txtAiModel.Text.Trim()).ConfigureAwait(true);
 
-                Log(string.IsNullOrWhiteSpace(text)
-                    ? "AI test warning: request succeeded but response is empty."
-                    : "AI test passed.");
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    NotifySettingsApiTest(
+                        "AI (Gemini)",
+                        false,
+                        true,
+                        "API phản hồi nhưng nội dung trống.\r\nKiểm tra model («" + txtAiModel.Text.Trim() + "») và quota.");
+                    return;
+                }
+
+                NotifySettingsApiTest(
+                    "AI (Gemini)",
+                    true,
+                    false,
+                    "Key hoạt động.\r\nModel: " + txtAiModel.Text.Trim() + "\r\nPhản hồi mẫu: " + TruncateSettingsTestMessage(text, 120));
             }
             catch (Exception ex)
             {
-                Log("AI test failed: " + ex.Message);
+                NotifySettingsApiTest("AI (Gemini)", false, false, FormatApiTestException(ex));
             }
             finally
             {
+                btnTestAi.Text = prevText;
                 btnTestAi.Enabled = true;
             }
         }
@@ -6461,24 +8248,31 @@ namespace tiktok_Omni
         private async void btnTestTwoCaptcha_Click(object sender, EventArgs e)
         {
             btnTestTwoCaptcha.Enabled = false;
+            var prevText = btnTestTwoCaptcha.Text;
+            btnTestTwoCaptcha.Text = "…";
             try
             {
                 if (string.IsNullOrWhiteSpace(txtTwoCaptchaApiKey.Text))
                 {
-                    Log("2Captcha test failed: API key is empty.");
+                    NotifySettingsApiTest("2Captcha", false, false, "Chưa nhập 2Captcha API Key.");
                     return;
                 }
 
                 var service = new CaptchaService();
-                var balance = await service.GetBalanceAsync(txtTwoCaptchaApiKey.Text.Trim(), CancellationToken.None);
-                Log($"2Captcha test passed. Balance: {balance:0.####} USD");
+                var balance = await service.GetBalanceAsync(txtTwoCaptchaApiKey.Text.Trim(), CancellationToken.None).ConfigureAwait(true);
+                NotifySettingsApiTest(
+                    "2Captcha",
+                    true,
+                    false,
+                    "Key hoạt động.\r\nSố dư tài khoản: " + balance.ToString("0.####", CultureInfo.InvariantCulture) + " USD");
             }
             catch (Exception ex)
             {
-                Log("2Captcha test failed: " + ex.Message);
+                NotifySettingsApiTest("2Captcha", false, false, FormatApiTestException(ex));
             }
             finally
             {
+                btnTestTwoCaptcha.Text = prevText;
                 btnTestTwoCaptcha.Enabled = true;
             }
         }
@@ -6486,51 +8280,143 @@ namespace tiktok_Omni
         private async void btnTestVeo_Click(object sender, EventArgs e)
         {
             btnTestVeo.Enabled = false;
+            var prevText = btnTestVeo.Text;
+            btnTestVeo.Text = "…";
             try
             {
+                if (string.IsNullOrWhiteSpace(txtVeoApiKey.Text))
+                {
+                    NotifySettingsApiTest("Veo", false, false, "Chưa nhập Veo API Key.");
+                    return;
+                }
+
+                var endpoint = txtVeoEndpoint.Text.Trim();
+                if (LooksLikePlaceholderApiEndpoint(endpoint))
+                {
+                    NotifySettingsApiTest(
+                        "Veo",
+                        false,
+                        false,
+                        "Endpoint vẫn là mẫu (example.com) — không phải API thật.\r\nHãy thay URL do nhà cung cấp Veo/gateway cung cấp.");
+                    return;
+                }
+
+                if (!IsValidHttpUrl(endpoint))
+                {
+                    NotifySettingsApiTest("Veo", false, false, "Veo Endpoint không phải URL http/https hợp lệ.");
+                    return;
+                }
+
                 var videoService = new VideoService();
                 var url = await videoService.GenerateVideoAsync(
                     "Generate a 2-second test clip.",
                     txtVeoApiKey.Text.Trim(),
-                    txtVeoEndpoint.Text.Trim());
+                    endpoint).ConfigureAwait(true);
 
-                Log(string.IsNullOrWhiteSpace(url)
-                    ? "Veo test warning: request succeeded but no video URL returned."
-                    : "Veo test passed.");
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    NotifySettingsApiTest(
+                        "Veo",
+                        false,
+                        true,
+                        "Kết nối được nhưng JSON không có trường videoUrl.\r\nKiểm tra endpoint và định dạng phản hồi API.");
+                    return;
+                }
+
+                NotifySettingsApiTest(
+                    "Veo",
+                    true,
+                    false,
+                    "Key hoạt động.\r\nĐã nhận videoUrl (rút gọn):\r\n" + TruncateSettingsTestMessage(url, 200));
             }
             catch (Exception ex)
             {
-                Log("Veo test failed: " + ex.Message);
+                NotifySettingsApiTest("Veo", false, false, FormatApiTestException(ex));
             }
             finally
             {
+                btnTestVeo.Text = prevText;
                 btnTestVeo.Enabled = true;
             }
         }
 
-        private async void btnTestLyria_Click(object sender, EventArgs e)
+        private async void btnTestTts_Click(object sender, EventArgs e)
         {
-            btnTestLyria.Enabled = false;
+            btnTestTts.Enabled = false;
+            var prevText = btnTestTts.Text;
+            btnTestTts.Text = "…";
             try
             {
+                if (string.IsNullOrWhiteSpace(txtTtsApiKey.Text))
+                {
+                    NotifySettingsApiTest("TTS", false, false, "Chưa nhập TTS API Key.");
+                    return;
+                }
+
+                var endpoint = txtTtsEndpoint.Text.Trim();
+                if (LooksLikePlaceholderApiEndpoint(endpoint))
+                {
+                    NotifySettingsApiTest(
+                        "TTS",
+                        false,
+                        false,
+                        "Endpoint vẫn là mẫu (example.com) — không phải API thật.\r\n" +
+                        "Nhập URL + key từ gateway Text-to-Speech (OpenAI, ElevenLabs, Google Cloud TTS, v.v. — không dùng chung key Gemini).");
+                    return;
+                }
+
+                if (!IsValidHttpUrl(endpoint))
+                {
+                    NotifySettingsApiTest("TTS", false, false, "TTS Endpoint không phải URL http/https hợp lệ.");
+                    return;
+                }
+
                 var videoService = new VideoService();
                 var url = await videoService.GenerateAudioAsync(
-                    "This is a short connection test.",
-                    txtLyriaApiKey.Text.Trim(),
-                    txtLyriaEndpoint.Text.Trim());
+                    "Đây là câu test kết nối Text-to-Speech ngắn.",
+                    txtTtsApiKey.Text.Trim(),
+                    endpoint).ConfigureAwait(true);
 
-                Log(string.IsNullOrWhiteSpace(url)
-                    ? "Lyria test warning: request succeeded but no audio URL returned."
-                    : "Lyria test passed.");
+                if (string.IsNullOrWhiteSpace(url))
+                {
+                    NotifySettingsApiTest(
+                        "TTS",
+                        false,
+                        true,
+                        "Kết nối được nhưng JSON không có trường audioUrl.\r\n" +
+                        "Kiểm tra TTS Endpoint và định dạng phản hồi API (POST JSON → audioUrl).");
+                    return;
+                }
+
+                NotifySettingsApiTest(
+                    "TTS",
+                    true,
+                    false,
+                    "TTS API hoạt động.\r\nĐã nhận audioUrl (rút gọn):\r\n" + TruncateSettingsTestMessage(url, 200));
             }
             catch (Exception ex)
             {
-                Log("Lyria test failed: " + ex.Message);
+                NotifySettingsApiTest("TTS", false, false, FormatApiTestException(ex));
             }
             finally
             {
-                btnTestLyria.Enabled = true;
+                btnTestTts.Text = prevText;
+                btnTestTts.Enabled = true;
             }
+        }
+
+        private static string FormatApiTestException(Exception ex)
+        {
+            var msg = ex?.Message ?? "Lỗi không xác định.";
+            if (msg.IndexOf("429", StringComparison.Ordinal) >= 0 ||
+                msg.IndexOf("quota", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                msg.IndexOf("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Hết quota / giới hạn API (429).\r\n\r\n" + TruncateSettingsTestMessage(msg, 700) +
+                       "\r\n\r\nGợi ý: đổi model (gemini-1.5-flash), đợi reset, hoặc bật billing trên Google AI Studio.";
+            }
+
+            return TruncateSettingsTestMessage(msg, 900);
         }
 
         private void btnBrowseFfmpegPath_Click(object sender, EventArgs e)
@@ -6563,11 +8449,11 @@ namespace tiktok_Omni
             }
         }
 
-        private void btnBrowseVideoReupMusicLibrary_Click(object sender, EventArgs e)
+        private async void btnBrowseVideoReupMusicLibrary_Click(object sender, EventArgs e)
         {
             try
             {
-                var s = GetSettingsSnapshotForVideoReupMusic();
+                var s = await GetSettingsSnapshotForVideoReupMusicAsync().ConfigureAwait(true);
                 var start = VideoReupRemixService.GetMusicLibraryDirectory(s);
                 if (!Directory.Exists(start))
                 {
@@ -6580,13 +8466,18 @@ namespace tiktok_Omni
                     dlg.SelectedPath = Directory.Exists(start) ? start : Environment.GetFolderPath(Environment.SpecialFolder.MyMusic);
                     if (dlg.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(dlg.SelectedPath))
                     {
+                        var chosen = dlg.SelectedPath.Trim();
                         if (txtVideoReupMusicLibraryPath != null)
                         {
-                            txtVideoReupMusicLibraryPath.Text = dlg.SelectedPath.Trim();
+                            txtVideoReupMusicLibraryPath.Text = chosen;
                         }
 
-                        RefreshVideoReupMusicCombo();
-                        Log("Video reup nhạc: đã chọn thư mục trong Cài đặt — bấm «Save Settings» để lưu vào appsettings.json.");
+                        var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                        settings.VideoReupMusicLibraryPath = chosen;
+                        await _configManager.SaveAsync(settings).ConfigureAwait(true);
+
+                        await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
+                        Log("Video reup nhạc: đã lưu thư mục nhạc.");
                     }
                 }
             }
@@ -6596,11 +8487,11 @@ namespace tiktok_Omni
             }
         }
 
-        private void btnVideoReupOpenMusicFolder_Click(object sender, EventArgs e)
+        private async void btnVideoReupOpenMusicFolder_Click(object sender, EventArgs e)
         {
             try
             {
-                var s = GetSettingsSnapshotForVideoReupMusic();
+                var s = await GetSettingsSnapshotForVideoReupMusicAsync().ConfigureAwait(true);
                 var dir = VideoReupRemixService.GetMusicLibraryDirectory(s);
                 VideoReupRemixService.EnsureMusicLibraryDirectoryExists(s);
                 Process.Start(new ProcessStartInfo
@@ -6609,14 +8500,14 @@ namespace tiktok_Omni
                     Arguments = "\"" + dir + "\"",
                     UseShellExecute = true
                 });
-                RefreshVideoReupMusicCombo();
+                await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
                 Log("Video reup nhạc: đã mở thư mục → " + dir);
                 MessageBox.Show(
                     this,
                     "Đã mở thư mục nhạc trong File Explorer.\r\n\r\n" +
                     "• Kéo hoặc copy các file .mp3 vào đúng thư mục đó (chỉ đuôi .mp3).\r\n" +
                     "• Quay lại tab Video reup: bấm «Làm mới danh sách» hoặc chọn lại một dòng trong bảng — combo bên trên sẽ hiện tên bài.\r\n" +
-                    "• Chọn bài trong combo rồi tiếp tục Lyria / Render.",
+                    "• Chọn bài trong combo rồi tiếp tục Voiceover / Render.",
                     "Video reup — thư mục nhạc",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -6627,9 +8518,9 @@ namespace tiktok_Omni
             }
         }
 
-        private void btnVideoReupRefreshMusicList_Click(object sender, EventArgs e)
+        private async void btnVideoReupRefreshMusicList_Click(object sender, EventArgs e)
         {
-            RefreshVideoReupMusicCombo();
+            await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
             var n = cbVideoReupMusic?.Items.Count ?? 0;
             Log(n > 0
                 ? $"Video reup nhạc: đã làm mới — có {n} file .mp3."
@@ -6776,8 +8667,12 @@ namespace tiktok_Omni
 
         private void Log(string message)
         {
-            if (rtbLogs.IsDisposed)
+            if (rtbLogs == null || rtbLogs.IsDisposed)
             {
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    _ = AppendLogToFileAsync($"[{DateTime.Now:HH:mm:ss}] {message}");
+                }
                 return;
             }
 
@@ -6836,6 +8731,7 @@ namespace tiktok_Omni
             void Apply()
             {
                 lblVideoReupProgress.Text = "Tiến trình: " + (statusText ?? string.Empty).Trim();
+                SetReupPreviewStage(statusText);
                 if (indeterminate)
                 {
                     pbVideoReupProgress.Style = ProgressBarStyle.Marquee;
@@ -6869,636 +8765,8 @@ namespace tiktok_Omni
             SetVideoReupProgress("sẵn sàng", 0);
         }
 
-        private void UpdateWarmupProgress(int completed, int total)
-        {
-            if (pbWarmupProgress.IsDisposed || lblWarmupProgress.IsDisposed)
-            {
-                return;
-            }
 
-            if (pbWarmupProgress.InvokeRequired || lblWarmupProgress.InvokeRequired)
-            {
-                pbWarmupProgress.Invoke(new Action<int, int>(UpdateWarmupProgress), completed, total);
-                return;
-            }
 
-            if (total <= 0)
-            {
-                pbWarmupProgress.Value = 0;
-                lblWarmupProgress.Text = "Tiến độ: 0/0 (0%)";
-                return;
-            }
-
-            var safeCompleted = Math.Max(0, Math.Min(completed, total));
-            var percent = (int)Math.Round((double)safeCompleted * 100 / total);
-            pbWarmupProgress.Value = Math.Max(0, Math.Min(percent, 100));
-            lblWarmupProgress.Text = $"Tiến độ: {safeCompleted}/{total} ({percent}%)";
-        }
-
-        private async void HandleWarmupProgressUpdate(int completed, int total)
-        {
-            UpdateWarmupProgress(completed, total);
-
-            if (_currentWarmupState == null)
-            {
-                return;
-            }
-
-            _currentWarmupState.CompletedCount = completed;
-            _currentWarmupState.VideoCount = total;
-            _currentWarmupState.LastUpdatedUtc = DateTime.UtcNow;
-            await _warmupStateManager.SaveAsync(_currentWarmupState);
-        }
-
-        private async Task RefreshResumeStateAsync()
-        {
-            var state = await _warmupStateManager.LoadAsync();
-            btnResumeWarmup.Enabled = state != null && state.CompletedCount < state.VideoCount;
-        }
-
-        private void ApplyWarmupStateToUi(WarmupRunState state)
-        {
-            txtKeywords.Text = state.Keywords;
-            SelectRunningProfileInUi(state.RunningProfileName);
-            numVideoCount.Value = Math.Max(numVideoCount.Minimum, Math.Min(numVideoCount.Maximum, state.VideoCount));
-            if (state.WatchSecondsMin > 0)
-            {
-                ApplyWatchSecondsToUi(numWatchMin, state.WatchSecondsMin);
-            }
-
-            if (state.WatchSecondsMax > 0)
-            {
-                ApplyWatchSecondsToUi(numWatchMax, state.WatchSecondsMax);
-            }
-            chkAutoComment.Checked = state.AutoComment;
-            rbDryRun.Checked = state.DryRun;
-            rbLiveRun.Checked = !state.DryRun;
-            UpdateWarmupProgress(state.CompletedCount, state.VideoCount);
-        }
-
-        private WarmupRunState BuildWarmupStateFromUi()
-        {
-            return new WarmupRunState
-            {
-                Keywords = txtKeywords.Text.Trim(),
-                RunningProfileName = cbRunningProfile?.SelectedItem?.ToString() ?? "default",
-                VideoCount = (int)numVideoCount.Value,
-                WatchSecondsMin = ReadWatchSecondsFromUi(numWatchMin),
-                WatchSecondsMax = Math.Max(ReadWatchSecondsFromUi(numWatchMin), ReadWatchSecondsFromUi(numWatchMax)),
-                AutoComment = chkAutoComment.Checked,
-                DryRun = rbDryRun.Checked,
-                CompletedCount = 0,
-                LastUpdatedUtc = DateTime.UtcNow
-            };
-        }
-
-        private void RefreshWarmupQueueStatus()
-        {
-            if (lblWarmupQueueStatus == null || lblWarmupQueueStatus.IsDisposed)
-            {
-                return;
-            }
-
-            if (lblWarmupQueueStatus.InvokeRequired)
-            {
-                lblWarmupQueueStatus.Invoke(new Action(RefreshWarmupQueueStatus));
-                return;
-            }
-
-            var queueCount = _warmupQueueScheduler?.QueueCount ?? 0;
-            var runningText = _isWarmupQueueRunning ? (_isWarmupQueuePaused ? "paused" : "running") : "idle";
-            lblWarmupQueueStatus.Text = $"Queue: {queueCount} job(s) - {runningText}";
-        }
-
-        private async Task LoadWarmupQueueAsync()
-        {
-            try
-            {
-                var snapshots = await _warmupQueueStateManager.LoadAsync();
-                _warmupQueueScheduler.ReplacePending(snapshots);
-                _warmupQueueBindingList?.Clear();
-                foreach (var snapshot in snapshots)
-                {
-                    if (snapshot?.State == null)
-                    {
-                        continue;
-                    }
-
-                    _warmupQueueBindingList.Add(new WarmupQueueUiItem
-                    {
-                        Profile = snapshot.State.RunningProfileName,
-                        Keywords = snapshot.State.Keywords,
-                        Videos = snapshot.State.VideoCount,
-                        WatchRange = FormatWatchRangeForQueue(snapshot.State.WatchSecondsMin, snapshot.State.WatchSecondsMax),
-                        AutoComment = snapshot.State.AutoComment,
-                        DryRun = snapshot.State.DryRun,
-                        Status = "Pending",
-                        RetryCount = snapshot.RetryCount,
-                        MaxRetries = snapshot.MaxRetries,
-                        LastError = snapshot.LastError ?? string.Empty,
-                        CreatedAtUtc = snapshot.CreatedAtUtc == default(DateTime) ? DateTime.UtcNow : snapshot.CreatedAtUtc,
-                        NextRetryAtUtc = snapshot.NextRetryAtUtc
-                    });
-                }
-                RefreshWarmupQueueStatus();
-            }
-            catch (Exception ex)
-            {
-                Log("[QUEUE] Failed to load queue state: " + ex.Message);
-            }
-        }
-
-        private async Task SaveWarmupQueueSnapshotAsync()
-        {
-            try
-            {
-                var snapshots = BuildSnapshotsFromUi();
-                await _warmupQueueStateManager.SaveAsync(snapshots);
-            }
-            catch (Exception ex)
-            {
-                Log("[QUEUE] Failed to persist queue state: " + ex.Message);
-            }
-        }
-
-        private void SyncSchedulerFromUi()
-        {
-            var snapshots = BuildSnapshotsFromUi();
-            _warmupQueueScheduler.ReplacePending(snapshots);
-            RefreshWarmupQueueStatus();
-        }
-
-        private List<WarmupQueueSnapshotItem> BuildSnapshotsFromUi()
-        {
-            var snapshots = new List<WarmupQueueSnapshotItem>();
-            if (_warmupQueueBindingList == null)
-            {
-                return snapshots;
-            }
-
-            for (var i = 0; i < _warmupQueueBindingList.Count; i++)
-            {
-                var row = _warmupQueueBindingList[i];
-                if (row == null)
-                {
-                    continue;
-                }
-
-                snapshots.Add(new WarmupQueueSnapshotItem
-                {
-                    State = BuildStateFromQueueRow(row),
-                    MaxRetries = row.MaxRetries < 0 ? 0 : row.MaxRetries,
-                    CreatedAtUtc = row.CreatedAtUtc == default(DateTime) ? DateTime.UtcNow : row.CreatedAtUtc,
-                    RetryCount = Math.Max(0, row.RetryCount),
-                    LastError = row.LastError ?? string.Empty,
-                    NextRetryAtUtc = row.NextRetryAtUtc
-                });
-            }
-
-            return snapshots;
-        }
-
-        private WarmupQueueUiItem FindQueueRow(WarmupRunState state)
-        {
-            if (state == null || _warmupQueueBindingList == null)
-            {
-                return null;
-            }
-
-            for (var i = 0; i < _warmupQueueBindingList.Count; i++)
-            {
-                var row = _warmupQueueBindingList[i];
-                if (row == null)
-                {
-                    continue;
-                }
-
-                ParseWatchRangeToSeconds(row.WatchRange, out var rowWatchMin, out var rowWatchMax);
-                if (string.Equals(row.Profile ?? string.Empty, state.RunningProfileName ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(row.Keywords ?? string.Empty, state.Keywords ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-                    row.Videos == state.VideoCount &&
-                    rowWatchMin == state.WatchSecondsMin &&
-                    rowWatchMax == state.WatchSecondsMax)
-                {
-                    return row;
-                }
-            }
-
-            return null;
-        }
-
-        private static WarmupRunState BuildStateFromQueueRow(WarmupQueueUiItem row)
-        {
-            ParseWatchRangeToSeconds(row?.WatchRange, out var watchMin, out var watchMax);
-
-            return new WarmupRunState
-            {
-                RunningProfileName = row?.Profile ?? "default",
-                Keywords = row?.Keywords ?? string.Empty,
-                VideoCount = row?.Videos ?? 0,
-                WatchSecondsMin = watchMin,
-                WatchSecondsMax = watchMax,
-                AutoComment = row?.AutoComment ?? true,
-                DryRun = row?.DryRun ?? false
-            };
-        }
-
-        private static WarmupRunState CloneWarmupState(WarmupRunState source)
-        {
-            if (source == null)
-            {
-                return new WarmupRunState();
-            }
-
-            return new WarmupRunState
-            {
-                Keywords = source.Keywords,
-                RunningProfileName = source.RunningProfileName,
-                VideoCount = source.VideoCount,
-                WatchSecondsMin = source.WatchSecondsMin,
-                WatchSecondsMax = source.WatchSecondsMax,
-                AutoComment = source.AutoComment,
-                DryRun = source.DryRun,
-                CompletedCount = source.CompletedCount,
-                LastUpdatedUtc = source.LastUpdatedUtc
-            };
-        }
-
-        private void dgvWarmupQueue_CellEndEdit(object sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0 || _isWarmupQueueRunning || _warmupQueueBindingList == null)
-            {
-                return;
-            }
-
-            var column = dgvWarmupQueue.Columns[e.ColumnIndex];
-            if (!string.Equals(column?.DataPropertyName, "MaxRetries", StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            var row = dgvWarmupQueue.Rows[e.RowIndex]?.DataBoundItem as WarmupQueueUiItem;
-            if (row == null)
-            {
-                return;
-            }
-
-            if (row.MaxRetries < 0)
-            {
-                row.MaxRetries = 0;
-            }
-            else if (row.MaxRetries > 10)
-            {
-                row.MaxRetries = 10;
-            }
-
-            dgvWarmupQueue.Refresh();
-            SyncSchedulerFromUi();
-            _ = SaveWarmupQueueSnapshotAsync();
-            Log($"[QUEUE] Updated MaxRetries for '{row.Profile}' to {row.MaxRetries}.");
-        }
-
-        private async Task AppendQueueHistoryAsync(WarmupQueueRunEvent eventInfo, WarmupQueueUiItem row)
-        {
-            try
-            {
-                var record = new WarmupQueueHistoryRecord
-                {
-                    FinishedAtUtc = DateTime.UtcNow,
-                    Profile = row?.Profile ?? string.Empty,
-                    Keywords = row?.Keywords ?? string.Empty,
-                    Videos = row?.Videos ?? 0,
-                    Result = eventInfo.EventType == WarmupQueueEventType.Completed
-                        ? "Completed"
-                        : (eventInfo.EventType == WarmupQueueEventType.Skipped ? "Skipped" : "Failed"),
-                    Error = (eventInfo.EventType == WarmupQueueEventType.FailedPermanent || eventInfo.EventType == WarmupQueueEventType.Skipped)
-                        ? (eventInfo.ErrorMessage ?? string.Empty)
-                        : string.Empty,
-                    Attempts = Math.Max(1, eventInfo.Attempt)
-                };
-
-                _warmupQueueHistory.Insert(0, record);
-                if (_warmupQueueHistory.Count > 300)
-                {
-                    _warmupQueueHistory.RemoveRange(300, _warmupQueueHistory.Count - 300);
-                }
-
-                await _warmupQueueHistoryManager.AppendAsync(record);
-                RefreshQueueStatsSummary();
-            }
-            catch (Exception ex)
-            {
-                Log("[QUEUE] Failed to append history: " + ex.Message);
-            }
-        }
-
-        private async void btnRefreshQueueStats_Click(object sender, EventArgs e)
-        {
-            _warmupQueueHistory = await _warmupQueueHistoryManager.LoadAsync();
-            RefreshQueueStatsSummary();
-            Log("[QUEUE] Stats refreshed.");
-        }
-
-        private void btnOpenQueueHistory_Click(object sender, EventArgs e)
-        {
-            var records = _warmupQueueHistory ?? new List<WarmupQueueHistoryRecord>();
-            var form = new Form
-            {
-                Text = "Warm-up Queue History",
-                StartPosition = FormStartPosition.CenterParent,
-                Size = new Size(1080, 520),
-                BackColor = Color.FromArgb(31, 34, 42),
-                ForeColor = Color.Gainsboro
-            };
-
-            var topPanel = new Panel
-            {
-                Dock = DockStyle.Top,
-                Height = 56,
-                BackColor = Color.FromArgb(31, 34, 42)
-            };
-            var lblSearch = new Label
-            {
-                Text = "Search",
-                AutoSize = true,
-                Location = new Point(12, 18),
-                ForeColor = Color.Gainsboro
-            };
-            var txtSearch = new TextBox
-            {
-                Location = new Point(66, 14),
-                Size = new Size(240, 28),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke
-            };
-            var lblResult = new Label
-            {
-                Text = "Result",
-                AutoSize = true,
-                Location = new Point(320, 18),
-                ForeColor = Color.Gainsboro
-            };
-            var cbResult = new ComboBox
-            {
-                Location = new Point(368, 14),
-                Size = new Size(120, 28),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke
-            };
-            cbResult.Items.AddRange(new object[] { "All", "Completed", "Failed", "Skipped" });
-            cbResult.SelectedIndex = 0;
-            var cbRange = new ComboBox
-            {
-                Location = new Point(640, 14),
-                Size = new Size(100, 28),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke
-            };
-            cbRange.Items.AddRange(new object[] { "Today", "7d", "30d", "Custom" });
-            cbRange.SelectedIndex = 0;
-            var dtFrom = new DateTimePicker
-            {
-                Location = new Point(748, 14),
-                Size = new Size(120, 28),
-                Format = DateTimePickerFormat.Short,
-                Enabled = false,
-                Value = DateTime.Today.AddDays(-7)
-            };
-            var dtTo = new DateTimePicker
-            {
-                Location = new Point(874, 14),
-                Size = new Size(120, 28),
-                Format = DateTimePickerFormat.Short,
-                Enabled = false,
-                Value = DateTime.Today
-            };
-            var btnExportHistory = new Button
-            {
-                Text = "Export CSV",
-                Location = new Point(998, 13),
-                Size = new Size(70, 30),
-                BackColor = Color.FromArgb(60, 64, 77),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.WhiteSmoke
-            };
-            btnExportHistory.FlatAppearance.BorderSize = 0;
-            var btnRetrySkipped = new Button
-            {
-                Text = "Retry Skipped",
-                Location = new Point(898, 13),
-                Size = new Size(96, 30),
-                BackColor = Color.FromArgb(60, 64, 77),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.WhiteSmoke
-            };
-            btnRetrySkipped.FlatAppearance.BorderSize = 0;
-
-            var grid = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                AutoGenerateColumns = false,
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                RowHeadersVisible = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                BackgroundColor = Color.FromArgb(20, 22, 28),
-                BorderStyle = BorderStyle.FixedSingle,
-                DataSource = new BindingList<WarmupQueueHistoryRecord>(new List<WarmupQueueHistoryRecord>(records))
-            };
-            grid.DefaultCellStyle = new DataGridViewCellStyle
-            {
-                BackColor = Color.FromArgb(31, 34, 42),
-                ForeColor = Color.Gainsboro,
-                SelectionBackColor = Color.FromArgb(76, 110, 245),
-                SelectionForeColor = Color.White
-            };
-            grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
-            {
-                BackColor = Color.FromArgb(40, 44, 54),
-                ForeColor = Color.WhiteSmoke,
-                SelectionBackColor = Color.FromArgb(40, 44, 54),
-                SelectionForeColor = Color.WhiteSmoke
-            };
-            grid.EnableHeadersVisualStyles = false;
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "FinishedAtUtc", HeaderText = "Finished (UTC)", FillWeight = 14 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Profile", HeaderText = "Profile", FillWeight = 12 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Keywords", HeaderText = "Keywords", FillWeight = 20 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Videos", HeaderText = "Videos", FillWeight = 8 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Attempts", HeaderText = "Attempts", FillWeight = 8 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Result", HeaderText = "Result", FillWeight = 10 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Error", HeaderText = "Error", FillWeight = 28 });
-
-            Action refreshGrid = () =>
-            {
-                var keyword = (txtSearch.Text ?? string.Empty).Trim();
-                var selectedResult = cbResult.SelectedItem?.ToString() ?? "All";
-                var filteredRange = FilterHistoryByRange(records, cbRange.SelectedItem?.ToString(), dtFrom.Value, dtTo.Value);
-                var filtered = filteredRange
-                    .Where(r =>
-                        (selectedResult == "All" || string.Equals(r.Result, selectedResult, StringComparison.OrdinalIgnoreCase)) &&
-                        (string.IsNullOrWhiteSpace(keyword) ||
-                         (r.Profile ?? string.Empty).IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                         (r.Keywords ?? string.Empty).IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                         (r.Error ?? string.Empty).IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0))
-                    .ToList();
-                grid.DataSource = new BindingList<WarmupQueueHistoryRecord>(filtered);
-            };
-
-            txtSearch.TextChanged += (s, a) => refreshGrid();
-            cbResult.SelectedIndexChanged += (s, a) => refreshGrid();
-            cbRange.SelectedIndexChanged += (s, a) =>
-            {
-                var isCustom = string.Equals(cbRange.SelectedItem?.ToString(), "Custom", StringComparison.OrdinalIgnoreCase);
-                dtFrom.Enabled = isCustom;
-                dtTo.Enabled = isCustom;
-                refreshGrid();
-            };
-            dtFrom.ValueChanged += (s, a) => refreshGrid();
-            dtTo.ValueChanged += (s, a) => refreshGrid();
-            btnExportHistory.Click += (s, a) =>
-            {
-                try
-                {
-                    var current = ((BindingList<WarmupQueueHistoryRecord>)grid.DataSource)?.ToList() ?? new List<WarmupQueueHistoryRecord>();
-                    if (current.Count == 0)
-                    {
-                        MessageBox.Show(form, "Không có dữ liệu để export.", "Queue History", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        return;
-                    }
-
-                    using (var dialog = new SaveFileDialog())
-                    {
-                        dialog.FileName = $"queue_history_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
-                        dialog.Filter = "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*";
-                        dialog.Title = "Export Queue History";
-                        if (dialog.ShowDialog(form) != DialogResult.OK)
-                        {
-                            return;
-                        }
-
-                        var lines = new List<string> { "FinishedAtUtc,Profile,Keywords,Videos,Attempts,Result,Error" };
-                        foreach (var item in current)
-                        {
-                            lines.Add(string.Join(",",
-                                CsvEscape(item.FinishedAtUtc.ToString("O")),
-                                CsvEscape(item.Profile),
-                                CsvEscape(item.Keywords),
-                                item.Videos.ToString(),
-                                item.Attempts.ToString(),
-                                CsvEscape(item.Result),
-                                CsvEscape(item.Error)));
-                        }
-                        File.WriteAllLines(dialog.FileName, lines);
-                        MessageBox.Show(form, "Export CSV thành công.", "Queue History", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(form, "Export thất bại: " + ex.Message, "Queue History", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            };
-            btnRetrySkipped.Click += (s, a) =>
-            {
-                try
-                {
-                    var skippedNetwork = records
-                        .Where(x => string.Equals(x.Result, "Skipped", StringComparison.OrdinalIgnoreCase))
-                        .Where(x => IsRetryableNetworkOrProxyError(x.Error))
-                        .Take(20)
-                        .ToList();
-                    if (skippedNetwork.Count == 0)
-                    {
-                        MessageBox.Show(form, "Không có job Skipped do network/proxy để retry.", "Queue History", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        return;
-                    }
-
-                    var added = 0;
-                    foreach (var item in skippedNetwork)
-                    {
-                        var state = new WarmupRunState
-                        {
-                            Keywords = item.Keywords,
-                            VideoCount = Math.Max(1, item.Videos),
-                            CompletedCount = 0,
-                            AutoComment = chkAutoComment?.Checked ?? false,
-                            DryRun = rbDryRun?.Checked ?? false,
-                            RunningProfileName = item.Profile,
-                            WatchSecondsMin = ReadWatchSecondsFromUiOrDefault(numWatchMin, 7),
-                            WatchSecondsMax = Math.Max(
-                                ReadWatchSecondsFromUiOrDefault(numWatchMin, 7),
-                                ReadWatchSecondsFromUiOrDefault(numWatchMax, 18))
-                        };
-                        _warmupQueueScheduler.Enqueue(state, 2);
-                        _warmupQueueBindingList.Add(new WarmupQueueUiItem
-                        {
-                            Profile = state.RunningProfileName,
-                            Keywords = state.Keywords,
-                            Videos = state.VideoCount,
-                            WatchRange = FormatWatchRangeForQueue(state.WatchSecondsMin, state.WatchSecondsMax),
-                            AutoComment = state.AutoComment,
-                            DryRun = state.DryRun,
-                            Status = "Pending",
-                            RetryCount = 0,
-                            MaxRetries = 2,
-                            LastError = string.Empty,
-                            CreatedAtUtc = DateTime.UtcNow
-                        });
-                        added++;
-                    }
-
-                    RefreshWarmupQueueStatus();
-                    _ = SaveWarmupQueueSnapshotAsync();
-                    MessageBox.Show(form, $"Đã re-queue {added} job skipped (network/proxy).", "Queue History", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(form, "Retry Skipped thất bại: " + ex.Message, "Queue History", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            };
-
-            topPanel.Controls.Add(lblSearch);
-            topPanel.Controls.Add(txtSearch);
-            topPanel.Controls.Add(lblResult);
-            topPanel.Controls.Add(cbResult);
-            topPanel.Controls.Add(cbRange);
-            topPanel.Controls.Add(dtFrom);
-            topPanel.Controls.Add(dtTo);
-            topPanel.Controls.Add(btnRetrySkipped);
-            topPanel.Controls.Add(btnExportHistory);
-            form.Controls.Add(topPanel);
-            form.Controls.Add(grid);
-            refreshGrid();
-            form.ShowDialog(this);
-        }
-
-        private static string CsvEscape(string value)
-        {
-            var text = value ?? string.Empty;
-            if (text.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0)
-            {
-                return "\"" + text.Replace("\"", "\"\"") + "\"";
-            }
-            return text;
-        }
-
-        private static bool IsRetryableNetworkOrProxyError(string error)
-        {
-            var text = (error ?? string.Empty).ToLowerInvariant();
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return false;
-            }
-
-            var keywords = new[]
-            {
-                "proxy", "ip", "timeout", "timed out", "dns", "network", "connection", "socket", "reset", "temporarily unavailable"
-            };
-            return keywords.Any(k => text.Contains(k));
-        }
 
         private async Task EnqueueApprovalItemAsync(ApprovalQueueItem item)
         {
@@ -7550,6 +8818,15 @@ namespace tiktok_Omni
             return string.IsNullOrWhiteSpace(tags) ? body : (body + " " + tags).Trim();
         }
 
+        /// <summary>
+        /// Chờ tiến trình ngoài (ffmpeg, ffprobe, …) và <see cref="Process.Kill"/> khi <paramref name="cancellationToken"/> hủy (Stop).
+        /// Các lệnh Process.Start trong Form1 hiện chỉ mở file/explorer (UseShellExecute) — không dùng WaitForExit.
+        /// </summary>
+        private static void WaitForExternalToolProcessExit(Process process, CancellationToken cancellationToken)
+        {
+            ProcessCancellationHelper.WaitForExit(process, cancellationToken);
+        }
+
         private string GetSelectedAutoPostCaptionStyleKey()
         {
             var idx = cbCaptionStyle?.SelectedIndex ?? 0;
@@ -7570,7 +8847,12 @@ namespace tiktok_Omni
             {
                 var rows = items
                     .Where(x => x != null)
-                    .Select(x => $"{(x.ProductName ?? string.Empty).Trim().ToLowerInvariant()}|{(x.Price ?? string.Empty).Trim().ToLowerInvariant()}|{(x.ImageUrl ?? string.Empty).Trim().ToLowerInvariant()}")
+                    .Select(x =>
+                        $"{ProfileScopedPaths.ResolveProfileName(x.ProfileName)}|" +
+                        $"{(x.SourceKeyword ?? string.Empty).Trim().ToLowerInvariant()}|" +
+                        $"{(x.ProductName ?? string.Empty).Trim().ToLowerInvariant()}|" +
+                        $"{(x.Price ?? string.Empty).Trim().ToLowerInvariant()}|" +
+                        $"{(x.ImageUrl ?? string.Empty).Trim().ToLowerInvariant()}")
                     .OrderBy(x => x)
                     .ToList();
                 itemText = string.Join(";", rows);
@@ -7627,19 +8909,29 @@ namespace tiktok_Omni
 
         private async void btnOpenApprovalQueue_Click(object sender, EventArgs e)
         {
+            HighlightSidebarForSelectedTab();
             _approvalQueueItems = _approvalQueueItems ?? await _approvalQueueManager.LoadAsync();
+            foreach (var row in _approvalQueueItems)
+            {
+                ApprovalAffiliateTagging.EnsureTargetFields(row, row?.AffiliateLink, row?.ProductId);
+            }
+
             var source = new BindingList<ApprovalQueueItem>(_approvalQueueItems
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .ToList());
 
             var form = new Form
             {
-                Text = "Approval Queue",
+                Text = "Hàng duyệt nội dung",
                 StartPosition = FormStartPosition.CenterParent,
-                Size = new Size(1120, 620),
+                Size = new Size(1180, 700),
+                Font = ApprovalQueueBodyFont,
                 BackColor = Color.FromArgb(31, 34, 42),
                 ForeColor = Color.Gainsboro
             };
+
+            var pnlApprovalBehavior = BuildApprovalQueueBehaviorPanel();
+            form.FormClosed += (_, __) => RestoreApprovalBehaviorControlsToHost();
 
             var split = new SplitContainer
             {
@@ -7661,8 +8953,26 @@ namespace tiktok_Omni
                 DataSource = source
             };
             grid.EnableHeadersVisualStyles = false;
-            grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(40, 44, 54), ForeColor = Color.WhiteSmoke };
-            grid.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(31, 34, 42), ForeColor = Color.Gainsboro };
+            grid.Font = ApprovalQueueBodyFont;
+            grid.RowTemplate.Height = ApprovalQueueGridRowHeight;
+            grid.ColumnHeadersHeight = AppGridHeaderHeight;
+            grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.FromArgb(40, 44, 54),
+                ForeColor = Color.WhiteSmoke,
+                Font = AppGridHeaderFont,
+                Alignment = DataGridViewContentAlignment.MiddleLeft,
+                Padding = new Padding(6, 8, 6, 8),
+                WrapMode = DataGridViewTriState.False
+            };
+            grid.DefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.FromArgb(31, 34, 42),
+                ForeColor = Color.Gainsboro,
+                Font = ApprovalQueueBodyFont,
+                Padding = new Padding(4, 2, 4, 2)
+            };
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Type", DataPropertyName = "JobType", FillWeight = 12, ReadOnly = true });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Status", DataPropertyName = "Status", FillWeight = 12, ReadOnly = true });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Profile", DataPropertyName = "Profile", FillWeight = 14, ReadOnly = true });
@@ -7672,10 +8982,19 @@ namespace tiktok_Omni
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Reviewed By", DataPropertyName = "ReviewedBy", FillWeight = 14, ReadOnly = true });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Reviewed At", DataPropertyName = "ReviewedAtLabel", FillWeight = 16, ReadOnly = true });
             grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Last Audit Action", DataPropertyName = "LastAuditAction", FillWeight = 28, ReadOnly = true });
+            grid.Columns.Add(new DataGridViewCheckBoxColumn
+            {
+                HeaderText = "Gắn link Affiliate",
+                DataPropertyName = nameof(ApprovalQueueItem.CanAttachAffiliate),
+                FillWeight = 14,
+                ReadOnly = false,
+                ThreeState = false
+            });
 
             var preview = new RichTextBox
             {
                 Dock = DockStyle.Fill,
+                Font = ApprovalQueueBodyFont,
                 BackColor = Color.FromArgb(20, 22, 28),
                 ForeColor = Color.Gainsboro,
                 BorderStyle = BorderStyle.FixedSingle
@@ -7684,7 +9003,8 @@ namespace tiktok_Omni
             var txtNotes = new TextBox
             {
                 Dock = DockStyle.Top,
-                Height = 28,
+                Height = ApprovalQueueInputHeight,
+                Font = ApprovalQueueBodyFont,
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.WhiteSmoke
@@ -7693,38 +9013,45 @@ namespace tiktok_Omni
             var txtReviewedBy = new TextBox
             {
                 Dock = DockStyle.Top,
-                Height = 28,
+                Height = ApprovalQueueInputHeight,
+                Font = ApprovalQueueBodyFont,
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.WhiteSmoke
             };
             txtReviewedBy.Text = "reviewer";
 
+            var chkAttachAffiliate = new CheckBox
+            {
+                Text = "Gắn link Affiliate",
+                Dock = DockStyle.Top,
+                Height = ApprovalQueueInputHeight,
+                AutoSize = false,
+                Font = ApprovalQueueBodyFont,
+                Padding = new Padding(4, 4, 0, 0),
+                ForeColor = Color.FromArgb(200, 204, 214),
+                BackColor = Color.FromArgb(31, 34, 42)
+            };
+
+            var lblAffiliateTarget = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = ApprovalQueueInputHeight - 4,
+                Font = ApprovalQueueBodyFont,
+                ForeColor = Color.FromArgb(150, 156, 172),
+                Text = "Link dự kiến: (chưa chọn dòng)"
+            };
+
             var cbStatusFilter = new ComboBox
             {
-                Location = new Point(660, 10),
-                Size = new Size(120, 28),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke
+                DropDownStyle = ComboBoxStyle.DropDownList
             };
             cbStatusFilter.Items.AddRange(new object[] { "All", "Pending", "Approved", "Completed", "Rejected" });
             cbStatusFilter.SelectedIndex = 0;
-            var txtApprovalKeyword = new TextBox
-            {
-                Location = new Point(786, 10),
-                Size = new Size(150, 28),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke
-            };
+            var txtApprovalKeyword = new TextBox();
             var cbApprovalProfile = new ComboBox
             {
-                Location = new Point(942, 10),
-                Size = new Size(120, 28),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke
+                DropDownStyle = ComboBoxStyle.DropDownList
             };
             cbApprovalProfile.Items.Add("All");
             foreach (var p in (_approvalQueueItems ?? new List<ApprovalQueueItem>()).Select(x => (x.Profile ?? string.Empty).Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x))
@@ -7734,51 +9061,53 @@ namespace tiktok_Omni
             cbApprovalProfile.SelectedIndex = 0;
             var dtApprovalFrom = new DateTimePicker
             {
-                Location = new Point(660, 42),
-                Size = new Size(120, 28),
-                Format = DateTimePickerFormat.Short,
                 Value = DateTime.Today.AddDays(-7)
             };
             var dtApprovalTo = new DateTimePicker
             {
-                Location = new Point(786, 42),
-                Size = new Size(120, 28),
-                Format = DateTimePickerFormat.Short,
                 Value = DateTime.Today
             };
 
-            var btnApprove = CreateApprovalButton("Approve", new Point(12, 10));
-            var btnReject = CreateApprovalButton("Reject", new Point(106, 10));
-            var btnApproveLowRisk = CreateApprovalButton("Approve All Low-Risk", new Point(200, 10), 172);
-            var btnRunApproved = CreateApprovalButton("Run Approved", new Point(378, 10), 130);
-            var btnRunAllApproved = CreateApprovalButton("Run All Approved", new Point(514, 10), 140);
-            var btnViewAuditLog = CreateApprovalButton("View Full Audit Log", new Point(12, 10), 170);
-            var btnApproveFiltered = CreateApprovalButton("Approve Filtered", new Point(912, 42), 120);
-            var btnRunFilteredApproved = CreateApprovalButton("Run Filtered", new Point(1038, 42), 80);
+            var btnApprove = CreateApprovalToolbarButton("Approve", 88);
+            var btnApproveAndPublish = CreateApprovalToolbarButton("Duyệt & Đăng", 120);
+            var btnReject = CreateApprovalToolbarButton("Reject", 88);
+            var btnApproveLowRisk = CreateApprovalToolbarButton("Approve All Low-Risk", 150);
+            var btnRunApproved = CreateApprovalToolbarButton("Run Approved", 120);
+            var btnRunAllApproved = CreateApprovalToolbarButton("Run All Approved", 130);
+            var btnViewAuditLog = CreateApprovalToolbarButton("View Full Audit Log", 150);
+            var btnApproveFiltered = CreateApprovalToolbarButton("Approve Filtered", 120);
+            var btnRunFilteredApproved = CreateApprovalToolbarButton("Run Filtered", 100);
 
-            var actionPanel = new Panel { Dock = DockStyle.Top, Height = 78, BackColor = Color.FromArgb(31, 34, 42) };
-            actionPanel.Controls.Add(btnApprove);
-            actionPanel.Controls.Add(btnReject);
-            actionPanel.Controls.Add(btnApproveLowRisk);
-            actionPanel.Controls.Add(btnRunApproved);
-            actionPanel.Controls.Add(btnRunAllApproved);
-            actionPanel.Controls.Add(cbStatusFilter);
-            actionPanel.Controls.Add(btnViewAuditLog);
-            actionPanel.Controls.Add(txtApprovalKeyword);
-            actionPanel.Controls.Add(cbApprovalProfile);
-            actionPanel.Controls.Add(dtApprovalFrom);
-            actionPanel.Controls.Add(dtApprovalTo);
-            actionPanel.Controls.Add(btnApproveFiltered);
-            actionPanel.Controls.Add(btnRunFilteredApproved);
+            var actionPanel = BuildApprovalQueueActionPanel(
+                btnApprove,
+                btnApproveAndPublish,
+                btnReject,
+                btnViewAuditLog,
+                btnApproveLowRisk,
+                btnRunApproved,
+                btnRunAllApproved,
+                cbStatusFilter,
+                txtApprovalKeyword,
+                cbApprovalProfile,
+                dtApprovalFrom,
+                dtApprovalTo,
+                btnApproveFiltered,
+                btnRunFilteredApproved);
 
             var bottom = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(31, 34, 42) };
             bottom.Controls.Add(preview);
             bottom.Controls.Add(txtReviewedBy);
             bottom.Controls.Add(txtNotes);
+            bottom.Controls.Add(chkAttachAffiliate);
+            bottom.Controls.Add(lblAffiliateTarget);
             bottom.Controls.Add(actionPanel);
             split.Panel1.Controls.Add(grid);
             split.Panel2.Controls.Add(bottom);
             form.Controls.Add(split);
+            form.Controls.Add(pnlApprovalBehavior);
+            ApplyApprovalQueueDialogTypography(form);
+            ApplyButtonThemesRecursive(form);
+            ApplyAppTypographyRecursive(form);
 
             Action refreshPreview = () =>
             {
@@ -7788,12 +9117,50 @@ namespace tiktok_Omni
                     preview.Text = string.Empty;
                     txtNotes.Text = string.Empty;
                     txtReviewedBy.Text = string.Empty;
+                    chkAttachAffiliate.Checked = false;
+                    chkAttachAffiliate.Enabled = false;
+                    lblAffiliateTarget.Text = "Link dự kiến: (chưa chọn dòng)";
                     return;
                 }
 
+                ApprovalAffiliateTagging.EnsureTargetFields(selected, selected.AffiliateLink, selected.ProductId);
                 preview.Text = string.IsNullOrWhiteSpace(selected.EditedPreview) ? selected.OriginalPreview : selected.EditedPreview;
                 txtNotes.Text = selected.ReviewerNotes ?? string.Empty;
                 txtReviewedBy.Text = selected.ReviewedBy ?? string.Empty;
+                chkAttachAffiliate.Checked = selected.CanAttachAffiliate;
+                chkAttachAffiliate.Enabled = ApprovalAffiliateTagging.AllowsAffiliateCheckbox(selected);
+                var targetLink = OmnichannelAutoPostFields.NormalizeLink(selected.TargetAffiliateLink);
+                lblAffiliateTarget.Text = string.IsNullOrWhiteSpace(targetLink)
+                    ? "Link dự kiến: (không có — chỉ đăng video thuần)"
+                    : "Link dự kiến: " + targetLink;
+            };
+
+            chkAttachAffiliate.CheckedChanged += (s, args) =>
+            {
+                if (grid.CurrentRow?.DataBoundItem is ApprovalQueueItem selected)
+                {
+                    ApprovalAffiliateTagging.ApplyReviewerAffiliateChoice(selected, chkAttachAffiliate.Checked);
+                    grid.Refresh();
+                }
+            };
+
+            grid.CellContentClick += (s, args) =>
+            {
+                if (args.RowIndex < 0)
+                {
+                    return;
+                }
+
+                var col = grid.Columns[args.ColumnIndex];
+                if (col is DataGridViewCheckBoxColumn && col.DataPropertyName == nameof(ApprovalQueueItem.CanAttachAffiliate))
+                {
+                    grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                    if (grid.Rows[args.RowIndex].DataBoundItem is ApprovalQueueItem row)
+                    {
+                        ApprovalAffiliateTagging.ApplyReviewerAffiliateChoice(row, row.CanAttachAffiliate);
+                        refreshPreview();
+                    }
+                }
             };
 
             grid.SelectionChanged += (s, args) => refreshPreview();
@@ -7803,12 +9170,58 @@ namespace tiktok_Omni
             {
                 var selected = grid.CurrentRow?.DataBoundItem as ApprovalQueueItem;
                 if (selected == null) return;
+                ApprovalAffiliateTagging.ApplyReviewerAffiliateChoice(selected, chkAttachAffiliate.Checked);
                 selected.Status = ApprovalStatus.Approved;
                 selected.ReviewerNotes = txtNotes.Text.Trim();
                 selected.ReviewedBy = txtReviewedBy.Text.Trim();
                 selected.EditedPreview = preview.Text;
                 selected.ReviewedAtUtc = DateTime.UtcNow;
-                AppendApprovalAudit(selected, "Approved");
+                AppendApprovalAudit(selected, selected.CanAttachAffiliate
+                    ? "Approved (gắn link Affiliate)"
+                    : "Approved (video thuần, không gắn link)");
+                grid.Refresh();
+                await _approvalQueueManager.SaveAsync(source.ToList());
+                _approvalQueueItems = source.ToList();
+            };
+
+            btnApproveAndPublish.Click += async (s, args) =>
+            {
+                var selected = grid.CurrentRow?.DataBoundItem as ApprovalQueueItem;
+                if (selected == null)
+                {
+                    Log("[APPROVAL] Chọn một dòng Pending để Duyệt & Đăng.");
+                    return;
+                }
+
+                if (selected.Status != ApprovalStatus.Pending)
+                {
+                    Log("[APPROVAL] Chỉ duyệt & đăng item trạng thái Pending.");
+                    return;
+                }
+
+                selected.ReviewerNotes = txtNotes.Text.Trim();
+                selected.ReviewedBy = string.IsNullOrWhiteSpace(txtReviewedBy.Text)
+                    ? "approve-publish"
+                    : txtReviewedBy.Text.Trim();
+                selected.ReviewedAtUtc = DateTime.UtcNow;
+                selected.Status = ApprovalStatus.Approved;
+                ApprovalAffiliateTagging.ApplyReviewerAffiliateChoice(selected, chkAttachAffiliate.Checked);
+                AppendApprovalAudit(selected, selected.CanAttachAffiliate
+                    ? "Approve & Publish (gắn link Affiliate)"
+                    : "Approve & Publish (video thuần)");
+                try
+                {
+                    var lockedProfile = ResolveLockedProfileFromApprovalItem(selected);
+                    await CompleteApprovedProductionVideoAsync(selected, ExtractVideoPathFromApprovalItem(selected), lockedProfile)
+                        .ConfigureAwait(true);
+                    Log("[APPROVAL] Duyệt & Đăng xong — video → Publishing + AutoPost job.");
+                }
+                catch (Exception ex)
+                {
+                    selected.LastError = ex.Message;
+                    Log("[APPROVAL] Duyệt & Đăng lỗi: " + ex.Message);
+                }
+
                 grid.Refresh();
                 await _approvalQueueManager.SaveAsync(source.ToList());
                 _approvalQueueItems = source.ToList();
@@ -7832,10 +9245,11 @@ namespace tiktok_Omni
             {
                 foreach (var row in source.Where(x => x.Status == ApprovalStatus.Pending && x.SafetyScore >= 85))
                 {
+                    ApprovalAffiliateTagging.ApplyReviewerAffiliateChoice(row, false);
                     row.Status = ApprovalStatus.Approved;
                     row.ReviewedAtUtc = DateTime.UtcNow;
                     row.ReviewedBy = string.IsNullOrWhiteSpace(txtReviewedBy.Text) ? "bulk-review" : txtReviewedBy.Text.Trim();
-                    AppendApprovalAudit(row, "Approved low-risk");
+                    AppendApprovalAudit(row, "Approved low-risk (không gắn link)");
                 }
                 grid.Refresh();
                 await _approvalQueueManager.SaveAsync(source.ToList());
@@ -7884,10 +9298,11 @@ namespace tiktok_Omni
                 var reviewer = string.IsNullOrWhiteSpace(txtReviewedBy.Text) ? "bulk-filter" : txtReviewedBy.Text.Trim();
                 foreach (var item in pending)
                 {
+                    ApprovalAffiliateTagging.ApplyReviewerAffiliateChoice(item, false);
                     item.Status = ApprovalStatus.Approved;
                     item.ReviewedAtUtc = DateTime.UtcNow;
                     item.ReviewedBy = reviewer;
-                    AppendApprovalAudit(item, "Approved filtered");
+                    AppendApprovalAudit(item, "Approved filtered (không gắn link)");
                 }
 
                 grid.Refresh();
@@ -8042,21 +9457,6 @@ namespace tiktok_Omni
             await _approvalQueueManager.SaveAsync(_approvalQueueItems);
         }
 
-        private static Button CreateApprovalButton(string text, Point point, int width = 88)
-        {
-            var button = new Button
-            {
-                Text = text,
-                Location = point,
-                Size = new Size(width, 28),
-                BackColor = Color.FromArgb(60, 64, 77),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.WhiteSmoke
-            };
-            button.FlatAppearance.BorderSize = 0;
-            return button;
-        }
-
         private async Task ExecuteApprovedItemAsync(ApprovalQueueItem item)
         {
             if (item == null)
@@ -8064,23 +9464,54 @@ namespace tiktok_Omni
                 return;
             }
 
+            var lockedProfile = ResolveLockedProfileFromApprovalItem(item);
+            SelectRunningProfileInUi(lockedProfile);
+            ApplyProfileScope(lockedProfile);
+            Log("[APPROVAL] Khóa profile thực thi: «" + lockedProfile + "» (bỏ qua profile đang chọn trên UI).");
+
             try
             {
                 if (item.JobType == ApprovalJobType.RenderVideo)
                 {
                     var payload = JsonConvert.DeserializeObject<RenderApprovalPayload>(item.PayloadJson ?? string.Empty) ?? new RenderApprovalPayload();
+                    if (payload.IsMascotStory &&
+                        !string.IsNullOrWhiteSpace(payload.OutputVideoPath) &&
+                        File.Exists(payload.OutputVideoPath))
+                    {
+                        item.Status = ApprovalStatus.Completed;
+                        item.CompletedAtUtc = DateTime.UtcNow;
+                        item.LastError = string.Empty;
+                        Log("[APPROVAL] Mascot Story đã duyệt — video: " + payload.OutputVideoPath);
+                        return;
+                    }
+
                     var script = string.IsNullOrWhiteSpace(item.EditedPreview) ? payload.Script : item.EditedPreview;
+                    var approvalRenderItems = GetSlideshowItemsForRender();
+                    IList<string> approvalPerScripts = null;
+                    if (_aiVideoScriptBindingList != null &&
+                        _aiVideoScriptBindingList.Count == approvalRenderItems.Count &&
+                        _aiVideoScriptBindingList.All(x => !string.IsNullOrWhiteSpace(x?.Script)))
+                    {
+                        approvalPerScripts = _aiVideoScriptBindingList
+                            .Select(x => (x.Script ?? string.Empty).Trim())
+                            .ToList();
+                    }
+
                     var settings = await _configManager.LoadAsync();
                     settings.VideoTransitionDurationSeconds = (double)numAiTransitionDuration.Value;
                     settings.VideoTextSize = (int)numAiTextSize.Value;
                     settings.VideoMusicVolume = (int)numAiMusicVolume.Value;
                     await _configManager.SaveAsync(settings);
                     var outputPath = await _videoProcessingService.GenerateProductVideoAsync(
-                        _aiVideoGenInputBuffer,
+                        approvalRenderItems,
                         script,
                         settings,
+                        lockedProfile,
                         Log,
-                        CancellationToken.None);
+                        CancellationToken.None,
+                        null,
+                        UseMultiVoiceNarrationEnabled(),
+                        approvalPerScripts);
                     item.Status = ApprovalStatus.Completed;
                     item.CompletedAtUtc = DateTime.UtcNow;
                     item.LastError = string.Empty;
@@ -8093,31 +9524,90 @@ namespace tiktok_Omni
                 }
                 else if (item.JobType == ApprovalJobType.AutoPost)
                 {
-                    var payload = JsonConvert.DeserializeObject<AutoPostApprovalPayload>(item.PayloadJson ?? string.Empty) ?? new AutoPostApprovalPayload();
-                    var hashtags = payload.Hashtags ?? string.Empty;
-                    if (!string.IsNullOrWhiteSpace(item.EditedPreview))
+                    if (!CheckAssetIntegrity(item, out var autoPostIntegrityError))
                     {
-                        // Keep hashtags from payload; edited preview is for review visibility only.
+                        item.LastError = autoPostIntegrityError;
+                        Log("[APPROVAL] Asset integrity: " + autoPostIntegrityError);
+                        return;
                     }
 
-                    var captionFull = (payload.CaptionFull ?? string.Empty).Trim();
-                    var uploadOnly = payload.UploadOnlyNoPublish;
+                    var payload = JsonConvert.DeserializeObject<AutoPostApprovalPayload>(item.PayloadJson ?? "{}")
+                                  ?? new AutoPostApprovalPayload();
+                    var plan = new OmnichannelAutoPostPlan
+                    {
+                        VideoFolder = payload.VideoFolder ?? string.Empty,
+                        VideoFilePath = payload.VideoFilePath ?? string.Empty,
+                        Profile = payload.Profile ?? payload.ProfileName ?? item.Profile ?? string.Empty,
+                        PostTikTok = payload.PostTikTok,
+                        PostFacebook = payload.PostFacebook,
+                        PostYouTube = payload.PostYouTube,
+                        TikTokCaption = payload.CaptionFull ?? string.Empty,
+                        TikTokHashtags = payload.Hashtags ?? string.Empty,
+                        TikTokUploadOnly = payload.UploadOnlyNoPublish,
+                        FacebookCaption = payload.FacebookCaption ?? string.Empty,
+                        FacebookHashtags = payload.FacebookHashtags ?? string.Empty,
+                        FacebookAttachShopeeLink = payload.FacebookAttachShopeeLink,
+                        FacebookShopeeLink = OmnichannelAutoPostFields.NormalizeLink(payload.FacebookShopeeLink),
+                        YouTubeTitle = payload.YouTubeTitle ?? string.Empty,
+                        YouTubeDescription = payload.YouTubeDescription ?? string.Empty,
+                        AffiliateLink = item.CanAttachAffiliate
+                            ? OmnichannelAutoPostFields.NormalizeLink(item.TargetAffiliateLink)
+                            : string.Empty,
+                        ProductId = item.CanAttachAffiliate
+                            ? OmnichannelAutoPostFields.NormalizeLink(item.TargetProductId)
+                            : string.Empty
+                    };
 
-                    await _tikTokAutomation.AutoPostUpToProductLinkAsync(
-                        payload.VideoFolder ?? string.Empty,
-                        hashtags,
-                        payload.Profile,
-                        CancellationToken.None,
-                        Log,
-                        payload.VideoFilePath,
-                        string.IsNullOrWhiteSpace(captionFull) ? null : captionFull,
-                        clickPublish: !uploadOnly);
+                    if (!plan.PostTikTok && !plan.PostFacebook && !plan.PostYouTube)
+                    {
+                        plan.PostTikTok = true;
+                    }
+
+                    await RunOmnichannelAutoPostSequenceAsync(plan, CancellationToken.None).ConfigureAwait(true);
                     item.Status = ApprovalStatus.Completed;
                     item.CompletedAtUtc = DateTime.UtcNow;
                     item.LastError = string.Empty;
-                    Log(uploadOnly
-                        ? "[APPROVAL] Auto Post upload completed (chế độ chỉ upload)."
-                        : "[APPROVAL] Auto Post đã chạy (đăng tự động hoặc đã gửi lệnh đăng).");
+                    Log("[APPROVAL] Auto Post đa kênh đã chạy xong.");
+                }
+                else if (item.JobType == ApprovalJobType.PhilosophyVideo)
+                {
+                    var payload = JsonConvert.DeserializeObject<PhilosophyApprovalPayload>(item.PayloadJson ?? "{}")
+                                  ?? new PhilosophyApprovalPayload();
+                    if (!string.IsNullOrWhiteSpace(payload.OutputPath) && File.Exists(payload.OutputPath))
+                    {
+                        await CompleteApprovedProductionVideoAsync(
+                            item,
+                            payload.OutputPath,
+                            lockedProfile,
+                            affiliateLink: string.Empty,
+                            productId: string.Empty).ConfigureAwait(true);
+                    }
+                    else
+                    {
+                        throw new FileNotFoundException("Không tìm thấy file video Triết lý.", payload.OutputPath);
+                    }
+                }
+                else if (item.JobType == ApprovalJobType.VideoReup)
+                {
+                    var videoPath = ExtractVideoPathFromApprovalItem(item);
+                    if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath))
+                    {
+                        throw new FileNotFoundException("Không tìm thấy video Reup.", videoPath);
+                    }
+
+                    await CompleteApprovedProductionVideoAsync(item, videoPath, lockedProfile).ConfigureAwait(true);
+                }
+                else if (item.JobType == ApprovalJobType.Slideshow
+                         || item.JobType == ApprovalJobType.AffiliateDeep
+                         || item.JobType == ApprovalJobType.Mascot)
+                {
+                    var videoPath = ExtractVideoPathFromApprovalItem(item);
+                    if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath))
+                    {
+                        throw new FileNotFoundException("Không tìm thấy file video đã render.", videoPath);
+                    }
+
+                    await CompleteApprovedProductionVideoAsync(item, videoPath, lockedProfile).ConfigureAwait(true);
                 }
             }
             catch (Exception ex)
@@ -8127,351 +9617,29 @@ namespace tiktok_Omni
             }
         }
 
-        private void btnOpenQueueTrend_Click(object sender, EventArgs e)
-        {
-            var records = _warmupQueueHistory ?? new List<WarmupQueueHistoryRecord>();
-            var now = DateTime.UtcNow.Date;
-            var start = now.AddDays(-13); // last 14 days
-            var bucket = records
-                .Where(x => x.FinishedAtUtc.Date >= start && x.FinishedAtUtc.Date <= now)
-                .GroupBy(x => x.FinishedAtUtc.Date)
-                .ToDictionary(
-                    g => g.Key,
-                    g => new
-                    {
-                        Success = g.Count(x => string.Equals(x.Result, "Completed", StringComparison.OrdinalIgnoreCase)),
-                        Failed = g.Count(x => string.Equals(x.Result, "Failed", StringComparison.OrdinalIgnoreCase))
-                    });
 
-            var form = new Form
-            {
-                Text = "Warm-up Queue Trend (14 days)",
-                StartPosition = FormStartPosition.CenterParent,
-                Size = new Size(980, 560),
-                BackColor = Color.FromArgb(31, 34, 42),
-                ForeColor = Color.Gainsboro
-            };
 
-            var rows = new List<QueueTrendRow>();
-            for (var i = 0; i < 14; i++)
-            {
-                var day = start.AddDays(i);
-                var success = 0;
-                var failed = 0;
-                if (bucket.TryGetValue(day, out var row))
-                {
-                    success = row.Success;
-                    failed = row.Failed;
-                }
 
-                var total = success + failed;
-                var rate = total == 0 ? "-" : (success * 100d / total).ToString("0.#") + "%";
-                rows.Add(new QueueTrendRow
-                {
-                    Date = day.ToLocalTime().ToString("yyyy-MM-dd"),
-                    Success = success,
-                    Failed = failed,
-                    Total = total,
-                    SuccessRate = rate
-                });
-            }
-
-            var split = new SplitContainer
-            {
-                Dock = DockStyle.Fill,
-                Orientation = Orientation.Horizontal,
-                BackColor = Color.FromArgb(31, 34, 42),
-                SplitterWidth = 6,
-                FixedPanel = FixedPanel.None,
-                SplitterDistance = 250
-            };
-
-            var pnlChart = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(20, 22, 28),
-                Padding = new Padding(12)
-            };
-            pnlChart.Paint += (s, pe) => DrawQueueTrendMiniChart(pe.Graphics, pnlChart.ClientRectangle, rows);
-
-            var grid = new DataGridView
-            {
-                Dock = DockStyle.Fill,
-                AutoGenerateColumns = false,
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                RowHeadersVisible = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                BackgroundColor = Color.FromArgb(20, 22, 28),
-                BorderStyle = BorderStyle.FixedSingle
-            };
-            grid.DefaultCellStyle = new DataGridViewCellStyle
-            {
-                BackColor = Color.FromArgb(31, 34, 42),
-                ForeColor = Color.Gainsboro,
-                SelectionBackColor = Color.FromArgb(76, 110, 245),
-                SelectionForeColor = Color.White
-            };
-            grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
-            {
-                BackColor = Color.FromArgb(40, 44, 54),
-                ForeColor = Color.WhiteSmoke,
-                SelectionBackColor = Color.FromArgb(40, 44, 54),
-                SelectionForeColor = Color.WhiteSmoke
-            };
-            grid.EnableHeadersVisualStyles = false;
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Date", HeaderText = "Date", FillWeight = 20 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Success", HeaderText = "Success", FillWeight = 16 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Failed", HeaderText = "Failed", FillWeight = 16 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Total", HeaderText = "Total", FillWeight = 16 });
-            grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "SuccessRate", HeaderText = "Success Rate", FillWeight = 20 });
-
-            grid.DataSource = new BindingList<QueueTrendRow>(rows);
-            split.Panel1.Controls.Add(pnlChart);
-            split.Panel2.Controls.Add(grid);
-            form.Controls.Add(split);
-            form.ShowDialog(this);
-        }
-
-        private void DrawQueueTrendMiniChart(Graphics g, Rectangle clientRect, IList<QueueTrendRow> rows)
-        {
-            if (g == null || rows == null || rows.Count == 0)
-            {
-                return;
-            }
-
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            g.Clear(Color.FromArgb(20, 22, 28));
-
-            var paddingLeft = 48;
-            var paddingTop = 20;
-            var paddingBottom = 42;
-            var paddingRight = 16;
-            var plot = new Rectangle(
-                clientRect.X + paddingLeft,
-                clientRect.Y + paddingTop,
-                Math.Max(1, clientRect.Width - paddingLeft - paddingRight),
-                Math.Max(1, clientRect.Height - paddingTop - paddingBottom));
-
-            using (var axisPen = new Pen(Color.FromArgb(90, 95, 110)))
-            using (var gridPen = new Pen(Color.FromArgb(52, 56, 70)))
-            using (var successBrush = new SolidBrush(Color.FromArgb(82, 170, 96)))
-            using (var failedBrush = new SolidBrush(Color.FromArgb(206, 86, 86)))
-            using (var textBrush = new SolidBrush(Color.Gainsboro))
-            using (var smallFont = new Font("Segoe UI", 8f))
-            using (var titleFont = new Font("Segoe UI Semibold", 9f))
-            {
-                g.DrawRectangle(axisPen, plot);
-                var maxValue = Math.Max(1, rows.Max(x => Math.Max(x.Success, x.Failed)));
-                var ySteps = Math.Min(5, maxValue);
-                ySteps = Math.Max(1, ySteps);
-                for (var i = 0; i <= ySteps; i++)
-                {
-                    var ratio = i / (double)ySteps;
-                    var y = plot.Bottom - (int)(plot.Height * ratio);
-                    g.DrawLine(gridPen, plot.Left, y, plot.Right, y);
-                    var label = (int)Math.Round(maxValue * ratio);
-                    g.DrawString(label.ToString(), smallFont, textBrush, plot.Left - 34, y - 7);
-                }
-
-                var groupWidth = plot.Width / (double)rows.Count;
-                var barWidth = Math.Max(4f, (float)(groupWidth * 0.32));
-                for (var i = 0; i < rows.Count; i++)
-                {
-                    var row = rows[i];
-                    var gx = (float)(plot.Left + i * groupWidth);
-                    var center = (float)(gx + groupWidth / 2d);
-
-                    var successHeight = (float)(row.Success * 1d / maxValue * plot.Height);
-                    var failedHeight = (float)(row.Failed * 1d / maxValue * plot.Height);
-                    var successRect = new RectangleF(center - barWidth - 1f, plot.Bottom - successHeight, barWidth, successHeight);
-                    var failedRect = new RectangleF(center + 1f, plot.Bottom - failedHeight, barWidth, failedHeight);
-                    g.FillRectangle(successBrush, successRect);
-                    g.FillRectangle(failedBrush, failedRect);
-
-                    if (i % 2 == 0 || rows.Count <= 8)
-                    {
-                        var label = row.Date.Length >= 5 ? row.Date.Substring(5) : row.Date;
-                        var size = g.MeasureString(label, smallFont);
-                        g.DrawString(label, smallFont, textBrush, center - size.Width / 2f, plot.Bottom + 6);
-                    }
-                }
-
-                g.DrawString("Success vs Failed (14 days)", titleFont, textBrush, plot.Left, clientRect.Top + 2);
-                g.FillRectangle(successBrush, plot.Right - 190, clientRect.Top + 3, 14, 10);
-                g.DrawString("Success", smallFont, textBrush, plot.Right - 172, clientRect.Top + 1);
-                g.FillRectangle(failedBrush, plot.Right - 105, clientRect.Top + 3, 14, 10);
-                g.DrawString("Failed", smallFont, textBrush, plot.Right - 87, clientRect.Top + 1);
-            }
-        }
-
-        private void RefreshQueueStatsSummary()
-        {
-            var history = _warmupQueueHistory ?? new List<WarmupQueueHistoryRecord>();
-            var selectedRange = cbQueueStatsRange?.SelectedItem?.ToString() ?? "Hôm nay";
-            var from = dtQueueStatsFrom?.Value ?? DateTime.Today.AddDays(-7);
-            var to = dtQueueStatsTo?.Value ?? DateTime.Today;
-            var rangeItems = FilterHistoryByRange(history, selectedRange, from, to);
-            var total = rangeItems.Count;
-            var completed = rangeItems.Count(x => string.Equals(x.Result, "Completed", StringComparison.OrdinalIgnoreCase));
-            var failed = rangeItems.Count(x => string.Equals(x.Result, "Failed", StringComparison.OrdinalIgnoreCase));
-            var successRate = total <= 0 ? 0d : (completed * 100d / total);
-            var avgRetry = total <= 0 ? 0d : rangeItems.Average(x => Math.Max(0, x.Attempts - 1));
-
-            var topFailed = rangeItems
-                .Where(x => string.Equals(x.Result, "Failed", StringComparison.OrdinalIgnoreCase))
-                .GroupBy(x => (x.Profile ?? string.Empty).Trim())
-                .OrderByDescending(g => g.Count())
-                .FirstOrDefault();
-
-            if (lblQueueStatsSummary != null)
-            {
-                lblQueueStatsSummary.Text = $"Hôm nay: {total} mục, lỗi: {failed}";
-            }
-            if (lblQueueStatsSuccessRate != null)
-            {
-                lblQueueStatsSuccessRate.Text = $"Tỉ lệ thành công: {successRate:0.#}%";
-            }
-            if (lblQueueStatsAvgRetry != null)
-            {
-                lblQueueStatsAvgRetry.Text = $"Số lần thử TB: {avgRetry:0.##}";
-            }
-            if (lblQueueStatsTopFailedProfile != null)
-            {
-                lblQueueStatsTopFailedProfile.Text = topFailed == null
-                    ? "Profile lỗi nhiều nhất: -"
-                    : $"Profile lỗi nhiều nhất: {topFailed.Key} ({topFailed.Count()})";
-            }
-        }
-
-        private static List<WarmupQueueHistoryRecord> FilterHistoryByRange(
-            IEnumerable<WarmupQueueHistoryRecord> source,
-            string range,
-            DateTime fromLocal,
-            DateTime toLocal)
-        {
-            var items = source?.ToList() ?? new List<WarmupQueueHistoryRecord>();
-            if (items.Count == 0)
-            {
-                return items;
-            }
-
-            var nowUtc = DateTime.UtcNow;
-            DateTime startUtc;
-            DateTime endUtc;
-            if (string.Equals(range, "7d", StringComparison.OrdinalIgnoreCase))
-            {
-                startUtc = nowUtc.AddDays(-7);
-                endUtc = nowUtc;
-            }
-            else if (string.Equals(range, "30d", StringComparison.OrdinalIgnoreCase))
-            {
-                startUtc = nowUtc.AddDays(-30);
-                endUtc = nowUtc;
-            }
-            else if (string.Equals(range, "Custom", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(range, "Tùy chỉnh", StringComparison.OrdinalIgnoreCase))
-            {
-                var localStart = fromLocal.Date;
-                var localEndExclusive = toLocal.Date.AddDays(1);
-                startUtc = localStart.ToUniversalTime();
-                endUtc = localEndExclusive.ToUniversalTime();
-            }
-            else
-            {
-                startUtc = nowUtc.Date;
-                endUtc = nowUtc;
-            }
-
-            return items.Where(x => x.FinishedAtUtc >= startUtc && x.FinishedAtUtc < endUtc).ToList();
-        }
-
-        private void MoveSelectedQueueRow(int direction)
-        {
-            if (_isWarmupQueueRunning)
-            {
-                Log("[QUEUE] Stop queue before reordering jobs.");
-                return;
-            }
-
-            if (dgvWarmupQueue?.SelectedRows == null || dgvWarmupQueue.SelectedRows.Count == 0 || _warmupQueueBindingList == null)
-            {
-                return;
-            }
-
-            var selected = dgvWarmupQueue.SelectedRows[0]?.DataBoundItem as WarmupQueueUiItem;
-            if (selected == null)
-            {
-                return;
-            }
-
-            var oldIndex = _warmupQueueBindingList.IndexOf(selected);
-            if (oldIndex < 0)
-            {
-                return;
-            }
-
-            var newIndex = oldIndex + direction;
-            if (newIndex < 0 || newIndex >= _warmupQueueBindingList.Count)
-            {
-                return;
-            }
-
-            _warmupQueueBindingList.RemoveAt(oldIndex);
-            _warmupQueueBindingList.Insert(newIndex, selected);
-            dgvWarmupQueue.ClearSelection();
-            if (newIndex >= 0 && newIndex < dgvWarmupQueue.Rows.Count)
-            {
-                dgvWarmupQueue.Rows[newIndex].Selected = true;
-            }
-
-            SyncSchedulerFromUi();
-            _ = SaveWarmupQueueSnapshotAsync();
-        }
-
-        private class WarmupQueueUiItem
-        {
-            public string Profile { get; set; } = string.Empty;
-            public string Keywords { get; set; } = string.Empty;
-            public int Videos { get; set; }
-            public string WatchRange { get; set; } = string.Empty;
-            public bool AutoComment { get; set; }
-            public bool DryRun { get; set; }
-            public string Status { get; set; } = "Pending";
-            public int RetryCount { get; set; }
-            public int MaxRetries { get; set; } = 2;
-            public string LastError { get; set; } = string.Empty;
-            public string RetryLabel => $"{RetryCount}/{MaxRetries + 1}";
-            public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
-            public DateTime? NextRetryAtUtc { get; set; }
-            public string CreatedAtLabel => CreatedAtUtc == default(DateTime) ? string.Empty : CreatedAtUtc.ToLocalTime().ToString("HH:mm:ss");
-            public string NextRetryEtaLabel => NextRetryAtUtc.HasValue ? NextRetryAtUtc.Value.ToLocalTime().ToString("HH:mm:ss") : "-";
-        }
-
-        private class QueueTrendRow
-        {
-            public string Date { get; set; } = string.Empty;
-            public int Success { get; set; }
-            public int Failed { get; set; }
-            public int Total { get; set; }
-            public string SuccessRate { get; set; } = "-";
-        }
 
         private class RenderApprovalPayload
         {
             public string Script { get; set; } = string.Empty;
             public string Profile { get; set; } = string.Empty;
+            public string ProfileName { get; set; } = string.Empty;
+            public string OutputVideoPath { get; set; } = string.Empty;
+            public string ChannelTheme { get; set; } = string.Empty;
+            public bool IsMascotStory { get; set; }
+            public string AffiliateLink { get; set; }
+            public string ProductId { get; set; }
         }
 
-        private class AutoPostApprovalPayload
+        private class PhilosophyApprovalPayload
         {
-            public string VideoFolder { get; set; } = string.Empty;
-            public string Hashtags { get; set; } = string.Empty;
-            public string Profile { get; set; } = string.Empty;
-            public string VideoFilePath { get; set; } = string.Empty;
-            public string CaptionFull { get; set; } = string.Empty;
-            public bool UploadOnlyNoPublish { get; set; }
+            public string OutputPath { get; set; } = string.Empty;
+            public string Quote { get; set; } = string.Empty;
+            public string ProfileName { get; set; } = string.Empty;
+            public double DurationSeconds { get; set; }
+            public string Mood { get; set; } = string.Empty;
         }
 
         private sealed class AutoPostVideoItem
@@ -8509,7 +9677,7 @@ namespace tiktok_Omni
         private static void WriteSessionLogLinesUnlocked(string path, FileMode mode, string text)
         {
             using (var fs = new FileStream(path, mode, FileAccess.Write, FileShare.Read))
-            using (var sw = new StreamWriter(fs, new UTF8Encoding(false)))
+            using (var sw = new StreamWriter(fs, TextFileEncoding.Utf8NoBom))
             {
                 sw.Write(text);
             }
@@ -8678,7 +9846,8 @@ namespace tiktok_Omni
                         return;
                     }
 
-                    await Task.Run(() => File.WriteAllText(dialog.FileName, rtbLogs.Text));
+                    var logText = rtbLogs.Text;
+                    await Task.Run(() => File.WriteAllText(dialog.FileName, logText, TextFileEncoding.Utf8NoBom));
                     Log("Current logs exported to: " + dialog.FileName);
                 }
             }
@@ -8692,6 +9861,156 @@ namespace tiktok_Omni
         {
             rtbLogs.Clear();
             Log("UI logs cleared.");
+        }
+
+        private void cbRunningProfile_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (cbRunningProfile?.SelectedItem != null)
+            {
+                var selectedProfile = cbRunningProfile.SelectedItem.ToString();
+                SelectRunningProfileInUi(selectedProfile);
+                ApplyProfileScope(selectedProfile);
+            }
+
+            SyncBuffersToGrids();
+        }
+
+        private string GetRunningProfileName()
+        {
+            return ProfileScopedPaths.ResolveProfileName(cbRunningProfile?.SelectedItem?.ToString());
+        }
+
+        /// <summary>Lọc lưới affiliate theo profile; đồng bộ scope lưu file.</summary>
+        private void ApplyProfileScope(string profileName)
+        {
+            _affiliateGridProfileScope = ProfileScopedPaths.ResolveProfileName(profileName);
+            RefreshAffiliateGridByQualityFilter();
+            SyncBuffersToGrids();
+            RefreshAffiliateDownloadFolderHint();
+            Log($"[Profile] Phạm vi UI: «{_affiliateGridProfileScope}» — tải/render lưu dưới Downloads\\{_affiliateGridProfileScope} và Generated\\{_affiliateGridProfileScope}.");
+        }
+
+        private static string ResolveLockedProfileFromApprovalItem(ApprovalQueueItem item)
+        {
+            if (item == null)
+            {
+                return "default";
+            }
+
+            var fallback = ProfileScopedPaths.ResolveProfileName(item.Profile);
+            try
+            {
+                if (item.JobType == ApprovalJobType.RenderVideo)
+                {
+                    var payload = JsonConvert.DeserializeObject<RenderApprovalPayload>(item.PayloadJson ?? "{}");
+                    return ProfileScopedPaths.ResolveProfileName(
+                        payload?.ProfileName ?? payload?.Profile ?? fallback);
+                }
+
+                if (item.JobType == ApprovalJobType.AutoPost)
+                {
+                    var payload = JsonConvert.DeserializeObject<AutoPostApprovalPayload>(item.PayloadJson ?? "{}");
+                    return ProfileScopedPaths.ResolveProfileName(
+                        payload?.ProfileName ?? payload?.Profile ?? fallback);
+                }
+
+                if (item.JobType == ApprovalJobType.PhilosophyVideo)
+                {
+                    var payload = JsonConvert.DeserializeObject<PhilosophyApprovalPayload>(item.PayloadJson ?? "{}");
+                    return ProfileScopedPaths.ResolveProfileName(
+                        payload?.ProfileName ?? fallback);
+                }
+            }
+            catch
+            {
+                // ignored — dùng fallback từ item.Profile
+            }
+
+            return fallback;
+        }
+
+        private void ForwardToAutoPost(
+            string videoPath,
+            string caption,
+            string hashtags,
+            string profileName,
+            string affiliateLink = null,
+            string productId = null,
+            OmniJob sourceJob = null)
+        {
+            if (!AssetIntegrityService.CheckVideoFile(videoPath, out var integrityError))
+            {
+                Log("[AssetIntegrity] Forward to Auto Post bị chặn: " + integrityError);
+                return;
+            }
+
+            try
+            {
+                var profile = ProfileScopedPaths.ResolveProfileName(profileName);
+                SelectRunningProfileInUi(profile);
+                ApplyProfileScope(profile);
+
+                var folder = OneClickPipelineService.GetAutoPostInboxFolder(_storageRootPathCache, profile);
+                if (!ProfileScopedPaths.IsUnderPublishingRoot(_storageRootPathCache, videoPath))
+                {
+                    var published = ProfileScopedPaths.CopyVideoToPublishing(
+                        _storageRootPathCache,
+                        profile,
+                        videoPath,
+                        VideoStorageType.Processed);
+                    if (!string.IsNullOrWhiteSpace(published) && File.Exists(published))
+                    {
+                        videoPath = published;
+                    }
+                }
+
+                Directory.CreateDirectory(folder);
+                txtAutoPostFolder.Text = folder;
+                RefreshAutoPostVideoCombo(videoPath);
+
+                if (txtAutoPostCaption != null)
+                {
+                    txtAutoPostCaption.Text = caption ?? string.Empty;
+                }
+
+                if (txtAutoPostHashtags != null)
+                {
+                    txtAutoPostHashtags.Text = hashtags ?? string.Empty;
+                }
+
+                if (OmnichannelAutoPostFields.IsShopeeProductUrl(affiliateLink))
+                {
+                    if (txtAutoPostFbShopeeLink != null)
+                    {
+                        txtAutoPostFbShopeeLink.Text = OmnichannelAutoPostFields.NormalizeLink(affiliateLink);
+                    }
+
+                    if (chkAutoPostFbAttachShopee != null)
+                    {
+                        chkAutoPostFbAttachShopee.Checked = true;
+                    }
+                }
+
+                SwitchToMainTab(tabAutoPost);
+
+                SetAutoPostInboxFromJob(sourceJob, affiliateLink, productId);
+
+                Log($"[Luồng Khép Kín] Profile «{profile}» → thư mục «{folder}» — video '{Path.GetFileName(videoPath)}'.");
+                if (OmnichannelAutoPostFields.ShouldAttachAffiliateProduct(
+                        _autoPostInboxJob?.AffiliateLink,
+                        _autoPostInboxJob?.ProductId))
+                {
+                    Log("[Luồng Khép Kín] Affiliate link sẽ gắn khi đăng TikTok: " + _autoPostInboxJob.AffiliateLink);
+                }
+                else
+                {
+                    Log("[Luồng Khép Kín] Nuôi kênh — Auto Post không gắn sản phẩm (AffiliateLink/ProductId trống).");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Forward to Auto Post lỗi: " + ex.Message);
+            }
         }
 
     }

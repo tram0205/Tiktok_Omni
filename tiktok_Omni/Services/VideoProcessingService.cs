@@ -10,6 +10,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
+using tiktok_Omni.Models;
 
 namespace tiktok_Omni.Services
 {
@@ -17,16 +18,31 @@ namespace tiktok_Omni.Services
     {
         private readonly VideoService _videoService = new VideoService();
         private readonly GeminiService _geminiService = new GeminiService();
+        private readonly MascotWorker _mascotWorker;
+        private readonly LipSyncService _lipSyncService = new LipSyncService();
+        private readonly EmotionEngine _emotionEngine = new EmotionEngine();
+        private readonly AffiliateNarrationService _affiliateNarrationService = new AffiliateNarrationService();
+        private readonly AffiliateVideoPostProcessingService _affiliatePostProcessing = new AffiliateVideoPostProcessingService();
         private readonly Random _random = new Random();
+
+        private AsyncTasksRebootStore _asyncTasksRebootStore;
+
+        public VideoProcessingService(AsyncTasksRebootStore rebootStore = null)
+        {
+            _asyncTasksRebootStore = rebootStore;
+            _mascotWorker = new MascotWorker(_videoService, rebootStore);
+        }
 
         public async Task<List<string>> GenerateProductVideosAsync(
             IList<AiVideoGenInputItem> items,
             string script,
             IList<string> perItemScripts,
             AppSettings settings,
+            string profileName,
             Action<string> logAction,
             Action<VideoRenderProgress> progressAction,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool useMultiVoiceNarration = false)
         {
             if (items == null || items.Count == 0)
             {
@@ -70,10 +86,22 @@ namespace tiktok_Omni.Services
                             itemScript = perItemScripts[itemIndex].Trim();
                         }
 
+                        var itemProfile = string.IsNullOrWhiteSpace(items[itemIndex]?.ProfileName)
+                            ? profileName
+                            : items[itemIndex].ProfileName;
+                        IList<string> singleProductScripts = null;
+                        if (perItemScripts != null &&
+                            perItemScripts.Count > itemIndex &&
+                            !string.IsNullOrWhiteSpace(perItemScripts[itemIndex]))
+                        {
+                            singleProductScripts = new List<string> { perItemScripts[itemIndex].Trim() };
+                        }
+
                         var output = await GenerateProductVideoAsync(
                             single,
                             itemScript,
                             settings,
+                            itemProfile,
                             logAction,
                             cancellationToken,
                             (percent, stage) =>
@@ -86,7 +114,9 @@ namespace tiktok_Omni.Services
                                     Percent = percent,
                                     Stage = stage ?? string.Empty
                                 });
-                            }).ConfigureAwait(false);
+                            },
+                            useMultiVoiceNarration,
+                            singleProductScripts).ConfigureAwait(false);
 
                         outputs[itemIndex] = output;
                         progressAction?.Invoke(new VideoRenderProgress
@@ -125,6 +155,7 @@ namespace tiktok_Omni.Services
                 script,
                 null,
                 settings,
+                null,
                 logAction,
                 progressAction,
                 cancellationToken);
@@ -133,9 +164,13 @@ namespace tiktok_Omni.Services
         public async Task<AffiliateVideoPipelineResult> GenerateAffiliateProductVideoAsync(
             IList<AiVideoGenInputItem> items,
             AppSettings settings,
+            string profileName,
             Action<string> logAction,
             CancellationToken cancellationToken,
-            Action<int, string> progressCallback = null)
+            Action<int, string> progressCallback = null,
+            string category = null,
+            string storageRoot = null,
+            bool useMultiVoiceNarration = false)
         {
             if (items == null || items.Count < 4)
             {
@@ -159,12 +194,11 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException("AI API key is required to generate motion prompts.");
             }
 
-            var baseDir = Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "generated_videos",
-                "affiliate_pipeline",
-                DateTime.Now.ToString("yyyyMMdd"),
-                DateTime.Now.ToString("HHmmss"));
+            var resolvedProfile = ProfileScopedPaths.ResolveProfileName(profileName);
+            ProfileScopedPaths.SetConfiguredStorageRoot(storageRoot);
+            ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(storageRoot, resolvedProfile);
+            var cat = string.IsNullOrWhiteSpace(category) ? "AffiliateDeep" : category.Trim();
+            var baseDir = ProfileScopedPaths.CreateGeneratedSessionFolder(resolvedProfile, cat);
             var sourceDir = Path.Combine(baseDir, "source_images");
             var aiImageDir = Path.Combine(baseDir, "ai_images");
             var clipsDir = Path.Combine(baseDir, "clips");
@@ -182,7 +216,14 @@ namespace tiktok_Omni.Services
 
             var narrationFile = Path.Combine(audioDir, "narration.mp3");
             var narrationText = await BuildAffiliateNarrationScriptAsync(selected, settings, cancellationToken).ConfigureAwait(false);
-            await GenerateNarrationWithLyriaStrictAsync(narrationText, settings, narrationFile, logAction, cancellationToken).ConfigureAwait(false);
+            await GenerateNarrationWithTtsStrictAsync(
+                narrationText,
+                settings,
+                narrationFile,
+                logAction,
+                cancellationToken,
+                useMultiVoiceNarration,
+                baseDir).ConfigureAwait(false);
             var narrationDuration = await GetAudioDurationSecondsAsync(narrationFile, logAction, cancellationToken).ConfigureAwait(false);
             var sceneDurations = AllocateSceneDurations(
                 narrationDuration,
@@ -195,12 +236,12 @@ namespace tiktok_Omni.Services
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var row = downloaded[i];
-                var shotHint = ResolveShotHint(i);
-                logAction?.Invoke($"Affiliate Pipeline: processing scene {i + 1}/4 ({shotHint})...");
+                var shotHint = ResolvePasShotHint(i);
+                logAction?.Invoke($"Affiliate Pipeline: PAS cảnh {i + 1}/4 ({shotHint})...");
                 var imageProgress = 5 + (int)Math.Round(((i + 1) / 4d) * 35d);
                 progressCallback?.Invoke(imageProgress, "Tạo ảnh");
 
-                var redrawPrompt = BuildAffiliateRedrawPrompt(row.ProductName, row.Price, shotHint);
+                var redrawPrompt = BuildAffiliateRedrawPrompt(row.ProductName, row.Price, i);
                 var aiImageUrl = await _videoService.GenerateContextImageAsync(
                     row.SourceImageUrl,
                     redrawPrompt,
@@ -219,7 +260,7 @@ namespace tiktok_Omni.Services
                 var motionPrompt = await BuildMotionPromptAsync(
                     row.ProductName,
                     row.Price,
-                    shotHint,
+                    i,
                     settings,
                     cancellationToken).ConfigureAwait(false);
                 var videoUrl = await _videoService.GenerateVideoFromImageAsync(
@@ -253,19 +294,48 @@ namespace tiktok_Omni.Services
 
             var finalOutput = Path.Combine(baseDir, $"affiliate_story_{DateTime.Now:HHmmss}.mp4");
             progressCallback?.Invoke(85, "Render");
+            var veoClipPaths = sceneAssets.Select(x => x.SceneVideoPath).ToList();
+            try
+            {
+                var hookBroll = await HookBRollLibraryService.GetRandomHookBRollAsync(_random, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(hookBroll) && File.Exists(hookBroll))
+                {
+                    veoClipPaths.Insert(0, hookBroll);
+                    logAction?.Invoke("Đã chèn Hook B-Roll: " + Path.GetFileName(hookBroll));
+                }
+                else
+                {
+                    var hookDir = ProfileScopedPaths.GetHookBRollsDirectory(ensureExists: false);
+                    logAction?.Invoke("Affiliate Deep: HookBRolls trống hoặc chưa có («" + hookDir +
+                                        "») — ghép 4 cảnh Veo.");
+                }
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("Affiliate Deep: Hook B-Roll bỏ qua — " + ex.Message);
+            }
+
             await RenderVeoVerticalVideoAsync(
-                sceneAssets.Select(x => x.SceneVideoPath).ToList(),
+                veoClipPaths,
                 finalOutput,
                 narrationFile,
                 narrationText,
                 settings,
                 logAction,
                 cancellationToken).ConfigureAwait(false);
+            var polished = await _affiliatePostProcessing.ApplyCtaTailOverlayOnlyAsync(
+                finalOutput,
+                settings,
+                baseDir,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
             progressCallback?.Invoke(100, "Render");
+            logAction?.Invoke("Affiliate Deep: lưu tại Processed/" + resolvedProfile + "/" + cat + "/ → " + polished);
 
             return new AffiliateVideoPipelineResult
             {
-                FinalVideoPath = finalOutput,
+                FinalVideoPath = polished,
                 SceneVideos = sceneAssets
             };
         }
@@ -276,9 +346,15 @@ namespace tiktok_Omni.Services
             IList<string> identityImagePaths,
             int sceneCount,
             AppSettings settings,
+            string profileName,
             Action<string> logAction,
             CancellationToken cancellationToken,
-            Action<int, string> progressCallback = null)
+            Action<int, string> progressCallback = null,
+            string mascotStyle = null,
+            Action<List<string>> onSceneScriptsReady = null,
+            Action<string> onProcessingPhase = null,
+            bool useLipSync = false,
+            AvatarIdentityPackConfig lipSyncPack = null)
         {
             if (string.IsNullOrWhiteSpace(mascotImagePath) || !File.Exists(mascotImagePath))
             {
@@ -309,12 +385,7 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException("Veo API key/endpoint is required.");
             }
 
-            var baseDir = Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "generated_videos",
-                "mascot_pipeline",
-                DateTime.Now.ToString("yyyyMMdd"),
-                DateTime.Now.ToString("HHmmss"));
+            var baseDir = ProfileScopedPaths.CreateGeneratedSessionFolder(profileName, "Mascot");
             var variantsDir = Path.Combine(baseDir, "variant_images");
             var clipsDir = Path.Combine(baseDir, "clips");
             var audioDir = Path.Combine(baseDir, "audio");
@@ -334,10 +405,32 @@ namespace tiktok_Omni.Services
 
             var mascotDataUrl = BuildImageDataUrl(mascotImagePath);
             var identityDataUrls = validIdentityImages.Select(BuildImageDataUrl).ToList();
-            var sceneScripts = await BuildMascotSceneScriptsAsync(channelTheme, sceneCount, settings, cancellationToken).ConfigureAwait(false);
+            var brain = MascotBrainStore.LoadOrCreate(profileName, mascotStyle);
+            var personaStyle = brain.ToGeminiContextBlock();
+            logAction?.Invoke("Mascot Pipeline: MascotBrain.json → " + MascotBrainStore.GetBrainPath(profileName));
+
+            progressCallback?.Invoke(2, "Kịch bản");
+            onProcessingPhase?.Invoke("Gemini: tạo kịch bản " + sceneCount + " cảnh…");
+            var sceneScripts = await BuildMascotSceneScriptsAsync(
+                channelTheme,
+                sceneCount,
+                settings,
+                personaStyle,
+                cancellationToken).ConfigureAwait(false);
+            onSceneScriptsReady?.Invoke(new List<string>(sceneScripts));
+            logAction?.Invoke("Mascot Pipeline: đã lưu " + sceneScripts.Count + " scene scripts.");
+
+            var nick = ProfileScopedPaths.ResolveProfileName(profileName);
+            var emotionPack = AvatarIdentityPackStore.LoadOrCreate(nick);
+            var sceneEmotions = await _emotionEngine.AnalyzeSceneEmotionsAsync(
+                sceneScripts,
+                settings,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
+
             var narrationFile = Path.Combine(audioDir, "narration.mp3");
-            var narrationText = string.Join(" ", sceneScripts);
-            await GenerateNarrationWithLyriaStrictAsync(
+            var narrationText = string.Join(" ", sceneScripts.Select(EmotionEngine.StripTagsForNarration));
+            await GenerateNarrationWithTtsStrictAsync(
                 AdaptNarrationForMascotGender(channelTheme, narrationText),
                 settings,
                 narrationFile,
@@ -349,24 +442,60 @@ namespace tiktok_Omni.Services
                 sceneScripts.Select(x => Math.Max(1d, (x ?? string.Empty).Length)).ToList());
             logAction?.Invoke("Mascot Pipeline: scene durations -> " + string.Join(", ", sceneDurations.Select(x => x.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "s")));
 
+            AvatarIdentityPackStore.EnsureVaultMouthAssets(nick, lipSyncPack);
+            var lipSyncEnabled = useLipSync && lipSyncPack != null && AvatarIdentityPackStore.HasValidMouthAssets(lipSyncPack);
+            if (useLipSync && !lipSyncEnabled)
+            {
+                logAction?.Invoke("Mascot LipSync: thiếu mouth_open.png trong AvatarVault — bỏ qua khớp miệng.");
+            }
+
+            if (lipSyncEnabled)
+            {
+                progressCallback?.Invoke(8, "Lipsync");
+                onProcessingPhase?.Invoke("LipSync: phân tích biên độ âm thanh (chuẩn bị overlay)…");
+                await _lipSyncService.AnalyzeTimelineAsync(narrationFile, settings, logAction, cancellationToken)
+                    .ConfigureAwait(false);
+                logAction?.Invoke("Mascot LipSync: timeline âm thanh sẵn sàng — overlay sau khi ghép clip.");
+            }
+
             var sceneAssets = new List<MascotSceneAsset>();
             progressCallback?.Invoke(5, "Tạo ảnh");
             for (var i = 0; i < sceneScripts.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var sceneText = sceneScripts[i];
+                var emotionTag = i < sceneEmotions.Count ? sceneEmotions[i].Tag : MascotEmotionTag.Neutral;
+                var sceneMascotPath = EmotionEngine.ResolveEmotionImagePath(
+                    nick,
+                    emotionTag,
+                    emotionPack,
+                    mascotImagePath);
+                if (string.IsNullOrWhiteSpace(sceneMascotPath) || !File.Exists(sceneMascotPath))
+                {
+                    sceneMascotPath = mascotImagePath;
+                }
+
+                logAction?.Invoke($"Mascot Pipeline: scene {i + 1} emotion [{emotionTag}] → {Path.GetFileName(sceneMascotPath)}");
+                var sceneMascotDataUrl = BuildImageDataUrl(sceneMascotPath);
                 logAction?.Invoke($"Mascot Pipeline: creating scene {i + 1}/{sceneScripts.Count}...");
                 var imageProgress = 5 + (int)Math.Round(((i + 1) / (double)sceneScripts.Count) * 35d);
                 progressCallback?.Invoke(imageProgress, "Tạo ảnh");
 
-                var variantPrompt = BuildMascotVariantImagePrompt(channelTheme, sceneText);
-                var variantImageUrl = await _videoService.GenerateContextImageAsync(
-                    mascotDataUrl,
+                var variantPrompt = BuildMascotVariantImagePrompt(
+                    channelTheme,
+                    sceneText + " [Emotion: " + emotionTag + "]",
+                    personaStyle,
+                    validIdentityImages.Count);
+                onProcessingPhase?.Invoke($"Cảnh {i + 1}/{sceneScripts.Count}: tạo ảnh (Processing)…");
+                var variantImageUrl = await _mascotWorker.GenerateContextImageWithPollingAsync(
+                    sceneMascotDataUrl,
                     variantPrompt,
                     settings.VeoApiKey,
                     settings.VeoEndpoint,
                     identityDataUrls,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    logAction,
+                    onProcessingPhase).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(variantImageUrl))
                 {
                     throw new InvalidOperationException($"Failed to create mascot variant image for scene {i + 1}.");
@@ -379,14 +508,18 @@ namespace tiktok_Omni.Services
                     channelTheme,
                     sceneText,
                     settings,
+                    personaStyle,
                     cancellationToken).ConfigureAwait(false);
-                var clipUrl = await _videoService.GenerateVideoFromImageAsync(
+                onProcessingPhase?.Invoke($"Cảnh {i + 1}/{sceneScripts.Count}: Veo clip (Processing)…");
+                var clipUrl = await _mascotWorker.GenerateVideoFromImageWithPollingAsync(
                     variantImageUrl,
                     motionPrompt,
                     settings.VeoApiKey,
                     settings.VeoEndpoint,
                     sceneDurations[i],
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    logAction,
+                    onProcessingPhase).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(clipUrl))
                 {
                     throw new InvalidOperationException($"Failed to create video clip for scene {i + 1}.");
@@ -408,23 +541,108 @@ namespace tiktok_Omni.Services
                 progressCallback?.Invoke(clipProgress, "Tạo clip");
             }
 
-            var finalOutput = Path.Combine(baseDir, $"mascot_story_{DateTime.Now:HHmmss}.mp4");
+            var tempOutput = Path.Combine(baseDir, $"mascot_story_{DateTime.Now:HHmmss}.mp4");
             progressCallback?.Invoke(85, "Render");
+            onProcessingPhase?.Invoke("FFmpeg: ghép video cuối…");
             await RenderVeoVerticalVideoAsync(
                 sceneAssets.Select(x => x.SceneVideoPath).ToList(),
-                finalOutput,
+                tempOutput,
                 narrationFile,
                 narrationText,
                 settings,
                 logAction,
                 cancellationToken).ConfigureAwait(false);
+
+            var finalOutput = Path.Combine(baseDir, BuildMascotStoryFileName(nick, channelTheme));
+            if (File.Exists(finalOutput))
+            {
+                File.Delete(finalOutput);
+            }
+
+            if (lipSyncEnabled)
+            {
+                progressCallback?.Invoke(92, "Lipsync");
+                onProcessingPhase?.Invoke("LipSync: overlay miệng theo volume (FFmpeg)…");
+                var lipsyncOut = Path.Combine(baseDir, "mascot_lipsync_final.mp4");
+                var lipRequest = new LipSyncService.LipSyncRenderRequest
+                {
+                    VideoPath = tempOutput,
+                    AudioPath = narrationFile,
+                    MouthClosedPath = lipSyncPack.MouthClosedPath,
+                    MouthOpenSmallPath = lipSyncPack.MouthOpenSmallPath,
+                    MouthOpenPath = lipSyncPack.MouthOpenPath,
+                    OverlayX = lipSyncPack.MouthOverlayX,
+                    OverlayY = lipSyncPack.MouthOverlayY,
+                    OverlayScale = lipSyncPack.MouthOverlayScale <= 0 ? 1d : lipSyncPack.MouthOverlayScale,
+                    OutputPath = lipsyncOut
+                };
+                try
+                {
+                    var applied = await _lipSyncService.TryApplyToVideoWithFallbackAsync(
+                        lipRequest,
+                        settings,
+                        logAction,
+                        cancellationToken).ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(applied) && File.Exists(applied))
+                    {
+                        File.Copy(applied, finalOutput, true);
+                    }
+                    else
+                    {
+                        File.Move(tempOutput, finalOutput);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logAction?.Invoke("Mascot LipSync bỏ qua (lỗi FFmpeg): " + ex.Message);
+                    File.Move(tempOutput, finalOutput);
+                }
+            }
+            else
+            {
+                File.Move(tempOutput, finalOutput);
+            }
+
             progressCallback?.Invoke(100, "Render");
+            logAction?.Invoke("Mascot Pipeline final -> " + finalOutput);
 
             return new MascotChannelVideoPipelineResult
             {
                 FinalVideoPath = finalOutput,
-                Scenes = sceneAssets
+                Scenes = sceneAssets,
+                ProfileName = nick,
+                ChannelTheme = channelTheme
             };
+        }
+
+        public Task GenerateMascotPreviewNarrationAsync(
+            string channelTheme,
+            string narrationText,
+            AppSettings settings,
+            string outputAudioFile,
+            Action<string> logAction,
+            CancellationToken cancellationToken)
+        {
+            var adapted = AdaptNarrationForMascotGender(channelTheme, narrationText);
+            return GenerateNarrationWithTtsStrictAsync(adapted, settings, outputAudioFile, logAction, cancellationToken);
+        }
+
+        public static string BuildMascotStoryFileName(string profileName, string channelTheme)
+        {
+            var nick = ProfileScopedPaths.ResolveProfileName(profileName);
+            var theme = (channelTheme ?? "Story").Trim();
+            if (theme.Length > 48)
+            {
+                theme = theme.Substring(0, 48);
+            }
+
+            theme = Regex.Replace(theme, @"[^\w\-]+", "_").Trim('_');
+            if (string.IsNullOrWhiteSpace(theme))
+            {
+                theme = "Story";
+            }
+
+            return $"{nick}_MascotStory_{theme}_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
         }
 
         public async Task<MascotVariantPreviewResult> GenerateMascotVariantPreviewAsync(
@@ -434,7 +652,8 @@ namespace tiktok_Omni.Services
             int sceneCount,
             AppSettings settings,
             Action<string> logAction,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string mascotStyle = null)
         {
             if (string.IsNullOrWhiteSpace(mascotImagePath) || !File.Exists(mascotImagePath))
             {
@@ -481,14 +700,24 @@ namespace tiktok_Omni.Services
 
             var mascotDataUrl = BuildImageDataUrl(mascotImagePath);
             var identityDataUrls = validIdentityImages.Select(BuildImageDataUrl).ToList();
-            var sceneScripts = await BuildMascotSceneScriptsAsync(channelTheme, sceneCount, settings, cancellationToken).ConfigureAwait(false);
+            var personaStyle = (mascotStyle ?? string.Empty).Trim();
+            var sceneScripts = await BuildMascotSceneScriptsAsync(
+                channelTheme,
+                sceneCount,
+                settings,
+                personaStyle,
+                cancellationToken).ConfigureAwait(false);
 
             var previews = new List<string>();
             var previewCount = Math.Min(4, sceneScripts.Count);
             for (var i = 0; i < previewCount; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var variantPrompt = BuildMascotVariantImagePrompt(channelTheme, sceneScripts[i]);
+                var variantPrompt = BuildMascotVariantImagePrompt(
+                    channelTheme,
+                    sceneScripts[i],
+                    personaStyle,
+                    validIdentityImages.Count);
                 var variantImageUrl = await _videoService.GenerateContextImageAsync(
                     mascotDataUrl,
                     variantPrompt,
@@ -520,7 +749,8 @@ namespace tiktok_Omni.Services
             string sceneScript,
             AppSettings settings,
             Action<string> logAction,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string mascotStyle = null)
         {
             if (string.IsNullOrWhiteSpace(mascotImagePath) || !File.Exists(mascotImagePath))
             {
@@ -565,9 +795,14 @@ namespace tiktok_Omni.Services
                 DateTime.Now.ToString("HHmmssfff"));
             Directory.CreateDirectory(baseDir);
 
+            var personaStyle = (mascotStyle ?? string.Empty).Trim();
             var mascotDataUrl = BuildImageDataUrl(mascotImagePath);
             var identityDataUrls = validIdentityImages.Select(BuildImageDataUrl).ToList();
-            var variantPrompt = BuildMascotVariantImagePrompt(channelTheme, sceneScript);
+            var variantPrompt = BuildMascotVariantImagePrompt(
+                channelTheme,
+                sceneScript,
+                personaStyle,
+                validIdentityImages.Count);
             var variantImageUrl = await _videoService.GenerateContextImageAsync(
                 mascotDataUrl,
                 variantPrompt,
@@ -586,6 +821,7 @@ namespace tiktok_Omni.Services
                 channelTheme,
                 sceneScript,
                 settings,
+                personaStyle,
                 cancellationToken).ConfigureAwait(false);
 
             logAction?.Invoke("Mascot Scene Regenerate: image + motion prompt regenerated.");
@@ -601,9 +837,12 @@ namespace tiktok_Omni.Services
             IList<AiVideoGenInputItem> items,
             string script,
             AppSettings settings,
+            string profileName,
             Action<string> logAction,
             CancellationToken cancellationToken,
-            Action<int, string> progressCallback = null)
+            Action<int, string> progressCallback = null,
+            bool useMultiVoiceNarration = false,
+            IList<string> perProductScripts = null)
         {
             if (items == null || items.Count == 0)
             {
@@ -615,7 +854,7 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException("Script is empty. Please generate script first.");
             }
 
-            var baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "generated_videos", DateTime.Now.ToString("yyyyMMdd"), DateTime.Now.ToString("HHmmss"));
+            var baseDir = ProfileScopedPaths.CreateGeneratedSessionFolder(profileName, "Slideshow");
             var imagesDir = Path.Combine(baseDir, "images");
             var clipsDir = Path.Combine(baseDir, "clips");
             Directory.CreateDirectory(imagesDir);
@@ -673,16 +912,61 @@ namespace tiktok_Omni.Services
 
             var audioFile = Path.Combine(baseDir, "narration.mp3");
             progressCallback?.Invoke(28, "Generating narration");
-            await GenerateNarrationAudioAsync(script, settings, baseDir, audioFile, logAction, cancellationToken).ConfigureAwait(false);
+            await GenerateNarrationAudioAsync(
+                script,
+                settings,
+                baseDir,
+                audioFile,
+                logAction,
+                cancellationToken,
+                useMultiVoiceNarration).ConfigureAwait(false);
             logAction?.Invoke("AI Video Gen: narration saved -> " + audioFile);
             var audioDuration = await GetAudioDurationSecondsAsync(audioFile, logAction, cancellationToken).ConfigureAwait(false);
-            var perImageDuration = ResolvePerImageDuration(audioDuration, downloadedImages.Count);
+            var ffmpegExe = ResolveFfmpegExecutablePath();
+            IReadOnlyList<WordTimestamp> whisperWords = Array.Empty<WordTimestamp>();
+            try
+            {
+                whisperWords = await SlideshowSemanticTimingService.TryGetWordTimestampsAsync(
+                    ffmpegExe,
+                    audioFile,
+                    settings?.AiApiKey,
+                    logAction,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("[Slideshow] Whisper/prepare timing lỗi: " + ex.Message);
+            }
+
+            if (whisperWords.Count == 0)
+            {
+                var estimated = SubtitleTimingHelper.EstimateWordTimestamps(
+                    script,
+                    Math.Max(1000d, audioDuration * 1000d));
+                if (estimated.Count > 0)
+                {
+                    whisperWords = estimated;
+                    logAction?.Invoke("[Slideshow] Ước lượng " + estimated.Count + " từ từ script (fallback timing).");
+                }
+            }
+
+            var segmentScripts = SlideshowSemanticTimingService.BuildSegmentScriptsForImages(
+                downloadedImages.Count,
+                script,
+                perProductScripts);
+            var perImageDurations = SlideshowSemanticTimingService.ResolvePerImageDurationsSeconds(
+                downloadedImages.Count,
+                audioDuration,
+                whisperWords,
+                segmentScripts,
+                logAction);
             var scriptOverlay = BuildScriptOverlayText(script);
             var transitionDuration = ResolveTransitionDuration(settings);
             var textSize = ResolveTextSize(settings);
             var musicVolume = ResolveMusicVolume(settings);
             var visualVariant = BuildVisualVariant();
-            logAction?.Invoke($"AI Video Gen: target image duration ~{perImageDuration:0.00}s per product.");
+            logAction?.Invoke("[Slideshow] Thời lượng từng ảnh (s): " + string.Join(", ",
+                perImageDurations.Select(d => d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))));
             logAction?.Invoke($"AI Video Gen: unique variant -> transition={visualVariant.Transition}, text={visualVariant.TextPosition}, brightness={visualVariant.BrightnessDelta:+0.00;-0.00}, contrast={visualVariant.Contrast:0.00}");
 
             logAction?.Invoke("AI Video Gen: sanitizing images (strip metadata)...");
@@ -705,13 +989,16 @@ namespace tiktok_Omni.Services
                 cancellationToken.ThrowIfCancellationRequested();
                 var clipPath = Path.Combine(clipsDir, $"clip_{i + 1:D3}.mp4");
                 var item = downloadedImages[i];
+                var clipDuration = i < perImageDurations.Count
+                    ? perImageDurations[i]
+                    : ResolvePerImageDuration(audioDuration, downloadedImages.Count);
                 await RenderImageClipAsync(
                     item.ImagePath,
                     clipPath,
                     item?.ProductName ?? string.Empty,
                     item?.Price ?? string.Empty,
                     scriptOverlay,
-                    perImageDuration,
+                    clipDuration,
                     textSize,
                     visualVariant.TextPosition,
                     visualVariant.BrightnessDelta,
@@ -724,23 +1011,86 @@ namespace tiktok_Omni.Services
             var slideshowFile = Path.Combine(baseDir, "slideshow.mp4");
             logAction?.Invoke("AI Video Gen: building smooth transitions (xfade)...");
             progressCallback?.Invoke(76, "Building transitions");
-            await BuildTransitionVideoAsync(clipFiles, slideshowFile, perImageDuration, transitionDuration, visualVariant.Transition, logAction, cancellationToken).ConfigureAwait(false);
+            await BuildTransitionVideoAsync(
+                clipFiles,
+                slideshowFile,
+                perImageDurations,
+                transitionDuration,
+                visualVariant.Transition,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
+
+            var slideshowDuration = await GetVideoDurationSecondsAsync(slideshowFile, logAction, cancellationToken).ConfigureAwait(false);
+            if (slideshowDuration < 1d)
+            {
+                slideshowDuration = Math.Max(8d, audioDuration);
+            }
 
             var outputFile = Path.Combine(baseDir, $"product_video_{DateTime.Now:HHmmss}.mp4");
             var backgroundMusic = ResolveBackgroundMusicFile();
             string preparedBackgroundMusic = null;
             if (!string.IsNullOrWhiteSpace(backgroundMusic))
             {
-                logAction?.Invoke("AI Video Gen: adding royalty-free background music -> " + Path.GetFileName(backgroundMusic));
+                logAction?.Invoke("AI Video Gen: AffiliateBed — trim nhạc nền khớp độ dài video (~" +
+                                  slideshowDuration.ToString("0.##") + "s) → " + Path.GetFileName(backgroundMusic));
                 preparedBackgroundMusic = Path.Combine(baseDir, "music_prepared.mp3");
                 progressCallback?.Invoke(88, "Preparing background music");
-                await PrepareBackgroundMusicTrackAsync(backgroundMusic, preparedBackgroundMusic, audioDuration, logAction, cancellationToken).ConfigureAwait(false);
+                await PrepareBackgroundMusicTrackAsync(
+                    backgroundMusic,
+                    preparedBackgroundMusic,
+                    slideshowDuration,
+                    logAction,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             logAction?.Invoke("AI Video Gen: merging clips + voice + music (1080x1920)...");
             progressCallback?.Invoke(95, "Final merge");
-            var concatArgs = BuildFinalRenderArgs(slideshowFile, audioFile, preparedBackgroundMusic, outputFile, musicVolume);
-            await RunFfmpegAsync(concatArgs, logAction, cancellationToken).ConfigureAwait(false);
+            KaraokeAssSubtitleService.KaraokeAssBurnInResult karaokeBurnIn = null;
+            try
+            {
+                karaokeBurnIn = await KaraokeAssSubtitleService.TryCreateBurnInAsync(
+                    ffmpegExe,
+                    script,
+                    audioFile,
+                    baseDir,
+                    logAction,
+                    cancellationToken,
+                    settings?.AiApiKey,
+                    precomputedWordTimestamps: whisperWords).ConfigureAwait(false);
+                var concatArgs = BuildFinalRenderArgs(
+                    slideshowFile,
+                    audioFile,
+                    preparedBackgroundMusic,
+                    outputFile,
+                    musicVolume,
+                    karaokeBurnIn?.VideoFilterFragment);
+                await RunFfmpegAsync(concatArgs, logAction, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                KaraokeAssSubtitleService.SafeDeleteAssFile(karaokeBurnIn?.AssFilePath);
+            }
+
+            try
+            {
+                outputFile = await _affiliatePostProcessing.ApplyCtaTailOverlayOnlyAsync(
+                    outputFile,
+                    settings,
+                    baseDir,
+                    logAction,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("AI Video Gen: CTA overlay skipped -> " + ex.Message);
+            }
+
+            progressCallback?.Invoke(98, "Cover thumbnail");
+            await SaveSlideshowCoverThumbnailAsync(
+                outputFile,
+                downloadedImages,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
             progressCallback?.Invoke(100, "Completed");
 
             return outputFile;
@@ -830,25 +1180,57 @@ namespace tiktok_Omni.Services
             var textSub = string.IsNullOrWhiteSpace(safeScriptOverlay)
                 ? string.Empty
                 : ",drawtext=text='" + safeScriptOverlay + "':x=70:y=" + ySub + ":fontsize=" + Math.Max(20, (int)Math.Round(textSize * 0.6d)) + ":fontcolor=white@0.95:line_spacing=8";
-            var vf =
-                "scale=1080:1920:force_original_aspect_ratio=decrease," +
-                "pad=1080:1920:(ow-iw)/2:(oh-ih)/2," +
-                "eq=brightness=" + brightnessDelta.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + ":contrast=" + contrast.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + "," +
-                "zoompan=z='min(zoom+0.0009,1.16)':d=" + Math.Max(1, (int)Math.Round(clipDurationSeconds * 30d)) + ":s=1080x1920:fps=30," +
+            var clipDurationText = clipDurationSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            var zoomFrames = Math.Max(1, (int)Math.Round(clipDurationSeconds * 30d));
+            var fadeOutStart = Math.Max(0d, clipDurationSeconds - 0.45d).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            var eqFilter = "eq=brightness=" + brightnessDelta.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) +
+                           ":contrast=" + contrast.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            var postOverlay =
+                eqFilter + "," +
+                "zoompan=z='min(zoom+0.0009,1.16)':d=" + zoomFrames + ":s=1080x1920:fps=30," +
                 "fade=t=in:st=0:d=0.35," +
-                "fade=t=out:st=" + Math.Max(0d, clipDurationSeconds - 0.45d).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + ":d=0.45," +
+                "fade=t=out:st=" + fadeOutStart + ":d=0.45," +
                 textBar + "," +
                 textMain +
                 textSub;
-            var clipDurationText = clipDurationSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            var args = $"-y -loop 1 -i \"{imagePath}\" -t {clipDurationText} -vf \"{vf}\" -r 30 -map_metadata -1 -c:v libx264 -preset medium -pix_fmt yuv420p \"{clipPath}\"";
-            await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                var filterComplex = BuildSmartBoxBlurPaddingFilterComplex(postOverlay);
+                var args = "-y -loop 1 -i \"" + imagePath + "\" -t " + clipDurationText +
+                           " -filter_complex \"" + filterComplex + "\" -map \"[vout]\" -r 30 -map_metadata -1" +
+                           " -c:v libx264 -preset medium -pix_fmt yuv420p \"" + clipPath + "\"";
+                logAction?.Invoke("[Slideshow FFmpeg] Smart Boxblur Padding → " + Path.GetFileName(clipPath));
+                await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("[Slideshow FFmpeg] Boxblur lỗi, fallback pad đen: " + ex.Message);
+                var vf =
+                    "scale=1080:1920:force_original_aspect_ratio=decrease," +
+                    "pad=1080:1920:(ow-iw)/2:(oh-ih)/2," +
+                    postOverlay;
+                var fallbackArgs = "-y -loop 1 -i \"" + imagePath + "\" -t " + clipDurationText +
+                                   " -vf \"" + vf + "\" -r 30 -map_metadata -1 -c:v libx264 -preset medium -pix_fmt yuv420p \"" +
+                                   clipPath + "\"";
+                await RunFfmpegAsync(fallbackArgs, logAction, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>Nền boxblur 1080x1920 + ảnh foreground căn giữa (TikTok 9:16).</summary>
+        private static string BuildSmartBoxBlurPaddingFilterComplex(string postOverlayFilters)
+        {
+            return "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:20,crop=1080:1920[bg];" +
+                   "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];" +
+                   "[bg][fg]overlay=(W-w)/2:(H-h)/2," +
+                   (postOverlayFilters ?? string.Empty) +
+                   "[vout]";
         }
 
         private static async Task BuildTransitionVideoAsync(
             IList<string> clipFiles,
             string outputFile,
-            double clipDurationSeconds,
+            IList<double> clipDurationSeconds,
             double transitionDurationSeconds,
             string transitionName,
             Action<string> logAction,
@@ -859,6 +1241,8 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException("No clip files to merge.");
             }
 
+            var durations = NormalizeClipDurations(clipFiles.Count, clipDurationSeconds);
+
             if (clipFiles.Count == 1)
             {
                 var singleArgs = $"-y -i \"{clipFiles[0]}\" -c:v libx264 -preset medium -pix_fmt yuv420p \"{outputFile}\"";
@@ -866,43 +1250,87 @@ namespace tiktok_Omni.Services
                 return;
             }
 
-            var inputBuilder = new StringBuilder();
-            for (var i = 0; i < clipFiles.Count; i++)
+            try
             {
-                inputBuilder.Append("-i \"").Append(clipFiles[i]).Append("\" ");
+                var inputBuilder = new StringBuilder();
+                for (var i = 0; i < clipFiles.Count; i++)
+                {
+                    inputBuilder.Append("-i \"").Append(clipFiles[i]).Append("\" ");
+                }
+
+                var filter = new StringBuilder();
+                var currentLabel = "[0:v]";
+                var timeline = durations[0];
+                for (var i = 1; i < clipFiles.Count; i++)
+                {
+                    var outputLabel = i == clipFiles.Count - 1 ? "[vout]" : $"[vx{i}]";
+                    var offset = Math.Max(0d, timeline - transitionDurationSeconds);
+                    filter
+                        .Append(currentLabel)
+                        .Append("[")
+                        .Append(i)
+                        .Append(":v]xfade=transition=")
+                        .Append(string.IsNullOrWhiteSpace(transitionName) ? "fade" : transitionName)
+                        .Append(":duration=")
+                        .Append(transitionDurationSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
+                        .Append(":offset=")
+                        .Append(offset.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
+                        .Append(outputLabel)
+                        .Append(";");
+                    currentLabel = outputLabel;
+                    timeline += durations[i] - transitionDurationSeconds;
+                }
+
+                var args = $"-y {inputBuilder}-filter_complex \"{filter}\" -map \"[vout]\" -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p \"{outputFile}\"";
+                logAction?.Invoke("[Slideshow FFmpeg] xfade " + clipFiles.Count + " clip (semantic durations).");
+                await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("[Slideshow FFmpeg] xfade lỗi: " + ex.Message);
+                throw;
+            }
+        }
+
+        private static IList<double> NormalizeClipDurations(int clipCount, IList<double> clipDurationSeconds)
+        {
+            if (clipCount <= 0)
+            {
+                return Array.Empty<double>();
             }
 
-            var filter = new StringBuilder();
-            var currentLabel = "[0:v]";
-            var timeline = clipDurationSeconds;
-            for (var i = 1; i < clipFiles.Count; i++)
+            if (clipDurationSeconds == null || clipDurationSeconds.Count == 0)
             {
-                var outputLabel = i == clipFiles.Count - 1 ? "[vout]" : $"[vx{i}]";
-                var offset = timeline - transitionDurationSeconds;
-                filter
-                    .Append(currentLabel)
-                    .Append("[")
-                    .Append(i)
-                    .Append(":v]xfade=transition=")
-                    .Append(string.IsNullOrWhiteSpace(transitionName) ? "fade" : transitionName)
-                    .Append(":duration=")
-                    .Append(transitionDurationSeconds.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
-                    .Append(":offset=")
-                    .Append(offset.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
-                    .Append(outputLabel)
-                    .Append(";");
-                currentLabel = outputLabel;
-                timeline += clipDurationSeconds - transitionDurationSeconds;
+                return Enumerable.Repeat(4.2d, clipCount).ToList();
             }
 
-            var args = $"-y {inputBuilder}-filter_complex \"{filter}\" -map \"[vout]\" -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p \"{outputFile}\"";
-            await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+            var list = new List<double>(clipCount);
+            for (var i = 0; i < clipCount; i++)
+            {
+                var value = i < clipDurationSeconds.Count ? clipDurationSeconds[i] : clipDurationSeconds[clipDurationSeconds.Count - 1];
+                list.Add(Math.Max(2.5d, value));
+            }
+
+            return list;
         }
 
         private static async Task SanitizeImageAsync(string inputPath, string outputPath, Action<string> logAction, CancellationToken cancellationToken)
         {
-            var args = $"-y -i \"{inputPath}\" -map_metadata -1 -frames:v 1 -pix_fmt yuv420p \"{outputPath}\"";
-            await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var stillFrame = "scale=1080:1920:force_original_aspect_ratio=increase,boxblur=20:20,crop=1080:1920[bg];" +
+                                 "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];" +
+                                 "[bg][fg]overlay=(W-w)/2:(H-h)/2[vout]";
+                var args = "-y -i \"" + inputPath + "\" -frames:v 1 -filter_complex \"" + stillFrame +
+                           "\" -map \"[vout]\" -map_metadata -1 -pix_fmt yuv420p \"" + outputPath + "\"";
+                await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("[Slideshow FFmpeg] Sanitize boxblur lỗi, fallback: " + ex.Message);
+                var args = $"-y -i \"{inputPath}\" -map_metadata -1 -frames:v 1 -pix_fmt yuv420p \"{outputPath}\"";
+                await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         private static async Task PrepareBackgroundMusicTrackAsync(
@@ -913,10 +1341,63 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken)
         {
             var safeTarget = Math.Max(8d, targetDurationSeconds);
-            var safeTargetText = safeTarget.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            var fadeStart = Math.Max(0d, safeTarget - 1.2d).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            var args = $"-y -stream_loop -1 -i \"{sourceMusicPath}\" -t {safeTargetText} -af \"afade=t=in:st=0:d=0.7,afade=t=out:st={fadeStart}:d=1.2\" -map_metadata -1 -c:a libmp3lame -q:a 2 \"{outputPath}\"";
+            var durationText = safeTarget.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            var fadeStart = Math.Max(0d, safeTarget - 1d).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            var filter =
+                $"atrim=0:{durationText},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.7,afade=t=out:st={fadeStart}:d=1";
+            var args =
+                $"-y -stream_loop -1 -i \"{sourceMusicPath}\" -af \"{filter}\" -map_metadata -1 -c:a libmp3lame -q:a 2 \"{outputPath}\"";
             await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+        }
+
+        private static async Task SaveSlideshowCoverThumbnailAsync(
+            string outputVideoPath,
+            IList<DownloadedProductImage> sourceImages,
+            Action<string> logAction,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(outputVideoPath) || !File.Exists(outputVideoPath))
+            {
+                return;
+            }
+
+            var videoName = Path.GetFileNameWithoutExtension(outputVideoPath);
+            if (string.IsNullOrWhiteSpace(videoName))
+            {
+                videoName = "slideshow";
+            }
+
+            var coverPath = Path.Combine(Path.GetDirectoryName(outputVideoPath) ?? string.Empty, videoName + "_cover.jpg");
+            var firstImage = (sourceImages ?? new List<DownloadedProductImage>())
+                .FirstOrDefault(x => x != null && !string.IsNullOrWhiteSpace(x.ImagePath) && File.Exists(x.ImagePath));
+            if (firstImage != null)
+            {
+                try
+                {
+                    File.Copy(firstImage.ImagePath, coverPath, overwrite: true);
+                    logAction?.Invoke("AI Video Gen: cover from first product image -> " + coverPath);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    logAction?.Invoke("AI Video Gen: first image cover fallback -> " + ex.Message);
+                }
+            }
+
+            try
+            {
+                var frameArgs =
+                    $"-y -i \"{outputVideoPath}\" -ss 00:00:01.000 -vframes 1 -q:v 2 \"{coverPath}\"";
+                await RunFfmpegAsync(frameArgs, logAction, cancellationToken).ConfigureAwait(false);
+                if (File.Exists(coverPath) && new FileInfo(coverPath).Length > 2048)
+                {
+                    logAction?.Invoke("AI Video Gen: cover thumbnail (frame) -> " + coverPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("AI Video Gen: frame extract failed -> " + ex.Message);
+            }
         }
 
         private static async Task RunFfmpegAsync(string args, Action<string> logAction, CancellationToken cancellationToken)
@@ -937,12 +1418,7 @@ namespace tiktok_Omni.Services
                 process.Start();
                 var stdOut = process.StandardOutput.ReadToEndAsync();
                 var stdErr = process.StandardError.ReadToEndAsync();
-
-                while (!process.HasExited)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-                }
+                await ProcessCancellationHelper.WaitUntilExitAsync(process, cancellationToken).ConfigureAwait(false);
 
                 var outText = await stdOut.ConfigureAwait(false);
                 var errText = await stdErr.ConfigureAwait(false);
@@ -1006,12 +1482,7 @@ namespace tiktok_Omni.Services
                 process.Start();
                 var outputTask = process.StandardOutput.ReadToEndAsync();
                 var errorTask = process.StandardError.ReadToEndAsync();
-
-                while (!process.HasExited)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await Task.Delay(80, cancellationToken).ConfigureAwait(false);
-                }
+                await ProcessCancellationHelper.WaitUntilExitAsync(process, cancellationToken, 80).ConfigureAwait(false);
 
                 var output = (await outputTask.ConfigureAwait(false) ?? string.Empty).Trim();
                 var errors = (await errorTask.ConfigureAwait(false) ?? string.Empty).Trim();
@@ -1066,33 +1537,29 @@ namespace tiktok_Omni.Services
             string baseDir,
             string outputAudioFile,
             Action<string> logAction,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool useMultiVoiceNarration = false)
         {
             Exception lastError = null;
 
-            if (!string.IsNullOrWhiteSpace(settings?.LyriaApiKey) && !string.IsNullOrWhiteSpace(settings?.LyriaEndpoint))
+            if (!string.IsNullOrWhiteSpace(settings?.TtsApiKey) && !string.IsNullOrWhiteSpace(settings?.TtsEndpoint))
             {
                 try
                 {
-                    logAction?.Invoke("AI Video Gen: generating narration via Lyria...");
-                    var audioUrl = await _videoService.GenerateAudioAsync(
+                    await _affiliateNarrationService.GenerateNarrationAsync(
                         script,
-                        settings.LyriaApiKey,
-                        settings.LyriaEndpoint,
+                        settings,
+                        outputAudioFile,
+                        useMultiVoiceNarration,
+                        baseDir,
+                        logAction,
                         cancellationToken).ConfigureAwait(false);
-
-                    if (!string.IsNullOrWhiteSpace(audioUrl))
-                    {
-                        await DownloadFileAsync(audioUrl, outputAudioFile, cancellationToken).ConfigureAwait(false);
-                        return;
-                    }
-
-                    throw new InvalidOperationException("Lyria returned empty audioUrl.");
+                    return;
                 }
                 catch (Exception ex)
                 {
                     lastError = ex;
-                    logAction?.Invoke("AI Video Gen: Lyria failed, fallback to Google TTS. Reason: " + ex.Message);
+                    logAction?.Invoke("AI Video Gen: TTS API failed, fallback to Google TTS. Reason: " + ex.Message);
                 }
             }
 
@@ -1138,7 +1605,7 @@ namespace tiktok_Omni.Services
             {
                 sb.AppendLine("file '" + seg.Replace("'", "'\\''") + "'");
             }
-            File.WriteAllText(listPath, sb.ToString());
+            File.WriteAllText(listPath, sb.ToString(), TextFileEncoding.Utf8NoBom);
 
             logAction?.Invoke("AI Video Gen: stitching Google TTS segments...");
             var args = $"-y -f concat -safe 0 -i \"{listPath}\" -c:a libmp3lame -q:a 2 \"{outputAudioFile}\"";
@@ -1200,15 +1667,28 @@ namespace tiktok_Omni.Services
             return string.Empty;
         }
 
-        private static string BuildFinalRenderArgs(string concatFile, string narrationFile, string backgroundMusicFile, string outputFile, double musicVolume)
+        private static string BuildFinalRenderArgs(
+            string concatFile,
+            string narrationFile,
+            string backgroundMusicFile,
+            string outputFile,
+            double musicVolume,
+            string subtitleVideoFilter = null)
         {
+            var vf = BuildSlideshowVideoFilterChain(subtitleVideoFilter);
             if (string.IsNullOrWhiteSpace(backgroundMusicFile))
             {
-                return $"-y -i \"{concatFile}\" -i \"{narrationFile}\" -map 0:v:0 -map 1:a:0 -vf scale=1080:1920:flags=lanczos -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -shortest \"{outputFile}\"";
+                return $"-y -i \"{concatFile}\" -i \"{narrationFile}\" -map 0:v:0 -map 1:a:0 -vf \"{vf}\" -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -shortest \"{outputFile}\"";
             }
 
             var musicVolumeFilter = musicVolume.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            return $"-y -i \"{concatFile}\" -i \"{narrationFile}\" -stream_loop -1 -i \"{backgroundMusicFile}\" -filter_complex \"[1:a]volume=1.0[voice];[2:a]volume={musicVolumeFilter}[music];[voice][music]amix=inputs=2:duration=first:dropout_transition=2[aout]\" -map 0:v:0 -map \"[aout]\" -vf scale=1080:1920:flags=lanczos -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -shortest \"{outputFile}\"";
+            return $"-y -i \"{concatFile}\" -i \"{narrationFile}\" -stream_loop -1 -i \"{backgroundMusicFile}\" -filter_complex \"[1:a]volume=1.0[voice];[2:a]volume={musicVolumeFilter}[music];[voice][music]amix=inputs=2:duration=first:dropout_transition=2[aout]\" -map 0:v:0 -map \"[aout]\" -vf \"{vf}\" -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -shortest \"{outputFile}\"";
+        }
+
+        private static string BuildSlideshowVideoFilterChain(string subtitleVideoFilter)
+        {
+            var scale = "scale=1080:1920:flags=lanczos";
+            return KaraokeAssSubtitleService.MergeVideoFilters(scale, subtitleVideoFilter);
         }
 
         private static double ResolvePerImageDuration(double audioDurationSeconds, int imageCount)
@@ -1306,17 +1786,20 @@ namespace tiktok_Omni.Services
         private async Task<string> BuildMotionPromptAsync(
             string productName,
             string price,
-            string shotHint,
+            int sceneIndex,
             AppSettings settings,
             CancellationToken cancellationToken)
         {
             var name = string.IsNullOrWhiteSpace(productName) ? "sản phẩm" : productName.Trim();
             var priceText = string.IsNullOrWhiteSpace(price) ? "không nêu giá" : price.Trim();
-            var prompt = "Viết một video prompt tiếng Việt ngắn (1-2 câu) cho Veo 3. " +
-                         "Mô tả chuyển động vật lý chân thực của cảnh quay sản phẩm gồm: xoay nhẹ sản phẩm, ánh sáng lướt qua bề mặt, " +
-                         "camera dolly chậm hoặc pan nhẹ, giữ chất liệu thật rõ nét. " +
-                         "Không markdown, không số thứ tự. " +
-                         $"Sản phẩm: {name}. Giá: {priceText}. Góc chụp: {shotHint}.";
+            var pasRole = ResolvePasShotHint(sceneIndex);
+            var prompt =
+                "Bạn là chuyên gia prompt video quảng cáo TikTok theo mô hình PAS (Pain-Agitate-Solve-CTA). " +
+                "Viết MỘT video prompt tiếng Việt ngắn gọn (2-3 câu) cho Veo 3. " +
+                "BẮT BUỘC đúng vai trò cảnh hiện tại trong chuỗi 4 cảnh PAS — không lẫn cảnh khác. " +
+                "Mô tả chuyển động camera và vật lý chân thực (dolly, pan, macro push, light sweep) phù hợp vai trò. " +
+                "Không markdown, không số thứ tự, không giải thích. " +
+                $"Cảnh {sceneIndex + 1}/4 — {pasRole}. Sản phẩm: {name}. Giá: {priceText}.";
 
             var generated = await _geminiService.GenerateScriptAsync(
                 prompt,
@@ -1325,48 +1808,112 @@ namespace tiktok_Omni.Services
                 settings.AiModel,
                 cancellationToken).ConfigureAwait(false);
 
-            return string.IsNullOrWhiteSpace(generated)
-                ? $"Quay cận cảnh {name}, camera pan nhẹ, ánh sáng studio lướt qua bề mặt sản phẩm, giữ chất liệu chân thực."
+            var body = string.IsNullOrWhiteSpace(generated)
+                ? BuildPasFallbackMotionPrompt(sceneIndex, name)
                 : Regex.Replace(generated.Trim(), "\\s+", " ");
+
+            return AppendPasCameraLightingTail(body, sceneIndex);
         }
 
-        private static string ResolveShotHint(int index)
+        private static string ResolvePasShotHint(int index)
         {
-            var hints = new[]
+            switch (index)
             {
-                "hero shot chính diện",
-                "góc 3/4 nhấn chất liệu",
-                "cận cảnh chi tiết sản phẩm",
-                "góc lifestyle sang trọng"
-            };
+                case 0:
+                    return "PAS Pain — tối màu, u ám, nhấn vấn đề sản phẩm giải quyết";
+                case 1:
+                    return "PAS Agitate — macro cận cảnh, zoom xoáy vào chi tiết sản phẩm";
+                case 2:
+                    return "PAS Solve — bừng sáng cinematic, glowing, tính năng hoàn hảo";
+                case 3:
+                    return "PAS CTA — quét ánh sáng qua sản phẩm hoặc logo";
+                default:
+                    return "PAS — cảnh quảng cáo";
+            }
+        }
 
-            if (index < 0 || index >= hints.Length)
+        private static string BuildPasFallbackMotionPrompt(int sceneIndex, string productName)
+        {
+            var name = string.IsNullOrWhiteSpace(productName) ? "sản phẩm" : productName.Trim();
+            switch (sceneIndex)
             {
-                return "góc đa dụng";
+                case 0:
+                    return $"Cảnh u ám tối màu, camera chậm lướt qua bối cảnh thể hiện nỗi đau mà {name} giải quyết.";
+                case 1:
+                    return $"Macro push-in xoáy sâu vào chi tiết bề mặt {name}, nhấn kết cấu và điểm yếu trước khi giải pháp.";
+                case 2:
+                    return $"Ánh sáng cinematic bừng sáng, {name} phát sáng premium, thể hiện tính năng hoàn hảo rõ nét.";
+                case 3:
+                    return $"Quét sáng mạnh lướt qua {name} hoặc logo, camera ổn định kết thúc ấn tượng kêu gọi mua.";
+                default:
+                    return $"Quay cận {name}, chuyển động mượt, ánh sáng studio chân thực.";
+            }
+        }
+
+        private static string AppendPasCameraLightingTail(string promptBody, int sceneIndex)
+        {
+            var tail = GetPasCameraLightingDirective(sceneIndex);
+            if (string.IsNullOrWhiteSpace(promptBody))
+            {
+                return tail;
             }
 
-            return hints[index];
+            return promptBody.Trim() + " Camera & lighting: " + tail;
         }
 
-        private static string BuildAffiliateRedrawPrompt(string productName, string price, string shotHint)
+        private static string GetPasCameraLightingDirective(int sceneIndex)
+        {
+            switch (sceneIndex)
+            {
+                case 0:
+                    return "dark moody low-key lighting, desaturated tones, soft shadows, slow handheld drift, focus on customer pain point before product hero.";
+                case 1:
+                    return "macro close-up, aggressive push-in zoom, shallow depth of field, dramatic side light, emphasize texture and tension on product details.";
+                case 2:
+                    return "cinematic high-key lighting, soft glow and rim light, vibrant clean highlights, premium hero product reveal, gentle dolly-in.";
+                case 3:
+                    return "dynamic light sweep across product or logo, lens flare accent, stable confident framing, call-to-action energy.";
+                default:
+                    return "smooth product motion, realistic studio lighting.";
+            }
+        }
+
+        private static string BuildAffiliateRedrawPrompt(string productName, string price, int sceneIndex)
         {
             var name = string.IsNullOrWhiteSpace(productName) ? "sản phẩm gia dụng" : productName.Trim();
             var priceText = string.IsNullOrWhiteSpace(price) ? string.Empty : (" giá " + price.Trim());
+            var pasVisual = sceneIndex switch
+            {
+                0 => "Bối cảnh tối, u ám, màu lạnh — gợi vấn đề/nỗi đau trước khi dùng sản phẩm.",
+                1 => "Góc macro cận chi tiết, tương phản cao — nhấn chất liệu và điểm cần cải thiện.",
+                2 => "Ánh sáng studio sáng, cinematic glow — sản phẩm là giải pháp hoàn hảo, premium.",
+                3 => "Hero shot sáng, có vùng highlight quét sáng — sẵn sàng CTA mua hàng.",
+                _ => "Phong cách thương mại cao cấp."
+            };
+
             return "Phân tích sản phẩm, giữ nguyên form dáng và chất liệu. " +
-                   "Vẽ lại ảnh mới theo phong cách thương mại cao cấp: nếu có người mẫu cũ thì thay bằng người mẫu xinh đẹp, tự nhiên; " +
-                   "đặt sản phẩm vào bối cảnh sang trọng, hợp lý (studio premium, bàn đá cẩm thạch hoặc không gian hiện đại), " +
-                   "đa dạng góc chụp theo chỉ dẫn. " +
+                   "Vẽ lại ảnh mới theo phong cách thương mại PAS: " + pasVisual + " " +
+                   "Nếu có người mẫu cũ thì thay bằng người mẫu xinh đẹp, tự nhiên. " +
                    "YÊU CẦU BẮT BUỘC: không làm sai tỷ lệ, không biến dạng, giữ đúng nhận diện thật của sản phẩm. " +
-                   $"Sản phẩm: {name}{priceText}. Góc chụp: {shotHint}.";
+                   $"Sản phẩm: {name}{priceText}. Cảnh PAS {sceneIndex + 1}/4.";
         }
 
-        private async Task<List<string>> BuildMascotSceneScriptsAsync(string channelTheme, int sceneCount, AppSettings settings, CancellationToken cancellationToken)
+        private async Task<List<string>> BuildMascotSceneScriptsAsync(
+            string channelTheme,
+            int sceneCount,
+            AppSettings settings,
+            string mascotStyle,
+            CancellationToken cancellationToken)
         {
             var safeSceneCount = sceneCount == 6 || sceneCount == 8 ? sceneCount : 4;
+            var styleBlock = string.IsNullOrWhiteSpace(mascotStyle)
+                ? string.Empty
+                : " Phong cách nhân vật/kênh (MascotStyle): " + mascotStyle.Trim() + ".";
             var prompt = $"Viết kịch bản video storytelling gồm đúng {safeSceneCount} phân cảnh cho kênh TikTok. " +
-                         "Chủ đề kênh: " + channelTheme.Trim() + ". " +
-                         $"Trả về đúng {safeSceneCount} dòng, mỗi dòng bắt đầu bằng 'Cảnh i:'. " +
-                         "Mỗi cảnh 1-2 câu ngắn, rõ hành động, bối cảnh, cảm xúc.";
+                         "Chủ đề kênh: " + channelTheme.Trim() + "." + styleBlock + " " +
+                         $"Trả về đúng {safeSceneCount} dòng. MỖI dòng BẮT BUỘC bắt đầu bằng ĐÚNG MỘT tag cảm xúc: [HAPPY], [SAD] hoặc [NEUTRAL] (chỉ 3 tag), " +
+                         "sau đó 'Cảnh i:' và 1-2 câu ngắn. Ví dụ: [HAPPY] Cảnh 1: ... " +
+                         "Mỗi cảnh rõ hành động, bối cảnh — đồng bộ MascotStyle.";
             var raw = await _geminiService.GenerateScriptAsync(
                 prompt,
                 settings.AiProvider,
@@ -1384,10 +1931,10 @@ namespace tiktok_Omni.Services
             {
                 scenes = new List<string>
                 {
-                    "Cảnh 1: Mở đầu giới thiệu linh vật/người mẫu trong bối cảnh đời thường gần gũi.",
-                    "Cảnh 2: Nhân vật chuyển sang bối cảnh nổi bật thể hiện cá tính của kênh.",
-                    "Cảnh 3: Cận cảnh biểu cảm nhân vật, nhấn thông điệp chính của nội dung.",
-                    "Cảnh 4: Kết thúc với góc quay ấn tượng và lời kêu gọi theo dõi kênh."
+                    "[NEUTRAL] Cảnh 1: Mở đầu giới thiệu linh vật trong bối cảnh đời thường gần gũi.",
+                    "[HAPPY] Cảnh 2: Nhân vật tươi sáng thể hiện cá tính kênh.",
+                    "[SAD] Cảnh 3: Cận cảnh biểu cảm, nhấn thông điệp chính.",
+                    "[HAPPY] Cảnh 4: Kết thúc ấn tượng và lời kêu gọi theo dõi kênh."
                 };
                 while (scenes.Count < safeSceneCount)
                 {
@@ -1399,24 +1946,37 @@ namespace tiktok_Omni.Services
             return scenes;
         }
 
-        private static string BuildMascotVariantImagePrompt(string channelTheme, string sceneScript)
+        private static string BuildMascotVariantImagePrompt(
+            string channelTheme,
+            string sceneScript,
+            string mascotStyle,
+            int identityPackCount)
         {
-            return "Dựa trên ảnh gốc linh vật/người mẫu, tạo ảnh biến thể theo phân cảnh. " +
+            var styleLine = string.IsNullOrWhiteSpace(mascotStyle)
+                ? string.Empty
+                : " MascotStyle bắt buộc: " + mascotStyle.Trim() + ".";
+            return "Dựa trên ảnh gốc linh vật/người mẫu + " + identityPackCount +
+                   " ảnh Identity Pack (giữ nhận diện khuôn mặt), tạo ảnh biến thể theo phân cảnh. " +
                    "Giữ NGUYÊN khuôn mặt/nhân vật nhận diện chính, không đổi đặc trưng gương mặt, không đổi danh tính. " +
-                   "Chỉ thay đổi bối cảnh, tư thế, góc chụp theo nội dung cảnh. " +
-                   "Phong cách điện ảnh, ánh sáng đẹp, bố cục rõ chủ thể. " +
+                   "Chỉ thay đổi bối cảnh, tư thế, góc chụp theo SceneScript. " +
+                   "Phong cách điện ảnh, ánh sáng đẹp, bố cục rõ chủ thể." + styleLine + " " +
                    "Chủ đề kênh: " + channelTheme.Trim() + ". " +
-                   "Nội dung cảnh: " + sceneScript.Trim();
+                   "SceneScript: " + sceneScript.Trim();
         }
 
         private async Task<string> BuildMascotMotionPromptAsync(
             string channelTheme,
             string sceneScript,
             AppSettings settings,
+            string mascotStyle,
             CancellationToken cancellationToken)
         {
+            var styleLine = string.IsNullOrWhiteSpace(mascotStyle)
+                ? string.Empty
+                : " MascotStyle: " + mascotStyle.Trim() + ".";
             var prompt = "Viết một video prompt ngắn cho Veo 3 dựa trên cảnh sau, mô tả chuyển động camera và chuyển động vật lý tự nhiên. " +
-                         "Không markdown, không giải thích. Chủ đề: " + channelTheme.Trim() + ". Cảnh: " + sceneScript.Trim();
+                         "Không markdown, không giải thích." + styleLine +
+                         " Chủ đề: " + channelTheme.Trim() + ". SceneScript: " + sceneScript.Trim();
             var text = await _geminiService.GenerateScriptAsync(
                 prompt,
                 settings.AiProvider,
@@ -1487,22 +2047,50 @@ namespace tiktok_Omni.Services
                 cancellationToken).ConfigureAwait(false);
             var hasAmbientAudio = await HasAudioStreamAsync(stitched, logAction, cancellationToken).ConfigureAwait(false);
             var fingerprintVariant = BuildRenderFingerprintVariant();
-            var captionVideoFilter = await BuildDynamicCaptionFilterAsync(
-                narrationScript,
-                narrationTrackPath,
-                settings,
-                logAction,
-                cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(preparedTrendMusic))
+            KaraokeAssSubtitleService.KaraokeAssBurnInResult karaokeBurnIn = null;
+            try
             {
-                var noMusicArgs = BuildMetadataRenderArgs(stitched, outputFile, narrationTrackPath, null, null, hasAmbientAudio, captionVideoFilter, fingerprintVariant);
-                await RunFfmpegAsync(noMusicArgs, logAction, cancellationToken).ConfigureAwait(false);
-                return;
-            }
+                var ffmpegExe = ResolveFfmpegExecutablePath();
+                karaokeBurnIn = await KaraokeAssSubtitleService.TryCreateBurnInAsync(
+                    ffmpegExe,
+                    narrationScript,
+                    narrationTrackPath,
+                    renderDir,
+                    logAction,
+                    cancellationToken,
+                    settings?.AiApiKey).ConfigureAwait(false);
+                var captionVideoFilter = karaokeBurnIn?.VideoFilterFragment ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(preparedTrendMusic))
+                {
+                    var noMusicArgs = BuildMetadataRenderArgs(
+                        stitched,
+                        outputFile,
+                        narrationTrackPath,
+                        null,
+                        null,
+                        hasAmbientAudio,
+                        captionVideoFilter,
+                        fingerprintVariant);
+                    await RunFfmpegAsync(noMusicArgs, logAction, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
 
-            var musicVolume = (_random.Next(10, 16) / 100d).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            var withMusicArgs = BuildMetadataRenderArgs(stitched, outputFile, narrationTrackPath, preparedTrendMusic, musicVolume, hasAmbientAudio, captionVideoFilter, fingerprintVariant);
-            await RunFfmpegAsync(withMusicArgs, logAction, cancellationToken).ConfigureAwait(false);
+                var musicVolume = (_random.Next(10, 16) / 100d).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                var withMusicArgs = BuildMetadataRenderArgs(
+                    stitched,
+                    outputFile,
+                    narrationTrackPath,
+                    preparedTrendMusic,
+                    musicVolume,
+                    hasAmbientAudio,
+                    captionVideoFilter,
+                    fingerprintVariant);
+                await RunFfmpegAsync(withMusicArgs, logAction, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                KaraokeAssSubtitleService.SafeDeleteAssFile(karaokeBurnIn?.AssFilePath);
+            }
         }
 
         private static string BuildMetadataRenderArgs(string stitchedInput, string outputFile, string narrationPath, string musicPath, string musicVolume, bool hasAmbientAudio, string captionVideoFilter, RenderFingerprintVariant fingerprintVariant)
@@ -1835,12 +2423,7 @@ namespace tiktok_Omni.Services
                 process.Start();
                 var outputTask = process.StandardOutput.ReadToEndAsync();
                 var errorTask = process.StandardError.ReadToEndAsync();
-
-                while (!process.HasExited)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await Task.Delay(80, cancellationToken).ConfigureAwait(false);
-                }
+                await ProcessCancellationHelper.WaitUntilExitAsync(process, cancellationToken, 80).ConfigureAwait(false);
 
                 var output = (await outputTask.ConfigureAwait(false) ?? string.Empty).Trim();
                 var errors = (await errorTask.ConfigureAwait(false) ?? string.Empty).Trim();
@@ -1856,55 +2439,6 @@ namespace tiktok_Omni.Services
             }
 
             return 0d;
-        }
-
-        private async Task<string> BuildDynamicCaptionFilterAsync(
-            string narrationScript,
-            string narrationTrackPath,
-            AppSettings settings,
-            Action<string> logAction,
-            CancellationToken cancellationToken)
-        {
-            if (string.IsNullOrWhiteSpace(narrationScript) ||
-                string.IsNullOrWhiteSpace(narrationTrackPath) ||
-                !File.Exists(narrationTrackPath))
-            {
-                return string.Empty;
-            }
-
-            var audioDuration = await GetAudioDurationSecondsAsync(narrationTrackPath, logAction, cancellationToken).ConfigureAwait(false);
-            if (audioDuration <= 0.1d)
-            {
-                return string.Empty;
-            }
-
-            var captions = await BuildCaptionTimelineWithGeminiAsync(
-                narrationScript,
-                audioDuration,
-                settings,
-                logAction,
-                cancellationToken).ConfigureAwait(false);
-            if (captions.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            var blocks = new List<string>();
-            for (var i = 0; i < captions.Count; i++)
-            {
-                var row = captions[i];
-                var color = i % 2 == 0 ? "yellow" : "white";
-                var text = EscapeDrawText(row.Text);
-                blocks.Add(
-                    "drawtext=font='Segoe UI Bold':text='" + text +
-                    "':x=(w-text_w)/2:y=(h*0.75):fontsize=54:fontcolor=" + color +
-                    ":borderw=4:bordercolor=black:line_spacing=8:enable='between(t," +
-                    row.Start.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + "," +
-                    row.End.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + ")'");
-            }
-
-            logAction?.Invoke("AI Caption: generated " + captions.Count + " timed caption segments.");
-            return string.Join(",", blocks);
         }
 
         private async Task<List<CaptionSegment>> BuildCaptionTimelineWithGeminiAsync(
@@ -2055,12 +2589,7 @@ namespace tiktok_Omni.Services
                 process.Start();
                 var outputTask = process.StandardOutput.ReadToEndAsync();
                 var errorTask = process.StandardError.ReadToEndAsync();
-
-                while (!process.HasExited)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await Task.Delay(80, cancellationToken).ConfigureAwait(false);
-                }
+                await ProcessCancellationHelper.WaitUntilExitAsync(process, cancellationToken, 80).ConfigureAwait(false);
 
                 var output = (await outputTask.ConfigureAwait(false) ?? string.Empty).Trim();
                 var errors = (await errorTask.ConfigureAwait(false) ?? string.Empty).Trim();
@@ -2081,16 +2610,16 @@ namespace tiktok_Omni.Services
             var first = selectedItems != null && selectedItems.Count > 0 ? selectedItems[0] : null;
             var name = first?.ProductName ?? "sản phẩm nổi bật";
             var price = first?.Price ?? string.Empty;
-            var prompt = "Viết một đoạn voice-over tiếng Việt 45-60 giây cho video affiliate bán hàng. " +
-                         "Giọng kể tự nhiên, truyền cảm, có mở vấn đề - giải pháp - chốt CTA mềm. " +
-                         $"Sản phẩm: {name}. Giá: {price}. " +
-                         "Trả về đúng một đoạn văn, không markdown.";
-            var text = await _geminiService.GenerateScriptAsync(
-                prompt,
+            var style = GeminiStyleTemplateExtensions.Parse(settings.GeminiStyleTemplate);
+            var text = await _geminiService.GenerateAffiliateExperienceScriptAsync(
+                "deep",
+                selectedItems,
+                first,
                 settings.AiProvider,
                 settings.AiApiKey,
                 settings.AiModel,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                style).ConfigureAwait(false);
             return string.IsNullOrWhiteSpace(text)
                 ? $"Đây là {name}, lựa chọn đáng cân nhắc cho nhu cầu hằng ngày. Trải nghiệm thực tế cho thấy sản phẩm mang lại hiệu quả rõ rệt và tiết kiệm thời gian. Nếu bạn đang tìm một giải pháp tiện lợi, hãy thử ngay hôm nay."
                 : Regex.Replace(text.Trim(), "\\s+", " ");
@@ -2112,53 +2641,23 @@ namespace tiktok_Omni.Services
             return $"{voiceHint} {narration}".Trim();
         }
 
-        private async Task GenerateNarrationWithLyriaStrictAsync(
+        private Task GenerateNarrationWithTtsStrictAsync(
             string text,
             AppSettings settings,
             string outputAudioFile,
             Action<string> logAction,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool useMultiVoiceNarration = false,
+            string workDirectory = null)
         {
-            if (string.IsNullOrWhiteSpace(settings?.LyriaApiKey))
-            {
-                logAction?.Invoke("Lyria Error: thiếu LyriaApiKey trong AppSettings. Không thể tạo giọng đọc thuyết minh.");
-                throw new InvalidOperationException("Missing Lyria API key.");
-            }
-
-            if (string.IsNullOrWhiteSpace(settings?.LyriaEndpoint))
-            {
-                logAction?.Invoke("Lyria Error: thiếu LyriaEndpoint trong AppSettings.");
-                throw new InvalidOperationException("Missing Lyria endpoint.");
-            }
-
-            try
-            {
-                logAction?.Invoke("AI Voice: generating Vietnamese narration via Lyria...");
-                var audioUrl = await _videoService.GenerateAudioAsync(
-                    text,
-                    settings.LyriaApiKey,
-                    settings.LyriaEndpoint,
-                    cancellationToken).ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(audioUrl))
-                {
-                    logAction?.Invoke("Lyria Error: API trả về audioUrl rỗng.");
-                    throw new InvalidOperationException("Lyria returned empty audioUrl.");
-                }
-
-                await DownloadFileAsync(audioUrl, outputAudioFile, cancellationToken).ConfigureAwait(false);
-                if (!File.Exists(outputAudioFile))
-                {
-                    logAction?.Invoke("Lyria Error: tải file mp3 từ audioUrl thất bại.");
-                    throw new InvalidOperationException("Failed to download Lyria audio.");
-                }
-
-                logAction?.Invoke("AI Voice: Lyria narration saved -> " + outputAudioFile);
-            }
-            catch (Exception ex)
-            {
-                logAction?.Invoke("Lyria Error: gọi API thất bại -> " + ex.Message);
-                throw;
-            }
+            return _affiliateNarrationService.GenerateNarrationAsync(
+                text,
+                settings,
+                outputAudioFile,
+                useMultiVoiceNarration,
+                workDirectory ?? Path.GetDirectoryName(outputAudioFile) ?? ".",
+                logAction,
+                cancellationToken);
         }
 
         private static string NormalizeName(string value)
@@ -2223,6 +2722,45 @@ namespace tiktok_Omni.Services
             public int AudioSampleRate { get; set; } = 48000;
             public string ColorHex { get; set; } = "0xF7EFE1";
         }
+
+        private async Task<string> ApplyBasicLipsyncAsync(
+            string videoPath,
+            string narrationAudioPath,
+            AppSettings settings,
+            Action<string> logAction,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath)
+                || string.IsNullOrWhiteSpace(narrationAudioPath) || !File.Exists(narrationAudioPath))
+            {
+                return videoPath;
+            }
+
+            if (!FfmpegToolkitService.TryResolve(settings, out _, out _))
+            {
+                return videoPath;
+            }
+
+            try
+            {
+                var dir = Path.GetDirectoryName(videoPath) ?? string.Empty;
+                var outPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(videoPath) + "_lipsync.mp4");
+                var args =
+                    $"-y -i \"{videoPath}\" -i \"{narrationAudioPath}\" -filter_complex \"[0:v]setpts=PTS-STARTPTS[v];[1:a]volume=1.0[a]\" -map \"[v]\" -map \"[a]\" -c:v libx264 -preset fast -pix_fmt yuv420p -c:a aac -shortest \"{outPath}\"";
+                await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+                if (File.Exists(outPath) && new FileInfo(outPath).Length > 10_000L)
+                {
+                    logAction?.Invoke("Mascot: lipsync cơ bản (khớp voiceover) → " + outPath);
+                    return outPath;
+                }
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("Mascot: lipsync bỏ qua — " + ex.Message);
+            }
+
+            return videoPath;
+        }
     }
 
     public class VideoRenderProgress
@@ -2256,6 +2794,8 @@ namespace tiktok_Omni.Services
     {
         public string FinalVideoPath { get; set; } = string.Empty;
         public List<MascotSceneAsset> Scenes { get; set; } = new List<MascotSceneAsset>();
+        public string ProfileName { get; set; } = string.Empty;
+        public string ChannelTheme { get; set; } = string.Empty;
     }
 
     public class MascotSceneAsset

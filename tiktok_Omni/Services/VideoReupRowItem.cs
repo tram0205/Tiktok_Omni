@@ -8,6 +8,9 @@ namespace tiktok_Omni.Services
         [Browsable(false)]
         public string SourceKeyword { get; set; } = string.Empty;
 
+        /// <summary>Chrome profile (nick) sở hữu dòng — tránh trộn file giữa các nick.</summary>
+        public string ProfileName { get; set; } = string.Empty;
+
         public string ProductName { get; set; } = string.Empty;
 
         [Browsable(false)]
@@ -21,8 +24,12 @@ namespace tiktok_Omni.Services
         public string Hashtags { get; set; } = string.Empty;
         public string VideoScript { get; set; } = string.Empty;
 
-        /// <summary>Câu hook thoại (Gemini / chỉnh tay) trước khi Lyria đọc — hiển thị/sửa trong bảng Video reup.</summary>
+        /// <summary>Câu hook thoại (Gemini / chỉnh tay) trước khi voiceover — hiển thị/sửa trong bảng Video reup.</summary>
         public string ReupHookDraft { get; set; } = string.Empty;
+
+        /// <summary>MP3 hook TTS (temp_downloads\hook_audio_*.mp3) trước khi chuẩn hóa WAV.</summary>
+        [Browsable(false)]
+        public string HookAudioPath { get; set; } = string.Empty;
 
         /// <summary>Gemini gợi ý tên file .mp3 (có thể chọn trong Combo).</summary>
         [Browsable(false)]
@@ -68,5 +75,13 @@ namespace tiktok_Omni.Services
 
         /// <summary>Thông báo lỗi remix gần nhất (nếu có).</summary>
         public string RemixLastError { get; set; } = string.Empty;
+
+        /// <summary>Bật hook SFX 3s (file âm thanh) thay voiceover hook dài.</summary>
+        [Browsable(false)]
+        public bool UseVisualHookSfx { get; set; }
+
+        /// <summary>Đường dẫn file SFX hook (mp3/wav) — tiếng cười, giật mình, …</summary>
+        [Browsable(false)]
+        public string VisualHookSfxPath { get; set; } = string.Empty;
     }
 }

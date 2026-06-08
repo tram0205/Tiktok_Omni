@@ -7,5 +7,6 @@ namespace tiktok_Omni.Services
         public string Mood { get; set; } = string.Empty;
         public string VisualPrompt { get; set; } = string.Empty;
         public double DurationSeconds { get; set; }
+        public string ProfileName { get; set; } = string.Empty;
     }
 }

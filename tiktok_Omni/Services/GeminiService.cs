@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,10 +10,39 @@ namespace tiktok_Omni.Services
 {
     public class GeminiService
     {
+        private static readonly SemaphoreSlim _geminiThrottle = new SemaphoreSlim(1, 1);
+
         /// <summary>
         /// Inline video payload limit for Gemini REST (conservative; larger files use text-only fallback).
         /// </summary>
         private const long MaxInlineVideoBytes = 12 * 1024 * 1024;
+
+        public Task<string> GenerateAffiliateExperienceScriptAsync(
+            string promptKind,
+            IList<AiVideoGenInputItem> items,
+            AiVideoGenInputItem primary,
+            string provider,
+            string apiKey,
+            string model = "gemini-2.0-flash",
+            CancellationToken cancellationToken = default,
+            GeminiStyleTemplate styleTemplate = GeminiStyleTemplate.Storytelling)
+        {
+            string prompt;
+            switch ((promptKind ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "deep":
+                    prompt = AffiliateScriptPromptBuilder.BuildAffiliateDeepNarrationPrompt(primary, items, styleTemplate);
+                    break;
+                case "per-product":
+                    prompt = AffiliateScriptPromptBuilder.BuildPerProductReviewScriptsPrompt(items, styleTemplate);
+                    break;
+                default:
+                    prompt = AffiliateScriptPromptBuilder.BuildSlideshowNarrationPrompt(items, styleTemplate);
+                    break;
+            }
+
+            return GenerateScriptAsync(prompt, provider, apiKey, model, cancellationToken);
+        }
 
         public async Task<string> GenerateScriptAsync(
             string prompt,
@@ -37,7 +67,16 @@ namespace tiktok_Omni.Services
                 return await SendClaudeRequestAsync(prompt, model, apiKey, cancellationToken).ConfigureAwait(false);
             }
 
-            return await SendGeminiRequestAsync(prompt, model, apiKey, cancellationToken).ConfigureAwait(false);
+            await _geminiThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await SendGeminiRequestAsync(prompt, model, apiKey, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                await Task.Delay(4000, CancellationToken.None).ConfigureAwait(false);
+                _geminiThrottle.Release();
+            }
         }
 
         /// <summary>
@@ -87,57 +126,59 @@ namespace tiktok_Omni.Services
                     useAnthropic: false).ConfigureAwait(false);
             }
 
-            var mime = GuessVideoMime(videoPath);
-            var bytes = await ReadAllBytesAsync(videoPath, cancellationToken).ConfigureAwait(false);
-            var b64 = Convert.ToBase64String(bytes);
-
-            var prompt = BuildTikTokCaptionPrompt(captionStyleKey, Path.GetFileName(videoPath), multimodal: true);
-            var body = new JObject
+            await _geminiThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            string multimodalCaption = null;
+            try
             {
-                ["contents"] = new JArray(
-                    new JObject
-                    {
-                        ["role"] = "user",
-                        ["parts"] = new JArray(
-                            new JObject { ["text"] = prompt },
-                            new JObject
-                            {
-                                ["inline_data"] = new JObject
+                var mime = GuessVideoMime(videoPath);
+                var bytes = await ReadAllBytesAsync(videoPath, cancellationToken).ConfigureAwait(false);
+                var b64 = Convert.ToBase64String(bytes);
+
+                var prompt = BuildTikTokCaptionPrompt(captionStyleKey, Path.GetFileName(videoPath), multimodal: true);
+                var body = new JObject
+                {
+                    ["contents"] = new JArray(
+                        new JObject
+                        {
+                            ["role"] = "user",
+                            ["parts"] = new JArray(
+                                new JObject { ["text"] = prompt },
+                                new JObject
                                 {
-                                    ["mime_type"] = mime,
-                                    ["data"] = b64
-                                }
-                            })
-                    })
-            };
+                                    ["inline_data"] = new JObject
+                                    {
+                                        ["mime_type"] = mime,
+                                        ["data"] = b64
+                                    }
+                                })
+                        })
+                };
 
-            var endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/{safeModel}:generateContent";
-            var apiClient = new ApiClient(endpoint, TimeSpan.FromMinutes(6));
+                var endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/{safeModel}:generateContent";
+                var apiClient = new ApiClient(endpoint, TimeSpan.FromMinutes(6));
 
-            var request = new RestRequest(string.Empty, Method.Post);
-            request.AddHeader("Content-Type", "application/json");
-            request.AddQueryParameter("key", apiKey);
-            request.AddStringBody(body.ToString(Newtonsoft.Json.Formatting.None), DataFormat.Json);
+                var request = new RestRequest(string.Empty, Method.Post);
+                request.AddHeader("Content-Type", "application/json");
+                request.AddQueryParameter("key", apiKey);
+                request.AddStringBody(body.ToString(Newtonsoft.Json.Formatting.None), DataFormat.Json);
 
-            var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            var json = JObject.Parse(response.Content ?? "{}");
-            var text = json["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString() ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(text))
+                var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                var json = JObject.Parse(response.Content ?? "{}");
+                var text = json["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    multimodalCaption = SanitizeCaptionOutput(text);
+                }
+            }
+            finally
             {
-                return SanitizeCaptionOutput(text);
+                await Task.Delay(4000, CancellationToken.None).ConfigureAwait(false);
+                _geminiThrottle.Release();
             }
 
-            var err = json["error"]?["message"]?.ToString();
-            if (!string.IsNullOrWhiteSpace(err))
+            if (!string.IsNullOrWhiteSpace(multimodalCaption))
             {
-                // Fallback if API refused inline video
-                return await GenerateTikTokCaptionTextOnlyAsync(
-                    videoPath,
-                    captionStyleKey,
-                    safeModel,
-                    apiKey,
-                    cancellationToken,
-                    useAnthropic: false).ConfigureAwait(false);
+                return multimodalCaption;
             }
 
             return await GenerateTikTokCaptionTextOnlyAsync(
@@ -160,6 +201,7 @@ namespace tiktok_Omni.Services
             {
                 throw new FileNotFoundException("Video file not found.", videoPath);
             }
+
             if (string.IsNullOrWhiteSpace(apiKey))
             {
                 throw new InvalidOperationException("AI provider API key is required.");
@@ -178,102 +220,111 @@ namespace tiktok_Omni.Services
                     $"File video ({fileInfo.Length / 1024d / 1024d:0.0} MB) lớn hơn giới hạn inline {MaxInlineVideoBytes / 1024d / 1024d:0.0} MB của Gemini REST. Hãy nén nhỏ hơn nữa.");
             }
 
-            var safeModel = string.IsNullOrWhiteSpace(model) ? "gemini-2.0-flash" : model.Trim();
-            var mime = GuessVideoMime(videoPath);
-            var bytes = await ReadAllBytesAsync(videoPath, cancellationToken).ConfigureAwait(false);
-            var b64 = Convert.ToBase64String(bytes);
-
-            const string prompt =
-                "Bạn là chuyên gia Marketing TikTok. Hãy xem kỹ video TikTok này và:\n" +
-                "1) Trích xuất CHÍNH XÁC lời thoại / voiceover (chỉ phần audio do người nói, không kèm thuyết minh phụ).\n" +
-                "2) Tóm tắt kịch bản từng cảnh theo timestamp (giây), súc tích.\n" +
-                "3) QUAN TRỌNG NHẤT: chỉ rõ (theo số giây, ví dụ 7-12s) đoạn 'ăn tiền' — đoạn mẫu mặc đẹp nhất / hiệu quả sử dụng sản phẩm rõ nhất / cú twist gây chú ý — giúp chốt đơn cao.\n\n" +
-                "Trả về DUY NHẤT một JSON hợp lệ (không markdown, không backticks), schema:\n" +
-                "{\n" +
-                "  \"voiceover\": \"<toàn bộ lời thoại tiếng Việt>\",\n" +
-                "  \"script_summary\": \"<tóm tắt kịch bản theo từng cảnh, mỗi cảnh bắt đầu bằng [mm:ss-mm:ss]>\",\n" +
-                "  \"money_shot\": \"<mô tả ngắn (1-3 câu) đoạn ăn tiền + khoảng thời gian chính xác>\"\n" +
-                "}\n" +
-                "Tất cả nội dung viết bằng tiếng Việt tự nhiên.";
-
-            var body = new JObject
+            await _geminiThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                ["contents"] = new JArray(
-                    new JObject
-                    {
-                        ["role"] = "user",
-                        ["parts"] = new JArray(
-                            new JObject { ["text"] = prompt },
-                            new JObject
-                            {
-                                ["inline_data"] = new JObject
+                var safeModel = string.IsNullOrWhiteSpace(model) ? "gemini-2.0-flash" : model.Trim();
+                var mime = GuessVideoMime(videoPath);
+                var bytes = await ReadAllBytesAsync(videoPath, cancellationToken).ConfigureAwait(false);
+                var b64 = Convert.ToBase64String(bytes);
+
+                const string prompt =
+                    "Bạn là chuyên gia Marketing TikTok. Hãy xem kỹ video TikTok này và:\n" +
+                    "1) Trích xuất CHÍNH XÁC lời thoại / voiceover (chỉ phần audio do người nói, không kèm thuyết minh phụ).\n" +
+                    "2) Tóm tắt kịch bản từng cảnh theo timestamp (giây), súc tích.\n" +
+                    "3) QUAN TRỌNG NHẤT: chỉ rõ (theo số giây, ví dụ 7-12s) đoạn 'ăn tiền' — đoạn mẫu mặc đẹp nhất / hiệu quả sử dụng sản phẩm rõ nhất / cú twist gây chú ý — giúp chốt đơn cao.\n\n" +
+                    "Trả về DUY NHẤT một JSON hợp lệ (không markdown, không backticks), schema:\n" +
+                    "{\n" +
+                    "  \"voiceover\": \"<toàn bộ lời thoại tiếng Việt>\",\n" +
+                    "  \"script_summary\": \"<tóm tắt kịch bản theo từng cảnh, mỗi cảnh bắt đầu bằng [mm:ss-mm:ss]>\",\n" +
+                    "  \"money_shot\": \"<mô tả ngắn (1-3 câu) đoạn ăn tiền + khoảng thời gian chính xác>\"\n" +
+                    "}\n" +
+                    "Tất cả nội dung viết bằng tiếng Việt tự nhiên.";
+
+                var body = new JObject
+                {
+                    ["contents"] = new JArray(
+                        new JObject
+                        {
+                            ["role"] = "user",
+                            ["parts"] = new JArray(
+                                new JObject { ["text"] = prompt },
+                                new JObject
                                 {
-                                    ["mime_type"] = mime,
-                                    ["data"] = b64
-                                }
-                            })
-                    }),
-                ["generationConfig"] = new JObject
-                {
-                    ["temperature"] = 0.25,
-                    ["responseMimeType"] = "application/json"
-                }
-            };
-
-            var endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/{safeModel}:generateContent";
-            var apiClient = new ApiClient(endpoint, TimeSpan.FromMinutes(6));
-            var request = new RestRequest(string.Empty, Method.Post);
-            request.AddHeader("Content-Type", "application/json");
-            request.AddQueryParameter("key", apiKey);
-            request.AddStringBody(body.ToString(Newtonsoft.Json.Formatting.None), DataFormat.Json);
-
-            RestResponse response;
-            try
-            {
-                response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            }
-            catch (InvalidOperationException ex) when (IsLikelyGeminiQuotaOrRateLimit(ex.Message))
-            {
-                GeminiUsageTracker.Instance.RecordRateLimit429(ex.Message);
-                throw;
-            }
-
-            var json = JObject.Parse(response.Content ?? "{}");
-            var err = json["error"]?["message"]?.ToString();
-            if (!string.IsNullOrWhiteSpace(err))
-            {
-                if (IsLikelyGeminiQuotaOrRateLimit(err))
-                {
-                    GeminiUsageTracker.Instance.RecordRateLimit429(err);
-                }
-
-                throw new InvalidOperationException("Gemini từ chối phân tích video: " + err);
-            }
-
-            var text = json["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                throw new InvalidOperationException("Gemini không trả về nội dung phân tích.");
-            }
-
-            var cleaned = SanitizeCaptionOutput(text);
-            try
-            {
-                var parsed = JObject.Parse(cleaned);
-                parsed["_raw"] = text;
-                GeminiUsageTracker.Instance.RecordVideoAnalysisSuccess();
-                return parsed;
-            }
-            catch
-            {
-                GeminiUsageTracker.Instance.RecordVideoAnalysisSuccess();
-                return new JObject
-                {
-                    ["voiceover"] = string.Empty,
-                    ["script_summary"] = cleaned,
-                    ["money_shot"] = string.Empty,
-                    ["_raw"] = text
+                                    ["inline_data"] = new JObject
+                                    {
+                                        ["mime_type"] = mime,
+                                        ["data"] = b64
+                                    }
+                                })
+                        }),
+                    ["generationConfig"] = new JObject
+                    {
+                        ["temperature"] = 0.25,
+                        ["responseMimeType"] = "application/json"
+                    }
                 };
+
+                var endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/{safeModel}:generateContent";
+                var apiClient = new ApiClient(endpoint, TimeSpan.FromMinutes(6));
+                var request = new RestRequest(string.Empty, Method.Post);
+                request.AddHeader("Content-Type", "application/json");
+                request.AddQueryParameter("key", apiKey);
+                request.AddStringBody(body.ToString(Newtonsoft.Json.Formatting.None), DataFormat.Json);
+
+                RestResponse response;
+                try
+                {
+                    response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                }
+                catch (InvalidOperationException ex) when (IsLikelyGeminiQuotaOrRateLimit(ex.Message))
+                {
+                    GeminiUsageTracker.Instance.RecordRateLimit429(ex.Message);
+                    throw;
+                }
+
+                var json = JObject.Parse(response.Content ?? "{}");
+                var err = json["error"]?["message"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(err))
+                {
+                    if (IsLikelyGeminiQuotaOrRateLimit(err))
+                    {
+                        GeminiUsageTracker.Instance.RecordRateLimit429(err);
+                    }
+
+                    throw new InvalidOperationException("Gemini từ chối phân tích video: " + err);
+                }
+
+                var text = json["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    throw new InvalidOperationException("Gemini không trả về nội dung phân tích.");
+                }
+
+                var cleaned = SanitizeCaptionOutput(text);
+                try
+                {
+                    var parsed = JObject.Parse(cleaned);
+                    parsed["_raw"] = text;
+                    GeminiUsageTracker.Instance.RecordVideoAnalysisSuccess();
+                    return parsed;
+                }
+                catch
+                {
+                    GeminiUsageTracker.Instance.RecordVideoAnalysisSuccess();
+                    return new JObject
+                    {
+                        ["voiceover"] = string.Empty,
+                        ["script_summary"] = cleaned,
+                        ["money_shot"] = string.Empty,
+                        ["_raw"] = text
+                    };
+                }
+            }
+            finally
+            {
+                await Task.Delay(4000, CancellationToken.None).ConfigureAwait(false);
+                _geminiThrottle.Release();
             }
         }
 

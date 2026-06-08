@@ -1,0 +1,16 @@
+Dự án đã clone ra ngoài OneDrive để tiết kiệm dung lượng sync:
+
+  C:\Dev\tiktok_Omni
+
+Mở trong Cursor (chọn một cách):
+  1. File → Open Workspace from File → C:\Dev\tiktok_Omni\tiktok_Omni.code-workspace
+  2. Hoặc double-click: tiktok_Omni-Dev.code-workspace (file này, trong thư mục OneDrive)
+  3. File → Open Folder → C:\Dev\tiktok_Omni
+
+Code backup: https://github.com/tram0205/Tiktok_Omni
+
+Đã xóa trên bản OneDrive (có thể build lại):
+  - _agent_build_*
+  - tiktok_Omni\bin, tiktok_Omni\obj
+
+Sau khi chắc C:\Dev + GitHub ổn, có thể "Free up space" hoặc xóa bản OneDrive này.

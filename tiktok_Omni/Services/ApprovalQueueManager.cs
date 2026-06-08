@@ -10,7 +10,12 @@ namespace tiktok_Omni.Services
     public enum ApprovalJobType
     {
         RenderVideo = 1,
-        AutoPost = 2
+        AutoPost = 2,
+        PhilosophyVideo = 3,
+        Slideshow = 4,
+        AffiliateDeep = 5,
+        Mascot = 6,
+        VideoReup = 7
     }
 
     public enum ApprovalStatus
@@ -34,6 +39,8 @@ namespace tiktok_Omni.Services
         public string RiskReasons { get; set; } = string.Empty;
         public string OriginalPreview { get; set; } = string.Empty;
         public string EditedPreview { get; set; } = string.Empty;
+        public string ThumbnailPath { get; set; } = string.Empty;
+        public int RiskScore { get; set; }
         public string ReviewerNotes { get; set; } = string.Empty;
         public string ReviewedBy { get; set; } = string.Empty;
         public List<string> ReviewActionLog { get; set; } = new List<string>();
@@ -41,6 +48,17 @@ namespace tiktok_Omni.Services
         public DateTime? ReviewedAtUtc { get; set; }
         public DateTime? CompletedAtUtc { get; set; }
         public string LastError { get; set; } = string.Empty;
+        public string AffiliateLink { get; set; }
+        public string ProductId { get; set; }
+
+        /// <summary>Reviewer bật khi duyệt — mới được gắn link lúc Auto Post.</summary>
+        public bool CanAttachAffiliate { get; set; }
+
+        /// <summary>Link dự kiến (từ sản phẩm / payload); chỉ dùng khi <see cref="CanAttachAffiliate"/>.</summary>
+        public string TargetAffiliateLink { get; set; }
+
+        public string TargetProductId { get; set; }
+
         public string ReviewedAtLabel => ReviewedAtUtc.HasValue ? ReviewedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") : "-";
         public string LastAuditAction => ReviewActionLog != null && ReviewActionLog.Count > 0
             ? ReviewActionLog[ReviewActionLog.Count - 1]
@@ -62,7 +80,7 @@ namespace tiktok_Omni.Services
 
             try
             {
-                var json = await Task.Run(() => File.ReadAllText(path)).ConfigureAwait(false);
+                var json = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(json))
                 {
                     return new List<ApprovalQueueItem>();
@@ -90,7 +108,7 @@ namespace tiktok_Omni.Services
                 .ToList();
 
             var json = JsonConvert.SerializeObject(normalized, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetQueuePath(), json)).ConfigureAwait(false);
+            await Task.Run(() => File.WriteAllText(GetQueuePath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
         }
 
         private static string GetQueuePath()

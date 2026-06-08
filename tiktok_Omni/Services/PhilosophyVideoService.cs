@@ -17,6 +17,7 @@ namespace tiktok_Omni.Services
         public async Task<PhilosophyVideoResult> GenerateAsync(
             string inputTextOrUrl,
             AppSettings settings,
+            AutomationProfile profile,
             Action<string> log,
             Action<string, int> progress,
             CancellationToken cancellationToken = default)
@@ -24,6 +25,7 @@ namespace tiktok_Omni.Services
             return await _pipeline.RunAsync(
                 inputTextOrUrl,
                 settings,
+                profile,
                 log,
                 progress,
                 cancellationToken).ConfigureAwait(false);

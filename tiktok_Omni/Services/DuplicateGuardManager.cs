@@ -80,7 +80,7 @@ namespace tiktok_Omni.Services
 
             try
             {
-                var text = await Task.Run(() => File.ReadAllText(path)).ConfigureAwait(false);
+                var text = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
                 return JsonConvert.DeserializeObject<List<DuplicateGuardRecord>>(text) ?? new List<DuplicateGuardRecord>();
             }
             catch
@@ -93,7 +93,7 @@ namespace tiktok_Omni.Services
         {
             var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, FileName);
             var json = JsonConvert.SerializeObject(records ?? new List<DuplicateGuardRecord>(), Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(path, json)).ConfigureAwait(false);
+            await Task.Run(() => File.WriteAllText(path, json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
         }
     }
 }

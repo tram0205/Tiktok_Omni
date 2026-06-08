@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace tiktok_Omni.Services
 {
@@ -29,14 +30,16 @@ namespace tiktok_Omni.Services
 
             try
             {
-                var json = await Task.Run(() => File.ReadAllText(path)).ConfigureAwait(false);
+                var json = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(json))
                 {
                     return new AppSettings();
                 }
 
                 var settings = JsonConvert.DeserializeObject<AppSettings>(json);
-                return Normalize(DecryptSecretsInPlace(settings ?? new AppSettings()));
+                settings = settings ?? new AppSettings();
+                MigrateLegacyLyriaTtsSettings(settings, json);
+                return Normalize(DecryptSecretsInPlace(settings));
             }
             catch (JsonException)
             {
@@ -57,7 +60,7 @@ namespace tiktok_Omni.Services
             var forDisk = CloneSettings(settings);
             EncryptSecretsForStorage(forDisk);
             var json = JsonConvert.SerializeObject(forDisk, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetConfigPath(), json)).ConfigureAwait(false);
+            await Task.Run(() => File.WriteAllText(GetConfigPath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -110,6 +113,63 @@ namespace tiktok_Omni.Services
                 $" vào profile «{target.Name}».");
         }
 
+        public async Task UpdateProfilePlatformLoginFlagsAsync(
+            string profileName,
+            BrowserPlatform platform,
+            bool loggedIn,
+            Action<string> logAction = null)
+        {
+            var settings = await LoadAsync().ConfigureAwait(false);
+            settings.Profiles = settings.Profiles ?? new List<AutomationProfile>();
+            var key = string.IsNullOrWhiteSpace(profileName) ? "default" : profileName.Trim();
+            var target = settings.Profiles.FirstOrDefault(p =>
+                p != null && string.Equals(p.Name, key, StringComparison.OrdinalIgnoreCase));
+            if (target == null)
+            {
+                target = new AutomationProfile { Name = key };
+                settings.Profiles.Add(target);
+            }
+
+            if (platform == BrowserPlatform.Facebook)
+            {
+                target.IsFBLoggedIn = loggedIn;
+            }
+            else if (platform == BrowserPlatform.YouTube)
+            {
+                target.IsYTLoggedIn = loggedIn;
+            }
+
+            await SaveAsync(settings).ConfigureAwait(false);
+            logAction?.Invoke(
+                $"[LOGIN] Đã lưu trạng thái {platform} = {(loggedIn ? "đã đăng nhập" : "chưa")} cho profile «{target.Name}».");
+        }
+
+        public async Task UpdateProfileSocialLoginStatusAsync(
+            string profileName,
+            bool tikTokLoggedIn,
+            bool facebookLoggedIn,
+            bool youTubeLoggedIn,
+            Action<string> logAction = null)
+        {
+            var settings = await LoadAsync().ConfigureAwait(false);
+            settings.Profiles = settings.Profiles ?? new List<AutomationProfile>();
+            var key = string.IsNullOrWhiteSpace(profileName) ? "default" : profileName.Trim();
+            var target = settings.Profiles.FirstOrDefault(p =>
+                p != null && string.Equals(p.Name, key, StringComparison.OrdinalIgnoreCase));
+            if (target == null)
+            {
+                target = new AutomationProfile { Name = key };
+                settings.Profiles.Add(target);
+            }
+
+            target.IsTTLoggedIn = tikTokLoggedIn;
+            target.IsFBLoggedIn = facebookLoggedIn;
+            target.IsYTLoggedIn = youTubeLoggedIn;
+            await SaveAsync(settings).ConfigureAwait(false);
+            logAction?.Invoke(
+                $"[LOGIN] Profile «{target.Name}» — TT={(tikTokLoggedIn ? "✓" : "✗")} FB={(facebookLoggedIn ? "✓" : "✗")} YT={(youTubeLoggedIn ? "✓" : "✗")}");
+        }
+
         private static AppSettings CloneSettings(AppSettings source)
         {
             var json = JsonConvert.SerializeObject(source);
@@ -124,7 +184,7 @@ namespace tiktok_Omni.Services
             settings.AiApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.AiApiKey ?? string.Empty);
             settings.TwoCaptchaApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.TwoCaptchaApiKey ?? string.Empty);
             settings.VeoApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.VeoApiKey ?? string.Empty);
-            settings.LyriaApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.LyriaApiKey ?? string.Empty);
+            settings.TtsApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.TtsApiKey ?? string.Empty);
             settings.NotificationSmtpPassword = DpapiSecretProtector.UnprotectAfterLoad(settings.NotificationSmtpPassword ?? string.Empty);
             if (settings.Profiles != null)
             {
@@ -150,7 +210,7 @@ namespace tiktok_Omni.Services
             settings.AiApiKey = DpapiSecretProtector.ProtectForStorage(settings.AiApiKey ?? string.Empty);
             settings.TwoCaptchaApiKey = DpapiSecretProtector.ProtectForStorage(settings.TwoCaptchaApiKey ?? string.Empty);
             settings.VeoApiKey = DpapiSecretProtector.ProtectForStorage(settings.VeoApiKey ?? string.Empty);
-            settings.LyriaApiKey = DpapiSecretProtector.ProtectForStorage(settings.LyriaApiKey ?? string.Empty);
+            settings.TtsApiKey = DpapiSecretProtector.ProtectForStorage(settings.TtsApiKey ?? string.Empty);
             settings.NotificationSmtpPassword = DpapiSecretProtector.ProtectForStorage(settings.NotificationSmtpPassword ?? string.Empty);
             if (settings.Profiles != null)
             {
@@ -208,6 +268,93 @@ namespace tiktok_Omni.Services
             return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ConfigFileName);
         }
 
+        /// <summary>Đường dẫn cũ trỏ OneDrive → thư mục cài exe hiện tại (sau khi chuyển sang C:\Dev).</summary>
+        private static string RemapToolPathAwayFromOneDrive(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return path;
+            }
+
+            if (path.IndexOf("onedrive", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return path;
+            }
+
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory ?? ".";
+            var fileName = Path.GetFileName(path);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return string.Empty;
+            }
+
+            if (fileName.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var mapped = Path.Combine(baseDir, "Tools", "ffmpeg", "bin", "ffmpeg.exe");
+                return File.Exists(mapped) ? mapped : string.Empty;
+            }
+
+            if (fileName.Equals("yt-dlp.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var mapped = Path.Combine(baseDir, "yt-dlp.exe");
+                return File.Exists(mapped) ? mapped : string.Empty;
+            }
+
+            if (fileName.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var mapped = Path.Combine(baseDir, "Tools", "ffmpeg", "bin", "ffprobe.exe");
+                return File.Exists(mapped) ? mapped : string.Empty;
+            }
+
+            const string marker = @"tiktok_Omni\tiktok_Omni\";
+            var idx = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                var tail = path.Substring(idx + marker.Length);
+                var mapped = Path.Combine(baseDir, tail);
+                return File.Exists(mapped) || Directory.Exists(Path.GetDirectoryName(mapped) ?? mapped)
+                    ? mapped
+                    : string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>Đọc key/endpoint cũ từ appsettings.json (Lyria*) sang Tts*.</summary>
+        private static void MigrateLegacyLyriaTtsSettings(AppSettings settings, string json)
+        {
+            if (settings == null || string.IsNullOrWhiteSpace(json))
+            {
+                return;
+            }
+
+            try
+            {
+                var root = JObject.Parse(json);
+                if (string.IsNullOrWhiteSpace(settings.TtsApiKey))
+                {
+                    var legacyKey = root["LyriaApiKey"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(legacyKey))
+                    {
+                        settings.TtsApiKey = legacyKey;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(settings.TtsEndpoint))
+                {
+                    var legacyEndpoint = root["LyriaEndpoint"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(legacyEndpoint))
+                    {
+                        settings.TtsEndpoint = legacyEndpoint;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // Ignore — Normalize will apply defaults.
+            }
+        }
+
         private static AppSettings Normalize(AppSettings settings)
         {
             settings.AiProvider = (settings.AiProvider ?? string.Empty).Trim();
@@ -215,7 +362,8 @@ namespace tiktok_Omni.Services
             settings.AiApiKey = (settings.AiApiKey ?? string.Empty).Trim();
             settings.TwoCaptchaApiKey = (settings.TwoCaptchaApiKey ?? string.Empty).Trim();
             settings.VeoApiKey = (settings.VeoApiKey ?? string.Empty).Trim();
-            settings.LyriaApiKey = (settings.LyriaApiKey ?? string.Empty).Trim();
+            settings.TtsApiKey = (settings.TtsApiKey ?? string.Empty).Trim();
+            settings.TtsEndpoint = (settings.TtsEndpoint ?? string.Empty).Trim();
             settings.NotificationSmtpHost = (settings.NotificationSmtpHost ?? string.Empty).Trim();
             settings.NotificationSmtpUser = (settings.NotificationSmtpUser ?? string.Empty).Trim();
             settings.NotificationSmtpPassword = (settings.NotificationSmtpPassword ?? string.Empty).Trim();
@@ -223,9 +371,9 @@ namespace tiktok_Omni.Services
             settings.NotificationToEmail = (settings.NotificationToEmail ?? string.Empty).Trim();
             settings.NotificationWebhookUrl = (settings.NotificationWebhookUrl ?? string.Empty).Trim();
             settings.VideoBackgroundMusicFileName = (settings.VideoBackgroundMusicFileName ?? string.Empty).Trim();
-            settings.FfmpegPath = (settings.FfmpegPath ?? string.Empty).Trim();
-            settings.YtDlpPath = (settings.YtDlpPath ?? string.Empty).Trim();
-            settings.VideoReupMusicLibraryPath = (settings.VideoReupMusicLibraryPath ?? string.Empty).Trim();
+            settings.FfmpegPath = RemapToolPathAwayFromOneDrive((settings.FfmpegPath ?? string.Empty).Trim());
+            settings.YtDlpPath = RemapToolPathAwayFromOneDrive((settings.YtDlpPath ?? string.Empty).Trim());
+            settings.VideoReupMusicLibraryPath = RemapToolPathAwayFromOneDrive((settings.VideoReupMusicLibraryPath ?? string.Empty).Trim());
             settings.CommentStyle = (settings.CommentStyle ?? string.Empty).Trim();
             settings.Profiles = settings.Profiles ?? new List<AutomationProfile>();
 
@@ -324,6 +472,8 @@ namespace tiktok_Omni.Services
                 profile.TikTokNickname = TikTokDisplayNicknameSanitizer.Sanitize(
                     (profile.TikTokNickname ?? string.Empty).Trim(),
                     profile.TikTokUniqueId);
+                profile.FacebookName = (profile.FacebookName ?? string.Empty).Trim();
+                profile.YouTubeName = (profile.YouTubeName ?? string.Empty).Trim();
                 profile.TikTokUserId = (profile.TikTokUserId ?? string.Empty).Trim();
                 if (profile.ViewportWidth < 800 || profile.ViewportWidth > 3840)
                 {
@@ -348,6 +498,8 @@ namespace tiktok_Omni.Services
                     string.IsNullOrWhiteSpace(profile.ProxyPass) &&
                     string.IsNullOrWhiteSpace(profile.TikTokUniqueId) &&
                     string.IsNullOrWhiteSpace(profile.TikTokNickname) &&
+                    string.IsNullOrWhiteSpace(profile.FacebookName) &&
+                    string.IsNullOrWhiteSpace(profile.YouTubeName) &&
                     string.IsNullOrWhiteSpace(profile.TikTokUserId))
                 {
                     settings.Profiles.RemoveAt(i);
@@ -432,9 +584,9 @@ namespace tiktok_Omni.Services
         public string AiApiKey { get; set; } = string.Empty;
         public string TwoCaptchaApiKey { get; set; } = string.Empty;
         public string VeoApiKey { get; set; } = string.Empty;
-        public string LyriaApiKey { get; set; } = string.Empty;
+        public string TtsApiKey { get; set; } = string.Empty;
         public string VeoEndpoint { get; set; } = "https://api.veo.example.com/v1/videos";
-        public string LyriaEndpoint { get; set; } = "https://api.lyria.example.com/v1/audio";
+        public string TtsEndpoint { get; set; } = "https://api.example.com/v1/tts/synthesize";
         public bool NotificationEnabled { get; set; } = false;
         public bool NotificationEmailEnabled { get; set; } = false;
         public string NotificationSmtpHost { get; set; } = "smtp.gmail.com";
@@ -449,9 +601,31 @@ namespace tiktok_Omni.Services
         public string FfmpegPath { get; set; } = string.Empty;
         public string YtDlpPath { get; set; } = string.Empty;
 
+        /// <summary>RootPath — gốc lưu video: {StorageRootPath}\{Profile}\{VideoType}\</summary>
+        public string StorageRootPath { get; set; } = string.Empty;
+
+        /// <summary>Số job chạy song song tối đa (render / hunt / đăng bài).</summary>
+        public int MaxConcurrentJobs { get; set; } = 2;
+
         /// <summary>Thư mục chứa .mp3 cho tab Video reup (Affiliate). Để trống = [exe]\VideoReup\Music.</summary>
         public string VideoReupMusicLibraryPath { get; set; } = string.Empty;
+
+        /// <summary>File âm thanh Hook SFX 3s (Reup) — mp3/wav trong VideoReup\Hooks.</summary>
+        public string ReupVisualHookSfxPath { get; set; } = string.Empty;
+
+        public bool ReupUseVisualHookSfx { get; set; }
+
+        /// <summary>Knowledge | Review | Storytelling — mẫu prompt Gemini khi render.</summary>
+        public string GeminiStyleTemplate { get; set; } = "Storytelling";
+
+        /// <summary>Ngày (yyyy-MM-dd) đã cào báo cáo Affiliate gần nhất — tránh cào trùng trong ngày.</summary>
+        public string LastAffiliateRevenueFetchDate { get; set; } = string.Empty;
+
+        /// <summary>Mở Chrome tự động 1 lần/ngày để cào báo cáo Affiliate khi khởi động app (mặc định tắt).</summary>
+        public bool? AutoFetchAffiliateRevenueOnStartup { get; set; } = false;
+        /// <summary>Total watch seconds (all videos combined) per warm-up session — minimum.</summary>
         public int WatchSecondsMin { get; set; } = 7;
+        /// <summary>Total watch seconds (all videos combined) per warm-up session — maximum.</summary>
         public int WatchSecondsMax { get; set; } = 18;
         public double VideoTransitionDurationSeconds { get; set; } = 0.6d;
         public int VideoTextSize { get; set; } = 50;
@@ -496,8 +670,39 @@ namespace tiktok_Omni.Services
         /// <summary>TikTok display name (not the app profile name in <see cref="Name"/>).</summary>
         public string TikTokNickname { get; set; } = string.Empty;
 
+        /// <summary>Fanpage / channel label for Facebook (user-editable memo).</summary>
+        public string FacebookName { get; set; } = string.Empty;
+
+        /// <summary>YouTube channel label (user-editable memo).</summary>
+        public string YouTubeName { get; set; } = string.Empty;
+
         /// <summary>Internal user id from TikTok page state when available.</summary>
         public string TikTokUserId { get; set; } = string.Empty;
+
+        /// <summary>Đã đăng nhập TikTok (cookie sessionid / @nick) — quét từ user-data-dir.</summary>
+        public bool IsTTLoggedIn { get; set; }
+
+        /// <summary>Đã đăng nhập Facebook (cookie c_user) trong user-data-dir của profile.</summary>
+        public bool IsFBLoggedIn { get; set; }
+
+        /// <summary>Đã đăng nhập YouTube/Google trong user-data-dir của profile.</summary>
+        public bool IsYTLoggedIn { get; set; }
+
+        /// <summary>Voice ID / tên giọng TTS (Lyria, Google TTS, v.v.) cho video Triết lý.</summary>
+        public string VoiceId { get; set; } = string.Empty;
+
+        /// <summary>Phong cách video (mô tả Veo/gradient): warm, dark, neon…</summary>
+        public string VideoStyle { get; set; } = string.Empty;
+
+        /// <summary>Persona / phong cách Mascot Story (đưa vào prompt Gemini — mỗi nick một style).</summary>
+        public string MascotStyle { get; set; } = string.Empty;
+
+        /// <summary>DNA kênh Mascot (giọng nam/nữ, vui/buồn…) — đồng bộ với <see cref="MascotStyle"/>.</summary>
+        public string MascotPersonality
+        {
+            get => MascotStyle;
+            set => MascotStyle = value ?? string.Empty;
+        }
     }
 
     /// <summary>Snapshot read from TikTok web after successful login.</summary>

@@ -40,7 +40,7 @@ namespace tiktok_Omni.Services
             {
                 if (File.Exists(StateFilePath))
                 {
-                    var json = File.ReadAllText(StateFilePath);
+                    var json = File.ReadAllText(StateFilePath, TextFileEncoding.Utf8);
                     var jo = JObject.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
                     _disk.LastUtc = jo.Value<DateTime?>("last429Utc");
                     _disk.Last429Summary = (jo["last429Summary"]?.ToString() ?? string.Empty).Trim();
@@ -82,7 +82,7 @@ namespace tiktok_Omni.Services
                     ["last429Utc"] = d.LastUtc,
                     ["last429Summary"] = d.Last429Summary
                 };
-                File.WriteAllText(StateFilePath, jo.ToString(Formatting.Indented));
+                File.WriteAllText(StateFilePath, jo.ToString(Formatting.Indented), TextFileEncoding.Utf8NoBom);
             }
             catch
             {

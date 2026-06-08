@@ -9,389 +9,10 @@ using tiktok_Omni.Services;
 
 namespace tiktok_Omni
 {
-    /// <summary>Affiliate Hunter: lưới kết quả, Deep Dive (đơn + hàng loạt), quét anchor.</summary>
+    /// <summary>Affiliate Hunter: lưới kết quả, enrich metrics/anchor. Deep Dive queue: Form1.AffiliateDeepDiveQueue.</summary>
     public partial class Form1
     {
-        private static readonly TimeSpan AffiliateBulkDeepDiveDelay = TimeSpan.FromSeconds(2.5);
         private static readonly TimeSpan AffiliateAutoEnrichRebindThrottle = TimeSpan.FromMilliseconds(800);
-
-        private async void btnAffiliateDeepDive_Click(object sender, EventArgs e)
-        {
-            if (_affiliateDeepDiveRunning && _affiliateBulkDeepDiveCancelCts != null)
-            {
-                try
-                {
-                    _affiliateBulkDeepDiveCancelCts.Cancel();
-                    Log("[DeepDive] Đã yêu cầu dừng hàng loạt.");
-                }
-                catch
-                {
-                    // ignore
-                }
-
-                return;
-            }
-
-            if (_affiliateDeepDiveRunning)
-            {
-                return;
-            }
-
-            if (dgvAffiliateResults?.SelectedRows == null || dgvAffiliateResults.SelectedRows.Count == 0)
-            {
-                MessageBox.Show(this,
-                    "Hãy chọn ít nhất một dòng trong bảng affiliate trước khi phân tích.",
-                    "Phân tích Deep Dive",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            var selectedCandidates = new List<AffiliateCandidate>();
-            foreach (DataGridViewRow row in dgvAffiliateResults.SelectedRows)
-            {
-                if (row?.DataBoundItem is AffiliateCandidate c)
-                {
-                    selectedCandidates.Add(c);
-                }
-            }
-
-            if (selectedCandidates.Count == 0)
-            {
-                return;
-            }
-
-            if (selectedCandidates.Count > 1)
-            {
-                var ok = MessageBox.Show(this,
-                    $"Bạn đang chọn {selectedCandidates.Count} dòng.\n\n" +
-                    "Chế độ hàng loạt: phân tích TUẦN TỰ từng video, nghỉ ~2,5 giây giữa các lần gọi Gemini để giảm 429.\n" +
-                    "Trong lúc chạy, bấm lại nút «Dừng hàng loạt» để hủy.\n\nTiếp tục?",
-                    "Deep Dive hàng loạt",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-                if (ok != DialogResult.Yes)
-                {
-                    return;
-                }
-            }
-
-            AppSettings settings;
-            try
-            {
-                settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            }
-            catch (Exception ex)
-            {
-                Log("Không nạp được cài đặt: " + ex.Message);
-                return;
-            }
-
-            var ytFromUi = (txtYtDlpPath?.Text ?? string.Empty).Trim();
-            if (!string.IsNullOrWhiteSpace(ytFromUi))
-            {
-                settings.YtDlpPath = ytFromUi;
-            }
-
-            var ffFromUi = (txtFfmpegPath?.Text ?? string.Empty).Trim();
-            if (!string.IsNullOrWhiteSpace(ffFromUi))
-            {
-                settings.FfmpegPath = ffFromUi;
-            }
-
-            if (string.IsNullOrWhiteSpace(settings.AiApiKey))
-            {
-                MessageBox.Show(this,
-                    "Chưa cấu hình AI API Key. Vào tab «Cài đặt» để nhập trước khi phân tích.",
-                    "Phân tích Deep Dive",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            if (selectedCandidates.Count == 1)
-            {
-                await RunAffiliateDeepDiveSingleAsync(selectedCandidates[0], settings).ConfigureAwait(true);
-            }
-            else
-            {
-                await RunAffiliateDeepDiveBulkAsync(selectedCandidates, settings).ConfigureAwait(true);
-            }
-        }
-
-        private async Task RunAffiliateDeepDiveSingleAsync(AffiliateCandidate candidate, AppSettings settings)
-        {
-            var videoUrl = (candidate.VideoUrl ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(videoUrl))
-            {
-                MessageBox.Show(this, "Dòng này không có VideoUrl.", "Phân tích Deep Dive",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            _affiliateDeepDiveRunning = true;
-            _affiliateBulkDeepDiveCancelCts = null;
-            btnAffiliateDeepDive.Enabled = false;
-            var originalText = btnAffiliateDeepDive.Text;
-            btnAffiliateDeepDive.Text = "⏳ Đang phân tích...";
-            Log($"[DeepDive] Bắt đầu phân tích video: {videoUrl}");
-            GeminiUsageTracker.Instance.LogPrewarnIfNeeded(Log, settings.AiModel);
-
-            try
-            {
-                using (var cts = new CancellationTokenSource(TimeSpan.FromMinutes(8)))
-                {
-                    candidate.LastDeepDiveError = string.Empty;
-                    var result = await _affiliateHunter
-                        .AnalyzeVideoContentAsync(videoUrl, settings, Log, cts.Token)
-                        .ConfigureAwait(true);
-
-                    ApplyDeepDiveResultToCandidate(candidate, result);
-                    _affiliateBindingList?.ResetBindings();
-
-                    var moneyShot = string.IsNullOrWhiteSpace(result.MoneyShotSummary)
-                        ? "(Gemini không xác định được đoạn ăn tiền nổi bật.)"
-                        : result.MoneyShotSummary.Trim();
-                    var transcriptPreview = string.IsNullOrWhiteSpace(result.VoiceoverTranscript)
-                        ? "(không bóc tách được lời thoại)"
-                        : TruncateForPreview(result.VoiceoverTranscript, 350);
-                    var scriptPreview = string.IsNullOrWhiteSpace(result.VideoScript)
-                        ? "(không có tóm tắt kịch bản)"
-                        : TruncateForPreview(result.VideoScript, 600);
-
-                    var popup =
-                        "💰 ĐOẠN ĂN TIỀN:\r\n" + moneyShot + "\r\n\r\n" +
-                        "🎤 Voiceover (rút gọn):\r\n" + transcriptPreview + "\r\n\r\n" +
-                        "🎬 Kịch bản (rút gọn):\r\n" + scriptPreview + "\r\n\r\n" +
-                        "Nội dung đầy đủ đã lưu vào trường VideoScript & VoiceoverTranscript của dòng này. " +
-                        "Khi xuất CSV sẽ kèm theo.";
-
-                    MessageBox.Show(this, popup, "✅ Phân tích Deep Dive xong",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                candidate.LastDeepDiveError = "Đã hủy / timeout.";
-                Log("[DeepDive] Đã huỷ phân tích (timeout 8 phút).");
-            }
-            catch (Exception ex)
-            {
-                candidate.LastDeepDiveError = ex.Message;
-                Log("[DeepDive] Lỗi: " + ex.Message);
-                ShowDeepDiveErrorDialog(ex);
-            }
-            finally
-            {
-                _affiliateDeepDiveRunning = false;
-                btnAffiliateDeepDive.Text = originalText;
-                RefreshAffiliateDeepDiveButtonState();
-            }
-        }
-
-        private async Task RunAffiliateDeepDiveBulkAsync(IList<AffiliateCandidate> candidates, AppSettings settings)
-        {
-            _affiliateDeepDiveRunning = true;
-            _affiliateBulkDeepDiveCancelCts?.Dispose();
-            _affiliateBulkDeepDiveCancelCts = new CancellationTokenSource();
-            var userToken = _affiliateBulkDeepDiveCancelCts.Token;
-            var originalText = btnAffiliateDeepDive.Text;
-            btnAffiliateDeepDive.Text = "⏹ Dừng hàng loạt";
-            btnAffiliateDeepDive.Enabled = true;
-
-            var total = candidates.Count;
-            var index = 0;
-            var ok = 0;
-            var fail = 0;
-
-            try
-            {
-                using (var timeout = new CancellationTokenSource(TimeSpan.FromHours(2)))
-                using (var linked = CancellationTokenSource.CreateLinkedTokenSource(userToken, timeout.Token))
-                {
-                    var token = linked.Token;
-                    foreach (var candidate in candidates)
-                    {
-                        token.ThrowIfCancellationRequested();
-                        index++;
-                        var videoUrl = (candidate?.VideoUrl ?? string.Empty).Trim();
-                        if (string.IsNullOrWhiteSpace(videoUrl))
-                        {
-                            if (candidate != null)
-                            {
-                                candidate.LastDeepDiveError = "Thiếu VideoUrl.";
-                            }
-
-                            fail++;
-                            Log($"[DeepDive] [{index}/{total}] Bỏ qua — không có VideoUrl.");
-                            continue;
-                        }
-
-                        Log($"[DeepDive] [{index}/{total}] Bắt đầu: {videoUrl}");
-                        GeminiUsageTracker.Instance.LogPrewarnIfNeeded(Log, settings.AiModel);
-                        candidate.LastDeepDiveError = string.Empty;
-                        _affiliateBindingList?.ResetBindings();
-
-                        try
-                        {
-                            var result = await _affiliateHunter
-                                .AnalyzeVideoContentAsync(videoUrl, settings, Log, token)
-                                .ConfigureAwait(true);
-                            ApplyDeepDiveResultToCandidate(candidate, result);
-                            candidate.LastDeepDiveError = string.Empty;
-                            ok++;
-                            Log($"[DeepDive] [{index}/{total}] Xong.");
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            if (candidate != null)
-                            {
-                                candidate.LastDeepDiveError = "Đã hủy.";
-                            }
-
-                            fail++;
-                            Log($"[DeepDive] [{index}/{total}] Đã hủy.");
-                            throw;
-                        }
-                        catch (Exception ex)
-                        {
-                            if (candidate != null)
-                            {
-                                candidate.LastDeepDiveError = ex.Message;
-                            }
-
-                            fail++;
-                            Log($"[DeepDive] [{index}/{total}] Lỗi: " + ex.Message);
-                        }
-
-                        _affiliateBindingList?.ResetBindings();
-
-                        if (index < total)
-                        {
-                            try
-                            {
-                                await Task.Delay(AffiliateBulkDeepDiveDelay, token).ConfigureAwait(true);
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                throw;
-                            }
-                        }
-                    }
-                }
-
-                MessageBox.Show(this,
-                    $"Hoàn tất Deep Dive hàng loạt.\nThành công: {ok}\nLỗi / bỏ qua: {fail}\nChi tiết lỗi từng dòng: cột lưu trong log + CSV (LastDeepDiveError).",
-                    "Deep Dive hàng loạt",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-            }
-            catch (OperationCanceledException)
-            {
-                Log("[DeepDive] Hàng loạt dừng (hủy hoặc timeout).");
-                MessageBox.Show(this,
-                    $"Đã dừng hàng loạt sau {index}/{total} video.\nThành công: {ok}\nLỗi: {fail}",
-                    "Deep Dive hàng loạt",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-            }
-            finally
-            {
-                _affiliateBulkDeepDiveCancelCts?.Dispose();
-                _affiliateBulkDeepDiveCancelCts = null;
-                _affiliateDeepDiveRunning = false;
-                btnAffiliateDeepDive.Text = originalText;
-                RefreshAffiliateDeepDiveButtonState();
-                _affiliateBindingList?.ResetBindings();
-            }
-        }
-
-        private static void ApplyDeepDiveResultToCandidate(AffiliateCandidate candidate, VideoDeepAnalysisResult result)
-        {
-            candidate.VideoScript = result.VideoScript ?? string.Empty;
-            candidate.VoiceoverTranscript = result.VoiceoverTranscript ?? string.Empty;
-
-            if (!string.IsNullOrWhiteSpace(result.LinkedProduct))
-            {
-                var existing = (candidate.LinkedProduct ?? string.Empty).Trim();
-                var isPlaceholder = string.IsNullOrEmpty(existing)
-                                    || string.Equals(existing, "Chưa rõ", StringComparison.OrdinalIgnoreCase)
-                                    || string.Equals(existing, "Không hiện giỏ hàng", StringComparison.OrdinalIgnoreCase);
-                if (isPlaceholder)
-                {
-                    candidate.LinkedProduct = result.LinkedProduct.Trim();
-                }
-            }
-        }
-
-        private void ShowDeepDiveErrorDialog(Exception ex)
-        {
-            if (ex.Message.Contains("0 Frames found")
-                || ex.Message.Contains("INVALID_ARGUMENT")
-                || ex.Message.IndexOf("Slideshow", StringComparison.OrdinalIgnoreCase) >= 0
-                || ex.Message.IndexOf("Ảnh trượt", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                MessageBox.Show(this,
-                    "TikTok đã chặn tải phần hình ảnh của video này (chỉ tải được âm thanh), hoặc đây là video dạng Ảnh trượt (Slideshow).\n\nCon AI Gemini không có khung hình để phân tích. Bạn hãy thử phân tích video khác nhé!",
-                    "Cảnh báo từ AI",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-            }
-            else if (ex.Message.Contains("429")
-                     || ex.Message.Contains("RESOURCE_EXHAUSTED")
-                     || ex.Message.IndexOf("quota", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                var retryHint = string.Empty;
-                var m = System.Text.RegularExpressions.Regex.Match(
-                    ex.Message,
-                    "\"retryDelay\"\\s*:\\s*\"(\\d+)s\"");
-                if (m.Success)
-                {
-                    retryHint = $"\n\nHãy chờ {m.Groups[1].Value} giây rồi thử lại.";
-                }
-
-                MessageBox.Show(this,
-                    "Bạn đã hết hạn ngạch (quota) miễn phí của Gemini API hôm nay.\n\n" +
-                    "Lý do: model gemini-2.5-flash free tier chỉ cho 20 request/ngày." + retryHint + "\n\n" +
-                    "Cách khắc phục:\n" +
-                    "1) Đợi sang ngày mới (theo giờ Mỹ — PST).\n" +
-                    "2) Hoặc vào tab «Cài đặt» → đổi model sang «gemini-1.5-flash» (quota cao hơn nhiều).\n" +
-                    "3) Hoặc bật billing trên Google AI Studio để được quota cao hơn.",
-                    "Hết quota Gemini",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-            }
-            else if (ex.Message.IndexOf("Unable to extract", StringComparison.OrdinalIgnoreCase) >= 0
-                     || ex.Message.IndexOf("universal data for rehydration", StringComparison.OrdinalIgnoreCase) >= 0
-                     || ex.Message.IndexOf("yt-dlp -U", StringComparison.OrdinalIgnoreCase) >= 0
-                     || ex.Message.IndexOf("on the latest version", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                MessageBox.Show(this,
-                    "Phiên bản yt-dlp.exe đang dùng đã quá cũ — TikTok thay đổi web nên extractor không còn lấy được dữ liệu video.\n\n" +
-                    "Cách khắc phục:\n" +
-                    "1) Vào tab «Cài đặt» → bấm «⬇ Tải yt-dlp» để tải bản mới nhất từ GitHub.\n" +
-                    "2) Hoặc mở Command Prompt tại thư mục chứa yt-dlp.exe và chạy: yt-dlp.exe -U\n\n" +
-                    "Sau đó thử Phân tích Deep Dive lại.",
-                    "Cần cập nhật yt-dlp",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-            }
-            else
-            {
-                MessageBox.Show(this, "Lỗi khi phân tích video:\r\n" + ex.Message,
-                    "Phân tích Deep Dive", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        }
-
-        private void RefreshAffiliateDeepDiveButtonState()
-        {
-            if (btnAffiliateDeepDive == null || dgvAffiliateResults == null)
-            {
-                return;
-            }
-
-            var hasSelection = dgvAffiliateResults.SelectedRows != null && dgvAffiliateResults.SelectedRows.Count > 0;
-            var canCancelBulk = _affiliateDeepDiveRunning && _affiliateBulkDeepDiveCancelCts != null;
-            btnAffiliateDeepDive.Enabled = (!_affiliateDeepDiveRunning && hasSelection) || canCancelBulk;
-        }
 
         /// <summary>Gọi TikWM, gán metrics và tính lại engagement score (Score).</summary>
         private async Task ApplyAffiliateMetricsFromTikWmAsync(AffiliateCandidate candidate, CancellationToken cancellationToken)
@@ -435,18 +56,18 @@ namespace tiktok_Omni
 
             items.Sort((a, b) =>
             {
-                var sa = a?.SafetyScore ?? 0;
-                var sb = b?.SafetyScore ?? 0;
-                if (sb != sa)
-                {
-                    return sb.CompareTo(sa);
-                }
-
                 var pa = a?.PlayCount ?? 0;
                 var pb = b?.PlayCount ?? 0;
                 if (pb != pa)
                 {
                     return pb.CompareTo(pa);
+                }
+
+                var sa = a?.SafetyScore ?? 0;
+                var sb = b?.SafetyScore ?? 0;
+                if (sb != sa)
+                {
+                    return sb.CompareTo(sa);
                 }
 
                 var la = a?.LikeCount ?? 0;
@@ -506,7 +127,7 @@ namespace tiktok_Omni
                 {
                     try
                     {
-                        await Task.Delay(350, cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(1100, cancellationToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException)
                     {
@@ -868,7 +489,7 @@ namespace tiktok_Omni
 
                     if (i < total - 1)
                     {
-                        try { await Task.Delay(350, token).ConfigureAwait(false); }
+                        try { await Task.Delay(1100, token).ConfigureAwait(false); }
                         catch (OperationCanceledException) { throw; }
                     }
                 }

@@ -1,0 +1,14 @@
+{
+  "folders": [
+    {
+      "name": "tiktok_Omni (C:\\Dev — dùng bản này)",
+      "path": "C:\\Dev\\tiktok_Omni"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/bin": true,
+      "**/obj": true
+    }
+  }
+}

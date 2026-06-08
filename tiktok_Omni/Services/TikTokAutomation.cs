@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -20,6 +22,7 @@ namespace tiktok_Omni.Services
         private readonly CaptchaService _captchaService;
         private readonly Random _random = new Random();
         private BrowserAutomation _autoPostBrowser;
+        private BrowserPlatform _autoPostBrowserPlatform = BrowserPlatform.TikTok;
         private const int MaxCaptchaSolveAttempts = 3;
 
         public event EventHandler<string> CaptchaDetected;
@@ -35,7 +38,7 @@ namespace tiktok_Omni.Services
             _captchaService = captchaService ?? new CaptchaService();
         }
 
-        public async Task StartWarmupAsync(
+        public Task StartWarmupAsync(
             string keywords,
             int videoCount,
             bool autoComment,
@@ -53,6 +56,35 @@ namespace tiktok_Omni.Services
                 throw new ArgumentOutOfRangeException(nameof(videoCount), "Video count must be greater than 0.");
             }
 
+            return BrowserLock.WithLockAsync(
+                ct => StartWarmupCoreAsync(
+                    keywords,
+                    videoCount,
+                    autoComment,
+                    dryRun,
+                    startIndex,
+                    watchSecondsMin,
+                    watchSecondsMax,
+                    ct,
+                    logAction,
+                    progressAction,
+                    runningProfileName),
+                cancellationToken);
+        }
+
+        private async Task StartWarmupCoreAsync(
+            string keywords,
+            int videoCount,
+            bool autoComment,
+            bool dryRun,
+            int startIndex,
+            int watchSecondsMin,
+            int watchSecondsMax,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            Action<int, int> progressAction,
+            string runningProfileName = null)
+        {
             logAction?.Invoke($"Loading settings for warm-up with keywords: {keywords}");
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
             var safeStartIndex = Math.Max(0, Math.Min(startIndex, videoCount));
@@ -64,9 +96,45 @@ namespace tiktok_Omni.Services
 
             if (!dryRun)
             {
+                if (WarmupBuildInfo.IsRunningStaleBuild(out var staleBuildMessage))
+                {
+                    logAction?.Invoke("[LIVE] ERROR: " + staleBuildMessage);
+                    // #region agent log
+                    DebugAgentLog.Write(
+                        "BOOT",
+                        "TikTokAutomation.StartWarmupCore",
+                        "stale build blocked",
+                        new { WarmupBuildInfo.BuildId, staleBuildMessage },
+                        "post-fix");
+                    // #endregion
+                    throw new InvalidOperationException(staleBuildMessage);
+                }
+
+                logAction?.Invoke("[LIVE] Build marker: " + WarmupBuildInfo.BuildId + " (watch once, pause at end, no loop).");
+                // #region agent log
+                var asmPath = Assembly.GetExecutingAssembly().Location;
+                var procStartUtc = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+                DebugAgentLog.Write(
+                    "BOOT",
+                    "TikTokAutomation.StartWarmupCore",
+                    "live warmup started",
+                    new
+                    {
+                        buildId = WarmupBuildInfo.BuildId,
+                        keywords,
+                        videoCount,
+                        autoComment,
+                        dryRun,
+                        asmPath,
+                        asmWriteUtc = File.Exists(asmPath) ? File.GetLastWriteTimeUtc(asmPath).ToString("O") : "n/a",
+                        processStartUtc = procStartUtc.ToString("O")
+                    },
+                    "post-fix");
+                // #endregion
                 var browser = new BrowserAutomation();
                 try
                 {
+                    browser.ResetWarmupSession();
                     var selectedProfile = ResolveRunningProfile(settings, runningProfileName, logAction);
                     selectedProfile = await _configManager
                         .EnsureProfileFingerprintAsync(settings, selectedProfile?.Name, logAction)
@@ -81,7 +149,23 @@ namespace tiktok_Omni.Services
                         effectiveProfileName,
                         selectedProfile).ConfigureAwait(false);
                     await browser.EnsureLoggedInAsync(cancellationToken, logAction).ConfigureAwait(false);
-                    await browser.GotoSearchAsync(keywords, cancellationToken, logAction).ConfigureAwait(false);
+
+                    var ownAccount = await browser.TryExtractTikTokAccountSnapshotAsync(cancellationToken, logAction)
+                        .ConfigureAwait(false);
+                    var excludeOwnUniqueId = ownAccount?.UniqueId;
+                    if (!string.IsNullOrWhiteSpace(excludeOwnUniqueId))
+                    {
+                        logAction?.Invoke("[LIVE] Will skip own channel videos: @" + excludeOwnUniqueId);
+                    }
+
+                    await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction).ConfigureAwait(false);
+
+                    var remainingVideoCount = videoCount - safeStartIndex;
+                    var watchBudgets = AllocateSessionWatchSeconds(
+                        watchSecondsMin,
+                        watchSecondsMax,
+                        remainingVideoCount,
+                        logAction);
 
                     for (var i = safeStartIndex + 1; i <= videoCount; i++)
                     {
@@ -92,16 +176,23 @@ namespace tiktok_Omni.Services
 
                         try
                         {
-                            await browser.OpenVideoAsync(i, cancellationToken, logAction).ConfigureAwait(false);
+                            await browser.OpenVideoAsync(i, cancellationToken, logAction, excludeOwnUniqueId, keywords)
+                                .ConfigureAwait(false);
 
-                            var watchRange = BuildHumanLikeWatchRange(watchSecondsMin, watchSecondsMax);
-                            logAction?.Invoke($"[LIVE] Human-watch mode: {watchRange.mode} ({watchRange.min}s..{watchRange.max}s).");
-                            await browser.WatchAsync(watchRange.min, watchRange.max, cancellationToken).ConfigureAwait(false);
-                            await browser.SimulateReadingScrollAsync(cancellationToken, logAction).ConfigureAwait(false);
-
-                            if (_random.NextDouble() <= 0.15d)
+                            var allocatedSec = watchBudgets[i - safeStartIndex - 1];
+                            var watchRange = BuildWatchRangeForAllocatedSeconds(allocatedSec);
+                            logAction?.Invoke(
+                                $"[LIVE] Human-watch mode: {watchRange.mode} ({watchRange.min}s..{watchRange.max}s, phân bổ {allocatedSec}s trong tổng phiên).");
+                            await browser.WatchAsync(watchRange.min, watchRange.max, cancellationToken, logAction)
+                                .ConfigureAwait(false);
+                            if (await browser.IsShopInAppGateBlockingAsync().ConfigureAwait(false))
                             {
-                                await browser.OpenCommentsPanelBrieflyAsync(cancellationToken, logAction).ConfigureAwait(false);
+                                logAction?.Invoke(
+                                    "[LIVE] Trang hiện tại bị chặn TikTok Shop (xem trong app). Bỏ tim/comment, quay lại tìm kiếm.");
+                                // #region agent log
+                                DebugAgentLog.Write("F", "TikTokAutomation.StartWarmupCore", "shop gate after watch", new { slot = i, url = browser.Page?.Url });
+                                // #endregion
+                                throw new ShopVideoGateException();
                             }
 
                             await browser.LikeCurrentVideoAsync(cancellationToken, logAction).ConfigureAwait(false);
@@ -111,6 +202,9 @@ namespace tiktok_Omni.Services
                                 if (string.IsNullOrWhiteSpace(settings.AiApiKey))
                                 {
                                     logAction?.Invoke("[LIVE] Auto comment enabled but AI API key is missing. Skipping comment.");
+                                    // #region agent log
+                                    DebugAgentLog.Write("C", "TikTokAutomation.StartWarmupCore", "comment skipped no api key", new { slot = i });
+                                    // #endregion
                                 }
                                 else
                                 {
@@ -123,6 +217,9 @@ namespace tiktok_Omni.Services
                                         cancellationToken).ConfigureAwait(false);
 
                                     var commentText = SanitizeComment(generated);
+                                    // #region agent log
+                                    DebugAgentLog.Write("C", "TikTokAutomation.StartWarmupCore", "ai comment ready", new { slot = i, len = commentText?.Length ?? 0 });
+                                    // #endregion
                                     if (!string.IsNullOrWhiteSpace(commentText))
                                     {
                                         await browser.CommentCurrentVideoAsync(commentText, cancellationToken, logAction).ConfigureAwait(false);
@@ -143,12 +240,29 @@ namespace tiktok_Omni.Services
                         }
                         catch (CaptchaDetectedException)
                         {
-                            var solved = await HandleCaptchaAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
-                            if (!solved)
+                            if (!await TryResolveCaptchaAndResumeWarmupSearchAsync(
+                                    browser,
+                                    settings,
+                                    keywords,
+                                    cancellationToken,
+                                    logAction).ConfigureAwait(false))
                             {
                                 logAction?.Invoke("[LIVE] CAPTCHA solve failed too many times. Stopping this profile.");
                                 throw new OperationCanceledException();
                             }
+
+                            i--;
+                            continue;
+                        }
+                        catch (ShopVideoGateException)
+                        {
+                            browser.ExcludeCurrentWarmupVideo();
+                            logAction?.Invoke("[LIVE] Bỏ qua video TikTok Shop, chọn video khác từ kết quả tìm kiếm.");
+                            // #region agent log
+                            DebugAgentLog.Write("F", "TikTokAutomation.StartWarmupCore", "shop gate skip slot", new { slot = i }, "post-fix");
+                            // #endregion
+                            await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction)
+                                .ConfigureAwait(false);
 
                             i--;
                             continue;
@@ -161,7 +275,8 @@ namespace tiktok_Omni.Services
                             try
                             {
                                 await browser.RandomDelayAsync(1500, 3500, cancellationToken).ConfigureAwait(false);
-                                await browser.GotoSearchAsync(keywords, cancellationToken, logAction).ConfigureAwait(false);
+                                await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction)
+                                    .ConfigureAwait(false);
                             }
                             catch (CheckpointDetectedException)
                             {
@@ -172,8 +287,12 @@ namespace tiktok_Omni.Services
                             }
                             catch (CaptchaDetectedException)
                             {
-                                var solved = await HandleCaptchaAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
-                                if (!solved)
+                                if (!await TryResolveCaptchaAndResumeWarmupSearchAsync(
+                                        browser,
+                                        settings,
+                                        keywords,
+                                        cancellationToken,
+                                        logAction).ConfigureAwait(false))
                                 {
                                     logAction?.Invoke("[LIVE] CAPTCHA solve failed too many times. Stopping this profile.");
                                     throw new OperationCanceledException();
@@ -200,15 +319,23 @@ namespace tiktok_Omni.Services
                 }
             }
 
+            var dryRemainingVideoCount = videoCount - safeStartIndex;
+            var dryWatchBudgets = AllocateSessionWatchSeconds(
+                watchSecondsMin,
+                watchSecondsMax,
+                dryRemainingVideoCount,
+                logAction);
+
             for (var i = safeStartIndex + 1; i <= videoCount; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 progressAction?.Invoke(i - 1, videoCount);
 
-                logAction?.Invoke($"[DRY] Interacting with video {i}/{videoCount}...");
+                var dryAllocatedSec = dryWatchBudgets[i - safeStartIndex - 1];
+                logAction?.Invoke($"[DRY] Interacting with video {i}/{videoCount} (watch budget {dryAllocatedSec}s)...");
                 await Task.Delay(200, cancellationToken).ConfigureAwait(false);
 
-                logAction?.Invoke($"[DRY] Simulated scroll/like/watch on video {i}.");
+                logAction?.Invoke($"[DRY] Simulated scroll/like/watch on video {i} for ~{dryAllocatedSec}s.");
 
                 if (!autoComment)
                 {
@@ -242,7 +369,15 @@ namespace tiktok_Omni.Services
         /// Opens Playwright Chrome for the selected profile and waits until TikTok login succeeds (QR or password in that window).
         /// There is no login field inside the desktop app — authentication happens only in this browser window.
         /// </summary>
-        public async Task OpenTikTokLoginBrowserAsync(
+        public Task OpenTikTokLoginBrowserAsync(
+            string runningProfileName,
+            CancellationToken cancellationToken,
+            Action<string> logAction) =>
+            BrowserLock.WithLockAsync(
+                ct => OpenTikTokLoginBrowserCoreAsync(runningProfileName, ct, logAction),
+                cancellationToken);
+
+        private async Task OpenTikTokLoginBrowserCoreAsync(
             string runningProfileName,
             CancellationToken cancellationToken,
             Action<string> logAction)
@@ -310,7 +445,7 @@ namespace tiktok_Omni.Services
         /// chờ cookie/localStorage báo đã login (vd. <c>sessionid</c>), rồi trích xuất tài khoản —
         /// ưu tiên <c>window.__INITIAL_PROPS__.value.userState.user</c>, sau đó hydration + <c>/api/me</c>, đóng Chrome, lưu appsettings.
         /// </summary>
-        public async Task<TikTokAccountSnapshot> ManualLoginAsync(
+        public Task<TikTokAccountSnapshot> ManualLoginAsync(
             string profileName,
             CancellationToken cancellationToken,
             Action<string> logAction)
@@ -320,6 +455,16 @@ namespace tiktok_Omni.Services
                 throw new ArgumentException("Profile name is required.", nameof(profileName));
             }
 
+            return BrowserLock.WithLockAsync(
+                ct => ManualLoginCoreAsync(profileName, ct, logAction),
+                cancellationToken);
+        }
+
+        private async Task<TikTokAccountSnapshot> ManualLoginCoreAsync(
+            string profileName,
+            CancellationToken cancellationToken,
+            Action<string> logAction)
+        {
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
             var profile = ResolveRunningProfile(settings, profileName, logAction);
             profile = await _configManager
@@ -329,6 +474,7 @@ namespace tiktok_Omni.Services
 
             var userDataDir = ResolveSeleniumUserDataDirectory(profile, effectiveName);
             Directory.CreateDirectory(userDataDir);
+            SeleniumChromeLaunchHelper.TryClearStaleProfileLocks(userDataDir, logAction);
             logAction?.Invoke($"[SELENIUM] user-data-dir: {userDataDir}");
 
             var proxyServer = BuildSeleniumProxyServerArgument(profile);
@@ -348,26 +494,30 @@ namespace tiktok_Omni.Services
             await Task.Run(
                     () =>
                     {
-                        ChromeDriver driver = null;
-                        try
+                        var options = new ChromeOptions();
+                        SeleniumChromeLaunchHelper.ApplyStableLaunchArguments(options, headless: false);
+                        options.AddArgument($"--user-data-dir={userDataDir}");
+                        options.AddArgument("--disable-blink-features=AutomationControlled");
+                        options.AddExcludedArgument("enable-automation");
+                        options.AddAdditionalOption("useAutomationExtension", false);
+                        options.AddArgument("--disable-dev-shm-usage");
+                        options.AddArgument("--no-sandbox");
+                        options.AddArgument("--mute-audio");
+                        options.AddArgument("--lang=en-US");
+                        if (!string.IsNullOrWhiteSpace(proxyServer))
                         {
-                            var options = new ChromeOptions();
-                            options.AddArgument($"--user-data-dir={userDataDir}");
-                            options.AddArgument("--disable-blink-features=AutomationControlled");
-                            options.AddExcludedArgument("enable-automation");
-                            options.AddAdditionalOption("useAutomationExtension", false);
-                            options.AddArgument("--disable-dev-shm-usage");
-                            options.AddArgument("--mute-audio");
-                            options.AddArgument("--lang=en-US");
-                            if (!string.IsNullOrWhiteSpace(proxyServer))
-                            {
-                                options.AddArgument("--proxy-server=" + proxyServer);
-                            }
+                            options.AddArgument("--proxy-server=" + proxyServer);
+                        }
 
-                            var service = ChromeDriverService.CreateDefaultService();
-                            service.HideCommandPromptWindow = true;
+                        var service = ChromeDriverService.CreateDefaultService();
 
-                            driver = new ChromeDriver(service, options);
+                        SeleniumChromeLaunchHelper.GuardProfileLaunch(userDataDir, logAction);
+
+                        using (var driver = SeleniumChromeLaunchHelper.CreateDriver(
+                            service,
+                            options,
+                            logAction))
+                        {
                             driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(90);
                             driver.Manage().Timeouts().AsynchronousJavaScript = TimeSpan.FromSeconds(45);
 
@@ -436,30 +586,7 @@ namespace tiktok_Omni.Services
                                 $"[SELENIUM] Đã đọc: @{snapshot.UniqueId.TrimStart('@')}" +
                                 (string.IsNullOrWhiteSpace(snapshot.Nickname) ? string.Empty : $" — {snapshot.Nickname}"));
 
-                            try
-                            {
-                                driver?.Quit();
-                            }
-                            catch
-                            {
-                                // ignore
-                            }
-
-                            driver = null;
                             Thread.Sleep(400);
-                        }
-                        finally
-                        {
-                            try
-                            {
-                                driver?.Quit();
-                            }
-                            catch
-                            {
-                                // ignore
-                            }
-
-                            driver = null;
                         }
                     },
                     cancellationToken)
@@ -475,7 +602,15 @@ namespace tiktok_Omni.Services
         /// Opens the profile browser on TikTok login and leaves it open until the user closes all windows.
         /// Does not wait for login detection or save @nick — use «Sign in to TikTok (QR)» for that, or enter @nick in Settings.
         /// </summary>
-        public async Task OpenManualTikTokBrowserAsync(
+        public Task OpenManualTikTokBrowserAsync(
+            string runningProfileName,
+            CancellationToken cancellationToken,
+            Action<string> logAction) =>
+            BrowserLock.WithLockAsync(
+                ct => OpenManualTikTokBrowserCoreAsync(runningProfileName, ct, logAction),
+                cancellationToken);
+
+        private async Task OpenManualTikTokBrowserCoreAsync(
             string runningProfileName,
             CancellationToken cancellationToken,
             Action<string> logAction)
@@ -972,33 +1107,101 @@ namespace tiktok_Omni.Services
             return selected;
         }
 
-        private (int min, int max, string mode) BuildHumanLikeWatchRange(int baseMin, int baseMax)
+        private int[] AllocateSessionWatchSeconds(
+            int totalMin,
+            int totalMax,
+            int videoCount,
+            Action<string> logAction)
         {
-            var min = Math.Max(2, Math.Min(baseMin, baseMax));
-            var max = Math.Max(min, Math.Max(baseMin, baseMax));
-            var roll = _random.NextDouble();
+            const int minPerVideo = 2;
+            var count = Math.Max(1, videoCount);
+            var lo = Math.Max(minPerVideo, Math.Min(totalMin, totalMax));
+            var hi = Math.Max(lo, Math.Max(totalMin, totalMax));
+            var sessionTotal = _random.Next(lo, hi + 1);
+            var floorTotal = count * minPerVideo;
 
-            // 30% skim quickly (~3-6s), 45% normal, 25% deep watch (can reach ~45s+).
+            if (sessionTotal < floorTotal)
+            {
+                logAction?.Invoke(
+                    $"[WARN] Tổng xem {sessionTotal}s thấp hơn tối thiểu {floorTotal}s ({minPerVideo}s/video × {count}). Dùng {floorTotal}s.");
+                sessionTotal = floorTotal;
+            }
+
+            if (count == 1)
+            {
+                logAction?.Invoke($"[LIVE] Tổng thời gian xem phiên: {sessionTotal}s / 1 video.");
+                return new[] { sessionTotal };
+            }
+
+            var weights = new double[count];
+            for (var i = 0; i < count; i++)
+            {
+                weights[i] = _random.NextDouble() + 0.05d;
+            }
+
+            var weightSum = weights.Sum();
+            var allocations = new int[count];
+            var assigned = 0;
+            for (var i = 0; i < count - 1; i++)
+            {
+                var share = Math.Max(minPerVideo, (int)Math.Round(sessionTotal * weights[i] / weightSum));
+                allocations[i] = share;
+                assigned += share;
+            }
+
+            allocations[count - 1] = Math.Max(minPerVideo, sessionTotal - assigned);
+
+            var actualTotal = allocations.Sum();
+            while (actualTotal != sessionTotal)
+            {
+                if (actualTotal > sessionTotal)
+                {
+                    var reducible = Enumerable.Range(0, count).Where(i => allocations[i] > minPerVideo).ToList();
+                    if (reducible.Count == 0)
+                    {
+                        break;
+                    }
+
+                    var pick = reducible[_random.Next(reducible.Count)];
+                    allocations[pick]--;
+                    actualTotal--;
+                    continue;
+                }
+
+                allocations[_random.Next(count)]++;
+                actualTotal++;
+            }
+
+            var average = sessionTotal / (double)count;
+            logAction?.Invoke(
+                $"[LIVE] Tổng thời gian xem phiên: {sessionTotal}s / {count} video (~{average:0.#}s trung bình/video).");
+
+            return allocations;
+        }
+
+        private (int min, int max, string mode) BuildWatchRangeForAllocatedSeconds(int allocatedSeconds)
+        {
+            var slot = Math.Max(2, allocatedSeconds);
+            if (slot <= 4)
+            {
+                return (slot, slot, "short");
+            }
+
+            var roll = _random.NextDouble();
             if (roll < 0.30d)
             {
-                var skimMin = Math.Max(3, Math.Min(4, max));
-                var skimMax = Math.Max(skimMin, Math.Min(6, max));
+                var skimMax = slot;
+                var skimMin = Math.Max(2, slot - Math.Max(1, slot / 3));
                 return (skimMin, skimMax, "skim");
             }
 
             if (roll < 0.75d)
             {
-                return (min, max, "normal");
+                var normalMin = Math.Max(2, slot - 1);
+                return (normalMin, slot, "normal");
             }
 
-            var deepMin = Math.Max(min, Math.Max(22, max));
-            var deepMax = Math.Min(65, Math.Max(deepMin, max + _random.Next(22, 33)));
-            if (deepMax < deepMin)
-            {
-                deepMax = deepMin;
-            }
-
-            return (deepMin, deepMax, "deep");
+            return (slot, slot, "deep");
         }
 
         private async Task<bool> HandleCaptchaAsync(
@@ -1021,8 +1224,9 @@ namespace tiktok_Omni.Services
                     var request = await browser.GetCaptchaSolveRequestAsync(cancellationToken).ConfigureAwait(false);
                     if (string.IsNullOrWhiteSpace(request.SiteKey))
                     {
-                        logAction?.Invoke("[LIVE] Could not extract captcha sitekey. Waiting for manual solve...");
-                        await browser.RandomDelayAsync(5000, 7000, cancellationToken).ConfigureAwait(false);
+                        logAction?.Invoke("[LIVE] Could not extract captcha sitekey — waiting for manual solve...");
+                        await browser.WaitForCaptchaResolvedAsync(cancellationToken, logAction, maxMinutes: 8)
+                            .ConfigureAwait(false);
                         if (!await browser.DetectChallengeAsync(cancellationToken).ConfigureAwait(false))
                         {
                             return true;
@@ -1049,7 +1253,27 @@ namespace tiktok_Omni.Services
                 }
             }
 
-            return false;
+            logAction?.Invoke("[LIVE] Waiting for manual CAPTCHA resolve (up to 8 min)...");
+            await browser.WaitForCaptchaResolvedAsync(cancellationToken, logAction, maxMinutes: 8).ConfigureAwait(false);
+            return !await browser.DetectChallengeAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<bool> TryResolveCaptchaAndResumeWarmupSearchAsync(
+            BrowserAutomation browser,
+            AppSettings settings,
+            string keywords,
+            CancellationToken cancellationToken,
+            Action<string> logAction)
+        {
+            var solved = await HandleCaptchaAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+            if (!solved)
+            {
+                return false;
+            }
+
+            logAction?.Invoke("[LIVE] CAPTCHA cleared — returning to video search results.");
+            await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction).ConfigureAwait(false);
+            return true;
         }
 
         /// <summary>
@@ -1138,7 +1362,7 @@ namespace tiktok_Omni.Services
             return text;
         }
 
-        public async Task AutoPostUpToProductLinkAsync(
+        public Task AutoPostUpToProductLinkAsync(
             string videoFolder,
             string hashtags,
             string runningProfileName,
@@ -1146,47 +1370,65 @@ namespace tiktok_Omni.Services
             Action<string> logAction,
             string explicitVideoPath = null,
             string userCaptionOverride = null,
-            bool clickPublish = false)
+            bool clickPublish = false,
+            bool reuseExistingAutoPostBrowser = false,
+            bool keepBrowserOpenAfter = false)
+        {
+            return AutoPostTikTokAsync(
+                videoFolder,
+                hashtags,
+                runningProfileName,
+                cancellationToken,
+                logAction,
+                explicitVideoPath,
+                userCaptionOverride,
+                clickPublish,
+                reuseExistingAutoPostBrowser,
+                keepBrowserOpenAfter);
+        }
+
+        public async Task AutoPostTikTokAsync(
+            string videoFolder,
+            string hashtags,
+            string runningProfileName,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string explicitVideoPath = null,
+            string userCaptionOverride = null,
+            bool clickPublish = false,
+            bool reuseExistingAutoPostBrowser = false,
+            bool keepBrowserOpenAfter = false,
+            string affiliateLink = null,
+            string productId = null)
         {
             if (string.IsNullOrWhiteSpace(videoFolder) || !Directory.Exists(videoFolder))
             {
                 throw new InvalidOperationException("Video folder does not exist.");
             }
 
-            var videoPath = (explicitVideoPath ?? string.Empty).Trim();
-            if (!string.IsNullOrWhiteSpace(videoPath) && File.Exists(videoPath))
-            {
-                logAction?.Invoke("Auto Post: using selected video file -> " + Path.GetFileName(videoPath));
-            }
-            else
-            {
-                videoPath = GetFirstVideoFile(videoFolder);
-            }
-
-            if (string.IsNullOrWhiteSpace(videoPath))
-            {
-                throw new InvalidOperationException("No video file found in selected folder.");
-            }
-
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
-            var profile = ResolveRunningProfile(settings, runningProfileName, logAction);
-            profile = await _configManager
-                .EnsureProfileFingerprintAsync(settings, profile?.Name, logAction)
-                .ConfigureAwait(false);
-            var effectiveProfileName = string.IsNullOrWhiteSpace(runningProfileName)
-                ? (profile?.Name ?? "default")
-                : runningProfileName.Trim();
-
-            if (_autoPostBrowser != null)
-            {
-                await _autoPostBrowser.CloseAsync().ConfigureAwait(false);
-                _autoPostBrowser = null;
-            }
-
-            var browser = new BrowserAutomation();
-            _autoPostBrowser = browser;
-            await browser.LaunchAsync(cancellationToken, logAction, effectiveProfileName, profile).ConfigureAwait(false);
-            await browser.EnsureLoggedInAsync(cancellationToken, logAction).ConfigureAwait(false);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var effectiveProfile = string.IsNullOrWhiteSpace(runningProfileName) ? "default" : runningProfileName.Trim();
+            ProfileScopedPaths.ValidateAutoPostPathsForProfile(
+                settings.StorageRootPath,
+                effectiveProfile,
+                videoFolder,
+                explicitVideoPath);
+            var videoPath = ResolveAutoPostVideoPath(
+                videoFolder,
+                explicitVideoPath,
+                logAction,
+                "TikTok",
+                effectiveProfile,
+                settings.StorageRootPath);
+            var browser = await EnsureAutoPostBrowserSessionAsync(
+                settings,
+                runningProfileName,
+                cancellationToken,
+                logAction,
+                reuseExistingAutoPostBrowser,
+                requireTikTokLogin: true,
+                platform: BrowserPlatform.TikTok).ConfigureAwait(false);
 
             var page = browser.Page ?? throw new InvalidOperationException("Browser page is not available.");
             await page.GotoAsync("https://www.tiktok.com/creator-center/upload", new PageGotoOptions
@@ -1214,9 +1456,28 @@ namespace tiktok_Omni.Services
 
             await browser.RandomDelayAsync(5000, 7000, cancellationToken).ConfigureAwait(false);
 
+            var linkToAttach = OmnichannelAutoPostFields.NormalizeLink(affiliateLink);
+            if (OmnichannelAutoPostFields.ShouldAttachAffiliateProduct(linkToAttach, productId))
+            {
+                await TikTokAffiliateLinkAutomation.TryAttachAffiliateProductLinkAsync(
+                    page,
+                    linkToAttach,
+                    cancellationToken,
+                    logAction).ConfigureAwait(false);
+            }
+            else if (!string.IsNullOrWhiteSpace(OmnichannelAutoPostFields.NormalizeLink(productId)))
+            {
+                logAction?.Invoke("Auto Post TikTok: có ProductId nhưng không có AffiliateLink — bỏ qua gắn SP (nuôi kênh).");
+            }
+
             if (!clickPublish)
             {
-                logAction?.Invoke("Đã upload xong, mời ông gắn link Affiliate tay và nhấn Đăng");
+                logAction?.Invoke("Auto Post TikTok: đã upload — gắn link Affiliate và đăng tay nếu cần.");
+                if (!keepBrowserOpenAfter)
+                {
+                    await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+                }
+
                 return;
             }
 
@@ -1224,13 +1485,338 @@ namespace tiktok_Omni.Services
             var posted = await TryClickPublishButtonAsync(page, cancellationToken, logAction).ConfigureAwait(false);
             if (!posted)
             {
-                logAction?.Invoke("Auto Post: không bấm được nút Đăng — hãy kiểm tra giao diện TikTok và bấm tay.");
+                logAction?.Invoke("Auto Post TikTok: không bấm được nút Đăng — hãy kiểm tra giao diện TikTok và bấm tay.");
+                if (!keepBrowserOpenAfter)
+                {
+                    await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+                }
+
                 return;
             }
 
             await Task.Delay(4000, cancellationToken).ConfigureAwait(false);
             await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
-            logAction?.Invoke("Auto Post: đã gửi lệnh đăng bài (kiểm tra trạng thái trên TikTok).");
+            logAction?.Invoke("Auto Post TikTok: đã gửi lệnh đăng bài (kiểm tra trạng thái trên TikTok).");
+
+            if (!keepBrowserOpenAfter)
+            {
+                await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+            }
+        }
+
+        public async Task AutoPostFacebookAsync(
+            string videoFolder,
+            string hashtags,
+            string runningProfileName,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string explicitVideoPath = null,
+            string userCaptionOverride = null,
+            bool clickPublish = true,
+            bool reuseExistingAutoPostBrowser = true,
+            bool keepBrowserOpenAfter = false,
+            bool attachShopeeLink = false,
+            string facebookShopeeLink = null)
+        {
+            if (string.IsNullOrWhiteSpace(videoFolder) || !Directory.Exists(videoFolder))
+            {
+                throw new InvalidOperationException("Video folder does not exist.");
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(false);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var effectiveProfile = string.IsNullOrWhiteSpace(runningProfileName) ? "default" : runningProfileName.Trim();
+            ProfileScopedPaths.ValidateAutoPostPathsForProfile(
+                settings.StorageRootPath,
+                effectiveProfile,
+                videoFolder,
+                explicitVideoPath);
+            var videoPath = ResolveAutoPostVideoPath(
+                videoFolder,
+                explicitVideoPath,
+                logAction,
+                "Facebook",
+                effectiveProfile,
+                settings.StorageRootPath);
+            var browser = await EnsureAutoPostBrowserSessionAsync(
+                settings,
+                runningProfileName,
+                cancellationToken,
+                logAction,
+                reuseExistingAutoPostBrowser,
+                requireTikTokLogin: false,
+                platform: BrowserPlatform.Facebook).ConfigureAwait(false);
+
+            var page = browser.Page ?? throw new InvalidOperationException("Browser page is not available.");
+            await page.GotoAsync("https://www.facebook.com/reels/create", new PageGotoOptions
+            {
+                Timeout = 90000,
+                WaitUntil = WaitUntilState.DOMContentLoaded
+            }).ConfigureAwait(false);
+
+            logAction?.Invoke("Auto Post Facebook: đã mở trang tạo Reels.");
+            await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+
+            if (!await TrySetVideoFileOnPageAsync(page, videoPath, cancellationToken, logAction, "Facebook").ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Không tìm thấy ô chọn video trên Facebook Reels.");
+            }
+
+            logAction?.Invoke("Auto Post Facebook: đang chờ xử lý video…");
+            await Task.Delay(8000, cancellationToken).ConfigureAwait(false);
+            await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+
+            var productName = ExtractProductNameFromVideoFile(videoPath);
+            var caption = string.IsNullOrWhiteSpace(userCaptionOverride)
+                ? BuildAutoPostCaption(productName, hashtags)
+                : userCaptionOverride.Trim();
+
+            var shopeeLink = OmnichannelAutoPostFields.NormalizeLink(facebookShopeeLink);
+            var shouldAttachShopee = OmnichannelAutoPostFields.ShouldAttachFacebookShopeeLink(attachShopeeLink, shopeeLink);
+            if (shouldAttachShopee)
+            {
+                logAction?.Invoke("Auto Post Facebook: gắn link Shopee…");
+            }
+
+            var fbCaptionSelectors = new[]
+            {
+                "motion[contenteditable='true']",
+                "div[contenteditable='true'][data-lexical-editor='true']",
+                "motion div[role='textbox']",
+                "motion textarea",
+                "motion input[type='text']",
+                "motion input",
+                "motion div[contenteditable='true']",
+                "motion div[aria-label*='caption']",
+                "div[contenteditable='true']"
+            };
+            await FillFirstVisibleTextAsync(page, fbCaptionSelectors, caption, cancellationToken, logAction, "Facebook caption")
+                .ConfigureAwait(false);
+            logAction?.Invoke("Auto Post Facebook: đã điền caption.");
+
+            if (shouldAttachShopee)
+            {
+                var uiAttached = await FacebookShopeeLinkAutomation.TryAttachShopeeProductLinkAsync(
+                    page,
+                    shopeeLink,
+                    cancellationToken,
+                    logAction).ConfigureAwait(false);
+                if (!uiAttached)
+                {
+                    var captionWithLink = OmnichannelAutoPostFields.EnsureLinkInCaption(caption, shopeeLink);
+                    if (!string.Equals(captionWithLink, caption, StringComparison.Ordinal))
+                    {
+                        await FillFirstVisibleTextAsync(
+                                page,
+                                fbCaptionSelectors,
+                                captionWithLink,
+                                cancellationToken,
+                                logAction,
+                                "Facebook caption + Shopee")
+                            .ConfigureAwait(false);
+                        logAction?.Invoke("Auto Post Facebook: đã chèn link Shopee vào caption (fallback).");
+                    }
+                }
+            }
+
+            if (!clickPublish)
+            {
+                logAction?.Invoke("Auto Post Facebook: chỉ upload — hãy kiểm tra và đăng tay trên Facebook.");
+                if (!keepBrowserOpenAfter)
+                {
+                    await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+                }
+
+                return;
+            }
+
+            await browser.RandomDelayAsync(3000, 5000, cancellationToken).ConfigureAwait(false);
+            await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+
+            var fbPublishSelectors = new[]
+            {
+                "div[aria-label='Post']",
+                "div[aria-label='Đăng']",
+                "motion[aria-label='Post']",
+                "motion[aria-label='Đăng']",
+                "motion span:has-text('Post')",
+                "motion span:has-text('Đăng')",
+                "button:has-text('Post')",
+                "button:has-text('Đăng')"
+            };
+            var posted = await TryClickFirstVisibleAsync(page, fbPublishSelectors, cancellationToken, logAction, "Facebook đăng bài")
+                .ConfigureAwait(false);
+            if (!posted)
+            {
+                logAction?.Invoke("Auto Post Facebook: không bấm được nút Đăng — hãy kiểm tra giao diện và bấm tay.");
+            }
+            else
+            {
+                logAction?.Invoke("Auto Post Facebook: đã gửi lệnh đăng Reels.");
+            }
+
+            if (!keepBrowserOpenAfter)
+            {
+                await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+            }
+        }
+
+        public async Task AutoPostYouTubeShortsAsync(
+            string videoFolder,
+            string title,
+            string description,
+            string runningProfileName,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string explicitVideoPath = null,
+            bool clickPublish = true,
+            bool reuseExistingAutoPostBrowser = true,
+            bool keepBrowserOpenAfter = false)
+        {
+            if (string.IsNullOrWhiteSpace(videoFolder) || !Directory.Exists(videoFolder))
+            {
+                throw new InvalidOperationException("Video folder does not exist.");
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(false);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var effectiveProfile = string.IsNullOrWhiteSpace(runningProfileName) ? "default" : runningProfileName.Trim();
+            ProfileScopedPaths.ValidateAutoPostPathsForProfile(
+                settings.StorageRootPath,
+                effectiveProfile,
+                videoFolder,
+                explicitVideoPath);
+            var videoPath = ResolveAutoPostVideoPath(
+                videoFolder,
+                explicitVideoPath,
+                logAction,
+                "YouTube",
+                effectiveProfile,
+                settings.StorageRootPath);
+            var browser = await EnsureAutoPostBrowserSessionAsync(
+                settings,
+                runningProfileName,
+                cancellationToken,
+                logAction,
+                reuseExistingAutoPostBrowser,
+                requireTikTokLogin: false,
+                platform: BrowserPlatform.YouTube).ConfigureAwait(false);
+
+            var page = browser.Page ?? throw new InvalidOperationException("Browser page is not available.");
+            await page.GotoAsync("https://www.youtube.com/upload", new PageGotoOptions
+            {
+                Timeout = 90000,
+                WaitUntil = WaitUntilState.DOMContentLoaded
+            }).ConfigureAwait(false);
+
+            logAction?.Invoke("Auto Post YouTube: đã mở trang upload.");
+            await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+
+            if (!await TrySetVideoFileOnPageAsync(page, videoPath, cancellationToken, logAction, "YouTube").ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Không tìm thấy ô chọn video trên YouTube Studio.");
+            }
+
+            logAction?.Invoke("Auto Post YouTube: đang chờ xử lý video…");
+            await WaitForYouTubeUploadDetailsAsync(page, cancellationToken, logAction).ConfigureAwait(false);
+            await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+
+            var safeTitle = (title ?? string.Empty).Trim();
+            if (safeTitle.Length > 60)
+            {
+                safeTitle = safeTitle.Substring(0, 60).TrimEnd();
+            }
+
+            if (string.IsNullOrWhiteSpace(safeTitle))
+            {
+                safeTitle = ExtractProductNameFromVideoFile(videoPath);
+                if (safeTitle.Length > 60)
+                {
+                    safeTitle = safeTitle.Substring(0, 60).TrimEnd();
+                }
+            }
+
+            var titleSelectors = new[]
+            {
+                "#title-textarea #textbox",
+                "#title-textarea",
+                "ytcp-social-suggestions-textbox#title-textarea #textbox",
+                "input#textbox[aria-label*='title']",
+                "input[aria-label*='Tiêu đề']"
+            };
+            await FillFirstVisibleTextAsync(page, titleSelectors, safeTitle, cancellationToken, logAction, "YouTube title")
+                .ConfigureAwait(false);
+
+            var desc = (description ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(desc))
+            {
+                var descSelectors = new[]
+                {
+                    "#description-textarea #textbox",
+                    "#description-textarea",
+                    "ytcp-social-suggestions-textbox#description-textarea #textbox",
+                    "input[aria-label*='description']",
+                    "input[aria-label*='Mô tả']"
+                };
+                await FillFirstVisibleTextAsync(page, descSelectors, desc, cancellationToken, logAction, "YouTube description")
+                    .ConfigureAwait(false);
+            }
+
+            logAction?.Invoke("Auto Post YouTube: đã điền tiêu đề / mô tả.");
+
+            if (!clickPublish)
+            {
+                logAction?.Invoke("Auto Post YouTube: chỉ upload — hãy kiểm tra và xuất bản tay trên YouTube.");
+                if (!keepBrowserOpenAfter)
+                {
+                    await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+                }
+
+                return;
+            }
+
+            await browser.RandomDelayAsync(3000, 5000, cancellationToken).ConfigureAwait(false);
+            await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+
+            var nextSelectors = new[]
+            {
+                "#next-button",
+                "ytcp-button#next-button",
+                "button:has-text('Next')",
+                "button:has-text('Tiếp')"
+            };
+            for (var step = 0; step < 3; step++)
+            {
+                if (await TryClickFirstVisibleAsync(page, nextSelectors, cancellationToken, logAction, "YouTube Next").ConfigureAwait(false))
+                {
+                    await Task.Delay(2500, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            var publishSelectors = new[]
+            {
+                "#done-button",
+                "ytcp-button#done-button",
+                "button:has-text('Publish')",
+                "button:has-text('Xuất bản')",
+                "button:has-text('Public')",
+                "button:has-text('Công khai')"
+            };
+            var published = await TryClickFirstVisibleAsync(page, publishSelectors, cancellationToken, logAction, "YouTube Publish")
+                .ConfigureAwait(false);
+            if (!published)
+            {
+                logAction?.Invoke("Auto Post YouTube: không bấm được Xuất bản — hãy hoàn tất các bước tay trên YouTube Studio.");
+            }
+            else
+            {
+                logAction?.Invoke("Auto Post YouTube Shorts: đã gửi lệnh xuất bản.");
+            }
+
+            if (!keepBrowserOpenAfter)
+            {
+                await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+            }
         }
 
         public async Task CloseAutoPostBrowserAsync(Action<string> logAction)
@@ -1238,6 +1824,16 @@ namespace tiktok_Omni.Services
             if (_autoPostBrowser == null)
             {
                 logAction?.Invoke("Auto Post: không có trình duyệt nào đang mở.");
+                return;
+            }
+
+            await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+        }
+
+        private async Task CloseAutoPostBrowserInternalAsync(Action<string> logAction)
+        {
+            if (_autoPostBrowser == null)
+            {
                 return;
             }
 
@@ -1249,7 +1845,239 @@ namespace tiktok_Omni.Services
             finally
             {
                 _autoPostBrowser = null;
+                _autoPostBrowserPlatform = BrowserPlatform.TikTok;
             }
+        }
+
+        private async Task<BrowserAutomation> EnsureAutoPostBrowserSessionAsync(
+            AppSettings settings,
+            string runningProfileName,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            bool reuseExistingAutoPostBrowser,
+            bool requireTikTokLogin,
+            BrowserPlatform platform)
+        {
+            var profile = ResolveRunningProfile(settings, runningProfileName, logAction);
+            profile = await _configManager
+                .EnsureProfileFingerprintAsync(settings, profile?.Name, logAction)
+                .ConfigureAwait(false);
+            var effectiveProfileName = string.IsNullOrWhiteSpace(runningProfileName)
+                ? (profile?.Name ?? "default")
+                : runningProfileName.Trim();
+
+            var mustRelaunch = _autoPostBrowser != null &&
+                               (!reuseExistingAutoPostBrowser || _autoPostBrowserPlatform != platform);
+            if (mustRelaunch)
+            {
+                await _autoPostBrowser.CloseAsync().ConfigureAwait(false);
+                _autoPostBrowser = null;
+            }
+
+            if (_autoPostBrowser == null)
+            {
+                var browser = new BrowserAutomation();
+                _autoPostBrowser = browser;
+                _autoPostBrowserPlatform = platform;
+                await browser.LaunchAsync(
+                    cancellationToken,
+                    logAction,
+                    effectiveProfileName,
+                    profile,
+                    headless: false,
+                    platform: platform).ConfigureAwait(false);
+                logAction?.Invoke(
+                    "Auto Post: đã mở Chrome profile «" + effectiveProfileName + "» (" + platform + ").");
+            }
+
+            if (requireTikTokLogin)
+            {
+                await _autoPostBrowser.EnsureLoggedInAsync(cancellationToken, logAction).ConfigureAwait(false);
+            }
+
+            return _autoPostBrowser;
+        }
+
+        private static string ResolveAutoPostVideoPath(
+            string videoFolder,
+            string explicitVideoPath,
+            Action<string> logAction,
+            string platformLabel,
+            string lockedProfileName,
+            string storageRoot)
+        {
+            ProfileScopedPaths.ValidateAutoPostPathsForProfile(
+                storageRoot,
+                lockedProfileName,
+                videoFolder,
+                explicitVideoPath);
+
+            var videoPath = (explicitVideoPath ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(videoPath) && File.Exists(videoPath))
+            {
+                logAction?.Invoke("Auto Post " + platformLabel + ": dùng file video -> " + Path.GetFileName(videoPath));
+                return videoPath;
+            }
+
+            videoPath = GetFirstVideoFile(videoFolder);
+            if (string.IsNullOrWhiteSpace(videoPath))
+            {
+                throw new InvalidOperationException("No video file found in selected folder.");
+            }
+
+            if (!ProfileScopedPaths.IsPathUnderProfile(storageRoot, lockedProfileName, videoPath))
+            {
+                throw new InvalidOperationException(
+                    "File video đầu tiên trong thư mục không thuộc profile «" +
+                    ProfileScopedPaths.ResolveProfileName(lockedProfileName) + "».");
+            }
+
+            logAction?.Invoke("Auto Post " + platformLabel + ": dùng file video -> " + Path.GetFileName(videoPath));
+            return videoPath;
+        }
+
+        private static async Task<bool> TrySetVideoFileOnPageAsync(
+            IPage page,
+            string videoPath,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string platformLabel)
+        {
+            var selectors = new[]
+            {
+                "input[type='file']",
+                "input[accept*='video']",
+                "input[accept*='mp4']"
+            };
+
+            foreach (var selector in selectors)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var locator = page.Locator(selector);
+                var count = await locator.CountAsync().ConfigureAwait(false);
+                if (count <= 0)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await locator.First.SetInputFilesAsync(videoPath).ConfigureAwait(false);
+                    logAction?.Invoke("Auto Post " + platformLabel + ": đã chọn file video.");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    logAction?.Invoke("Auto Post " + platformLabel + ": thử chọn file (" + selector + "): " + ex.Message);
+                }
+            }
+
+            return false;
+        }
+
+        private static async Task WaitForYouTubeUploadDetailsAsync(
+            IPage page,
+            CancellationToken cancellationToken,
+            Action<string> logAction)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(300);
+            var readySelectors = new[]
+            {
+                "#title-textarea",
+                "ytcp-social-suggestions-textbox#title-textarea",
+                "#textbox[aria-label*='title']"
+            };
+
+            while (DateTime.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var selector in readySelectors)
+                {
+                    var locator = page.Locator(selector).First;
+                    if (await locator.IsVisibleAsync().ConfigureAwait(false))
+                    {
+                        logAction?.Invoke("Auto Post YouTube: form tiêu đề / mô tả đã sẵn sàng.");
+                        return;
+                    }
+                }
+
+                await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
+            }
+
+            throw new TimeoutException("Timeout waiting for YouTube upload details form.");
+        }
+
+        private static async Task FillFirstVisibleTextAsync(
+            IPage page,
+            string[] selectors,
+            string text,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string fieldLabel)
+        {
+            foreach (var selector in selectors)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var locator = page.Locator(selector).First;
+                if (!await locator.IsVisibleAsync().ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await locator.ClickAsync().ConfigureAwait(false);
+                    await page.Keyboard.PressAsync("Control+A").ConfigureAwait(false);
+                    await page.Keyboard.PressAsync("Backspace").ConfigureAwait(false);
+                    await page.Keyboard.TypeAsync(text).ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    logAction?.Invoke("Auto Post: thử điền " + fieldLabel + " (" + selector + "): " + ex.Message);
+                }
+            }
+
+            throw new InvalidOperationException("Could not find input for " + fieldLabel + ".");
+        }
+
+        private static async Task<bool> TryClickFirstVisibleAsync(
+            IPage page,
+            string[] selectors,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string actionLabel)
+        {
+            foreach (var selector in selectors)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var locator = page.Locator(selector).First;
+                if (!await locator.IsVisibleAsync().ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var disabled = await locator.GetAttributeAsync("disabled").ConfigureAwait(false);
+                    var ariaDisabled = await locator.GetAttributeAsync("aria-disabled").ConfigureAwait(false);
+                    if (string.Equals(disabled, "true", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(ariaDisabled, "true", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    await locator.ScrollIntoViewIfNeededAsync().ConfigureAwait(false);
+                    await locator.ClickAsync().ConfigureAwait(false);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    logAction?.Invoke("Auto Post: thử " + actionLabel + " (" + selector + "): " + ex.Message);
+                }
+            }
+
+            return false;
         }
 
         private static readonly string[] CaptionInputSelectors =
@@ -1395,6 +2223,72 @@ namespace tiktok_Omni.Services
             }
 
             return string.Empty;
+        }
+    }
+
+    internal static class WarmupBuildInfo
+    {
+        public const string BuildId = "warmup-shop-fix-v7";
+
+        public static bool IsRunningStaleBuild(out string message)
+        {
+            message = null;
+            try
+            {
+                var exePath = Assembly.GetExecutingAssembly().Location;
+                if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+                {
+                    return false;
+                }
+
+                var exeWriteUtc = File.GetLastWriteTimeUtc(exePath);
+                var procStartUtc = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+                if (exeWriteUtc > procStartUtc.AddSeconds(3))
+                {
+                    message =
+                        "Dang chay phien ban cu trong bo nho. Build moi luc " +
+                        exeWriteUtc.ToLocalTime().ToString("HH:mm:ss") +
+                        ", app mo luc " + procStartUtc.ToLocalTime().ToString("HH:mm:ss") +
+                        ". Dong hoan toan tiktok_Omni roi mo lai (" + BuildId + ").";
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        public static void WriteStartupFingerprint(Action<string> logAction)
+        {
+            try
+            {
+                var exePath = Assembly.GetExecutingAssembly().Location;
+                var exeWriteUtc = File.Exists(exePath) ? File.GetLastWriteTimeUtc(exePath) : DateTime.MinValue;
+                var procStartUtc = Process.GetCurrentProcess().StartTime.ToUniversalTime();
+                var line =
+                    "[App] Warmup build=" + BuildId +
+                    " exeWrite=" + exeWriteUtc.ToLocalTime().ToString("HH:mm:ss") +
+                    " processStart=" + procStartUtc.ToLocalTime().ToString("HH:mm:ss") +
+                    " exe=" + (exePath ?? "n/a");
+                logAction?.Invoke(line);
+                DebugAgentLog.Write(
+                    "BOOT",
+                    "WarmupBuildInfo.WriteStartupFingerprint",
+                    "app started",
+                    new
+                    {
+                        buildId = BuildId,
+                        exePath,
+                        exeWriteUtc = exeWriteUtc.ToString("O"),
+                        processStartUtc = procStartUtc.ToString("O")
+                    },
+                    "post-fix");
+            }
+            catch
+            {
+            }
         }
     }
 

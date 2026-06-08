@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using RestSharp;
+using System.Collections.Generic;
 
 namespace tiktok_Omni.Services
 {
@@ -51,6 +52,24 @@ namespace tiktok_Omni.Services
             double durationSeconds = 0d,
             CancellationToken cancellationToken = default)
         {
+            var parsed = await SubmitVideoFromImageAsync(
+                sourceImageUrl,
+                prompt,
+                veoApiKey,
+                veoEndpoint,
+                durationSeconds,
+                cancellationToken).ConfigureAwait(false);
+            return parsed?.VideoUrl ?? string.Empty;
+        }
+
+        public async Task<VeoAsyncJobResult> SubmitVideoFromImageAsync(
+            string sourceImageUrl,
+            string prompt,
+            string veoApiKey,
+            string veoEndpoint,
+            double durationSeconds = 0d,
+            CancellationToken cancellationToken = default)
+        {
             if (string.IsNullOrWhiteSpace(sourceImageUrl))
             {
                 throw new ArgumentException("Source image URL is required.", nameof(sourceImageUrl));
@@ -75,54 +94,52 @@ namespace tiktok_Omni.Services
             var request = new RestRequest(string.Empty, Method.Post);
             request.AddHeader("Content-Type", "application/json");
             request.AddHeader("Authorization", $"Bearer {veoApiKey}");
-            var body = new System.Collections.Generic.Dictionary<string, object>
+            var body = new Dictionary<string, object>
             {
                 ["prompt"] = prompt,
                 ["sourceImageUrl"] = sourceImageUrl
             };
             if (durationSeconds > 0.1d)
             {
-                // Send both keys to maximize compatibility across Veo-compatible gateways.
                 body["duration"] = durationSeconds;
                 body["durationSeconds"] = durationSeconds;
             }
-            request.AddJsonBody(body);
 
+            request.AddJsonBody(body);
             var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            var json = JObject.Parse(response.Content ?? "{}");
-            return json["videoUrl"]?.ToString()
-                   ?? json["outputVideoUrl"]?.ToString()
-                   ?? json["data"]?["videoUrl"]?.ToString()
-                   ?? json["result"]?["videoUrl"]?.ToString()
-                   ?? string.Empty;
+            return ParseVeoAsyncResponse(response.Content);
         }
 
         public async Task<string> GenerateAudioAsync(
             string script,
-            string lyriaApiKey,
-            string lyriaEndpoint,
-            CancellationToken cancellationToken = default)
+            string ttsApiKey,
+            string ttsEndpoint,
+            CancellationToken cancellationToken = default,
+            string voiceId = null)
         {
             if (string.IsNullOrWhiteSpace(script))
             {
                 throw new ArgumentException("Script is required.", nameof(script));
             }
 
-            if (string.IsNullOrWhiteSpace(lyriaApiKey))
+            if (string.IsNullOrWhiteSpace(ttsApiKey))
             {
-                throw new InvalidOperationException("Lyria API key is required.");
+                throw new InvalidOperationException("TTS API key is required.");
             }
 
-            if (string.IsNullOrWhiteSpace(lyriaEndpoint))
+            if (string.IsNullOrWhiteSpace(ttsEndpoint))
             {
-                throw new InvalidOperationException("Lyria endpoint is required.");
+                throw new InvalidOperationException("TTS endpoint is required.");
             }
 
-            var apiClient = new ApiClient(lyriaEndpoint);
+            var apiClient = new ApiClient(ttsEndpoint);
             var request = new RestRequest(string.Empty, Method.Post);
             request.AddHeader("Content-Type", "application/json");
-            request.AddHeader("Authorization", $"Bearer {lyriaApiKey}");
-            request.AddJsonBody(new { script });
+            request.AddHeader("Authorization", $"Bearer {ttsApiKey}");
+            var body = string.IsNullOrWhiteSpace(voiceId)
+                ? (object)new { script }
+                : new { script, voiceId = voiceId.Trim() };
+            request.AddJsonBody(body);
 
             var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
             var json = JObject.Parse(response.Content ?? "{}");
@@ -137,8 +154,43 @@ namespace tiktok_Omni.Services
             string prompt,
             string veoApiKey,
             string veoEndpoint,
-            System.Collections.Generic.IList<string> referenceImageUrls = null,
+            IList<string> referenceImageUrls = null,
             CancellationToken cancellationToken = default)
+        {
+            var parsed = await SubmitContextImageAsync(
+                sourceImageUrl,
+                prompt,
+                veoApiKey,
+                veoEndpoint,
+                referenceImageUrls,
+                cancellationToken).ConfigureAwait(false);
+            return parsed?.ImageUrl ?? string.Empty;
+        }
+
+        public Task<VeoAsyncJobResult> SubmitContextImageAsync(
+            string sourceImageUrl,
+            string prompt,
+            string veoApiKey,
+            string veoEndpoint,
+            IList<string> referenceImageUrls = null,
+            CancellationToken cancellationToken = default)
+        {
+            return SubmitContextImageInternalAsync(
+                sourceImageUrl,
+                prompt,
+                veoApiKey,
+                veoEndpoint,
+                referenceImageUrls,
+                cancellationToken);
+        }
+
+        private async Task<VeoAsyncJobResult> SubmitContextImageInternalAsync(
+            string sourceImageUrl,
+            string prompt,
+            string veoApiKey,
+            string veoEndpoint,
+            IList<string> referenceImageUrls,
+            CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(sourceImageUrl))
             {
@@ -165,7 +217,7 @@ namespace tiktok_Omni.Services
             var request = new RestRequest(string.Empty, Method.Post);
             request.AddHeader("Content-Type", "application/json");
             request.AddHeader("Authorization", $"Bearer {veoApiKey}");
-            var body = new System.Collections.Generic.Dictionary<string, object>
+            var body = new Dictionary<string, object>
             {
                 ["prompt"] = prompt,
                 ["sourceImageUrl"] = sourceImageUrl
@@ -175,15 +227,119 @@ namespace tiktok_Omni.Services
                 body["referenceImageUrls"] = referenceImageUrls;
                 body["identityReferenceImages"] = referenceImageUrls;
             }
+
             request.AddJsonBody(body);
+            var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            return ParseVeoAsyncResponse(response.Content);
+        }
+
+        public async Task<VeoAsyncJobResult> PollVeoJobAsync(
+            string jobId,
+            string statusPollUrl,
+            string veoApiKey,
+            string veoEndpoint,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(jobId) && string.IsNullOrWhiteSpace(statusPollUrl))
+            {
+                throw new ArgumentException("jobId or statusPollUrl is required.");
+            }
+
+            var pollEndpoint = ResolvePollEndpoint(veoEndpoint, statusPollUrl, jobId);
+            var apiClient = new ApiClient(pollEndpoint);
+            var request = new RestRequest(string.Empty, Method.Get);
+            request.AddHeader("Authorization", $"Bearer {veoApiKey}");
+            if (!string.IsNullOrWhiteSpace(jobId) &&
+                string.IsNullOrWhiteSpace(statusPollUrl))
+            {
+                request.AddQueryParameter("jobId", jobId);
+            }
 
             var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            var json = JObject.Parse(response.Content ?? "{}");
-            return json["imageUrl"]?.ToString()
-                   ?? json["outputImageUrl"]?.ToString()
-                   ?? json["data"]?["imageUrl"]?.ToString()
-                   ?? json["result"]?["imageUrl"]?.ToString()
-                   ?? string.Empty;
+            return ParseVeoJobStatusResponse(response.Content);
+        }
+
+        private static VeoAsyncJobResult ParseVeoAsyncResponse(string jsonText)
+        {
+            var json = JObject.Parse(jsonText ?? "{}");
+            var result = new VeoAsyncJobResult
+            {
+                JobId = FirstString(json, "jobId", "id", "taskId", "operationId", "data.jobId", "result.jobId"),
+                Status = FirstString(json, "status", "state", "data.status", "result.status"),
+                VideoUrl = FirstString(json, "videoUrl", "outputVideoUrl", "data.videoUrl", "result.videoUrl"),
+                ImageUrl = FirstString(json, "imageUrl", "outputImageUrl", "data.imageUrl", "result.imageUrl"),
+                ErrorMessage = FirstString(json, "error", "message", "errorMessage", "data.error"),
+                StatusPollUrl = FirstString(json, "statusUrl", "pollUrl", "statusEndpoint", "data.statusUrl")
+            };
+
+            if (string.IsNullOrWhiteSpace(result.VideoUrl) && string.IsNullOrWhiteSpace(result.ImageUrl))
+            {
+                result.VideoUrl = FirstString(json, "url", "outputUrl", "data.url");
+            }
+
+            return result;
+        }
+
+        private static VeoAsyncJobResult ParseVeoJobStatusResponse(string jsonText)
+        {
+            return ParseVeoAsyncResponse(jsonText);
+        }
+
+        private static string FirstString(JObject json, params string[] paths)
+        {
+            if (json == null)
+            {
+                return string.Empty;
+            }
+
+            foreach (var path in paths)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                if (!path.Contains("."))
+                {
+                    var direct = json[path]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(direct))
+                    {
+                        return direct.Trim();
+                    }
+
+                    continue;
+                }
+
+                var token = json.SelectToken(path);
+                var nested = token?.ToString();
+                if (!string.IsNullOrWhiteSpace(nested))
+                {
+                    return nested.Trim();
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string ResolvePollEndpoint(string veoEndpoint, string statusPollUrl, string jobId)
+        {
+            if (!string.IsNullOrWhiteSpace(statusPollUrl))
+            {
+                return statusPollUrl.Trim();
+            }
+
+            var baseUrl = (veoEndpoint ?? string.Empty).Trim().TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                throw new InvalidOperationException("Veo endpoint is required for polling.");
+            }
+
+            if (baseUrl.IndexOf("/videos", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return baseUrl + "/" + Uri.EscapeDataString(jobId ?? string.Empty);
+            }
+
+            return baseUrl + "/status/" + Uri.EscapeDataString(jobId ?? string.Empty);
         }
 
         private static string ResolveImageEndpoint(string veoEndpoint)

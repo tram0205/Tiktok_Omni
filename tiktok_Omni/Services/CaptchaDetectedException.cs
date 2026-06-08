@@ -19,4 +19,17 @@ namespace tiktok_Omni.Services
         {
         }
     }
+
+    public class ShopVideoGateException : Exception
+    {
+        public ShopVideoGateException()
+            : base("TikTok Shop video is blocked on web; open in the mobile app.")
+        {
+        }
+
+        public ShopVideoGateException(string message)
+            : base(message)
+        {
+        }
+    }
 }

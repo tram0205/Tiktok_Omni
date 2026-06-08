@@ -1,0 +1,14 @@
+{
+  "folders": [
+    {
+      "name": "tiktok_Omni",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/bin": true,
+      "**/obj": true
+    }
+  }
+}

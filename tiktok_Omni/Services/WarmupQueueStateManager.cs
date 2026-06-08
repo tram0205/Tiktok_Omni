@@ -21,7 +21,7 @@ namespace tiktok_Omni.Services
 
             try
             {
-                var json = await Task.Run(() => File.ReadAllText(path)).ConfigureAwait(false);
+                var json = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(json))
                 {
                     return new List<WarmupQueueSnapshotItem>();
@@ -40,7 +40,7 @@ namespace tiktok_Omni.Services
         {
             var safeItems = items == null ? new List<WarmupQueueSnapshotItem>() : new List<WarmupQueueSnapshotItem>(items);
             var json = JsonConvert.SerializeObject(safeItems, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetPath(), json)).ConfigureAwait(false);
+            await Task.Run(() => File.WriteAllText(GetPath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
         }
 
         public async Task<bool> LoadPausedFlagAsync()
@@ -53,7 +53,7 @@ namespace tiktok_Omni.Services
 
             try
             {
-                var json = await Task.Run(() => File.ReadAllText(path)).ConfigureAwait(false);
+                var json = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
                 var state = JsonConvert.DeserializeObject<WarmupQueueRuntimeState>(json ?? string.Empty);
                 return state?.IsPaused ?? false;
             }
@@ -66,7 +66,7 @@ namespace tiktok_Omni.Services
         public async Task SavePausedFlagAsync(bool isPaused)
         {
             var json = JsonConvert.SerializeObject(new WarmupQueueRuntimeState { IsPaused = isPaused }, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetRuntimePath(), json)).ConfigureAwait(false);
+            await Task.Run(() => File.WriteAllText(GetRuntimePath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
         }
 
         private static string GetPath()
