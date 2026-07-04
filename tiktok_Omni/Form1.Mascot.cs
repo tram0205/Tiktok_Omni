@@ -93,7 +93,11 @@ namespace tiktok_Omni
             AddMascotLabeledRow(tbl, 0, "Profile:", () =>
             {
                 cbMascotProfile = new ComboBox { Name = "cbMascotProfile", Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(45, 49, 60), ForeColor = Color.WhiteSmoke };
-                cbMascotProfile.SelectedIndexChanged += (_, __) => LoadMascotAvatarVaultForProfile();
+                cbMascotProfile.SelectedIndexChanged += (_, __) =>
+                {
+                    LoadMascotAvatarVaultForProfile();
+                    LoadMascotIdentityPackForSelectedProfile();
+                };
                 return cbMascotProfile;
             });
 
@@ -219,8 +223,7 @@ namespace tiktok_Omni
         {
             try
             {
-                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-                RefreshMascotProfileCombo(settings);
+                RefreshAllProfileSelectors();
                 LoadMascotAvatarVaultForProfile();
             }
             catch (Exception ex)

@@ -140,6 +140,12 @@ namespace tiktok_Omni.Services
 
             item.ProductName = (item.ProductName ?? string.Empty).Trim();
 
+            item.VideoUrl = (item.VideoUrl ?? string.Empty).Trim();
+
+            item.HookText = (item.HookText ?? string.Empty).Trim();
+
+            item.Hashtags = (item.Hashtags ?? string.Empty).Trim();
+
             item.Price = (item.Price ?? string.Empty).Trim();
 
             item.ImageUrl = (item.ImageUrl ?? string.Empty).Trim();

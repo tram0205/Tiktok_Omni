@@ -16,5 +16,14 @@ namespace tiktok_Omni.Services
 
         /// <summary>Độ dài file MP4 xuất (probe).</summary>
         public double OutputFileDurationSeconds { get; set; }
+
+        /// <summary>Thời lượng clip hook intro AI (giây).</summary>
+        public double HookIntroDurationSeconds { get; set; }
+
+        /// <summary>Thời lượng phần body reup sau lách (giây).</summary>
+        public double BodyDurationSeconds { get; set; }
+
+        /// <summary>Tổng thời lượng = hook intro + body.</summary>
+        public double TotalDurationSeconds { get; set; }
     }
 }

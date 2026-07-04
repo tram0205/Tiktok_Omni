@@ -603,14 +603,9 @@ namespace tiktok_Omni
 
         private void AttachAiRenderProgressPanelToSelectedModePanel()
         {
-            if (pnlAiVideoGenRenderStatusHost != null)
+            if (tabAiVideoGen != null)
             {
-                if (tabAiVideoGen?.Controls.Contains(pnlAiVideoGenRenderStatusHost) == true)
-                {
-                    tabAiVideoGen.Controls.Remove(pnlAiVideoGenRenderStatusHost);
-                }
-
-                pnlAiVideoGenRenderStatusHost.Visible = false;
+                WireAiVideoGenLayout(tabAiVideoGen);
             }
 
             if (grpAiRenderProgress != null)

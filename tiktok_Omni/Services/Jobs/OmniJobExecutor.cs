@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using tiktok_Omni.Models;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Affiliate;
 
@@ -127,6 +128,8 @@ namespace tiktok_Omni.Services.Jobs
                     rankTikTokVideo,
                     mode);
 
+                ui.Log($"[Hunt] «{kw}» — mục tiêu {payload.MaxResultsPerKeyword} video/lưới (thu {collectLimit} ứng viên trước khi chọn top view).");
+
                 var results = await _affiliateHunter.HuntAsync(
                     kw,
                     collectLimit,
@@ -149,42 +152,6 @@ namespace tiktok_Omni.Services.Jobs
                             c.SourceKeyword = kw;
                         }
                     }
-                }
-
-                var huntWindow = TimeSpan.FromDays(7);
-                var freshBatch = new List<AffiliateCandidate>();
-                var skipped = 0;
-                foreach (var c in batch)
-                {
-                    if (c == null)
-                    {
-                        continue;
-                    }
-
-                    var url = (c.VideoUrl ?? string.Empty).Trim();
-                    if (!string.IsNullOrWhiteSpace(url) && _huntHistoryStore.ContainsRecent(url, huntWindow))
-                    {
-                        skipped++;
-                        continue;
-                    }
-
-                    freshBatch.Add(c);
-                    if (!string.IsNullOrWhiteSpace(url))
-                    {
-                        _huntHistoryStore.Record(url, profile, kw);
-                    }
-                }
-
-                if (skipped > 0)
-                {
-                    ui.Log($"[Hunt] Bỏ qua {skipped} URL đã quét trong 7 ngày (hunt_history).");
-                }
-
-                batch = freshBatch;
-                if (batch.Count == 0 && skipped > 0 && (results?.Count ?? 0) > 0)
-                {
-                    batch = results;
-                    ui.Log($"[Hunt] Hiển thị lại {batch.Count} video đã có trong lịch sử lên lưới.");
                 }
 
                 if (rankTikTokVideo && batch.Count > 0 && _rankAffiliateBatch != null)
@@ -301,10 +268,45 @@ namespace tiktok_Omni.Services.Jobs
             ui.OnRenderFinished(true, outputPaths, string.Empty);
         }
 
+        private static readonly Random _autoPostJitterRng = new Random();
+
         private async Task ExecuteAutoPostAsync(OmniJob job, IJobUiBridge ui, CancellationToken cancellationToken)
         {
             var payload = JsonConvert.DeserializeObject<AutoPostJobPayload>(job.PayloadJson ?? "{}")
                             ?? new AutoPostJobPayload();
+
+            // ── 1. Pre-post jitter (schedule-originated jobs only) ────────────────
+            if (payload.ApplyPrePostJitter)
+            {
+                int jitterSec;
+                lock (_autoPostJitterRng) jitterSec = _autoPostJitterRng.Next(30, 91);
+                ui.Log($"[AutoPost] Jitter {jitterSec}s trước «{job.Title}»…");
+                await Task.Delay(TimeSpan.FromSeconds(jitterSec), cancellationToken).ConfigureAwait(false);
+            }
+
+            // ── 2. Browser-busy check (up to 3 × 60 s) ───────────────────────────
+            if (payload.CheckBrowserBusy)
+            {
+                const int maxBusyRetries  = 3;
+                const int busyWaitSeconds = 60;
+                var profileKey = ProfileScopedPaths.ResolveProfileName(
+                    string.IsNullOrWhiteSpace(payload.Profile) ? job.ProfileName : payload.Profile);
+
+                for (int attempt = 0; attempt < maxBusyRetries; attempt++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (BrowserLockService.Instance.GetLock(profileKey).CurrentCount > 0)
+                        break; // browser is free
+
+                    if (attempt == maxBusyRetries - 1)
+                        throw new InvalidOperationException(
+                            $"Profile «{profileKey}» vẫn bận sau {maxBusyRetries} lần chờ ({maxBusyRetries * busyWaitSeconds}s). Job sẽ được retry sau.");
+
+                    ui.Log($"[AutoPost] Profile «{profileKey}» đang bận (lần {attempt + 1}/{maxBusyRetries}) — đợi {busyWaitSeconds}s…");
+                    await Task.Delay(TimeSpan.FromSeconds(busyWaitSeconds), cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             ProfileScopedPaths.SetConfiguredStorageRoot(payload.StorageRootPath);
             var profile = ProfileScopedPaths.ResolveProfileName(payload.Profile);
             ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(payload.StorageRootPath, profile);
@@ -360,19 +362,34 @@ namespace tiktok_Omni.Services.Jobs
                 profile.VideoStyle = payload.VideoStyle.Trim();
             }
 
-            var quoteInput = (payload.QuoteText ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(quoteInput))
+            var content = (payload.Content ?? payload.QuoteText ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(content))
             {
-                throw new InvalidOperationException("Quote trống.");
+                throw new InvalidOperationException("Script trống.");
             }
 
-            ui.Log("[Job] Triết lý/Quote — nick «" + nick + "»: " +
-                   (quoteInput.Length > 60 ? quoteInput.Substring(0, 60) + "…" : quoteInput));
+            ui.Log("[Job] Triết lý — nick «" + nick + "»: " +
+                   (content.Length > 60 ? content.Substring(0, 60) + "…" : content));
 
             try
             {
-                var result = await _philosophyVideoService.GenerateAsync(
-                    quoteInput,
+                var scriptItem = new PhilosophyScriptItem
+                {
+                    Content = content,
+                    Mood = string.IsNullOrWhiteSpace(payload.Mood) ? "reflective" : payload.Mood.Trim(),
+                    Status = "Render"
+                };
+                var renderOptions = new PhilosophyRenderOptions
+                {
+                    ProfileName = nick,
+                    BRollFolder = payload.BRollFolder ?? string.Empty,
+                    MusicFolder = payload.MusicFolder ?? string.Empty,
+                    AmbientFolder = payload.AmbientFolder ?? string.Empty
+                };
+
+                var result = await _philosophyVideoService.GenerateFromScriptAsync(
+                    scriptItem,
+                    renderOptions,
                     settings,
                     profile,
                     ui.Log,

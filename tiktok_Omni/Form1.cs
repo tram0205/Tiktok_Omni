@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
@@ -45,7 +45,6 @@ namespace tiktok_Omni
         private ComboBox cbRunningProfile;
         private Button btnOpenTikTokManualBrowser;
         private Button btnNavApprovalQueue;
-        private Button btnSlideshowOpenApproval;
         private Button btnPhilosophyOpenApproval;
         private Label lblHealthReadiness;
         private Button btnHealthRecheck;
@@ -162,32 +161,12 @@ namespace tiktok_Omni
         private TextBox txtManualProductUrl;
         private Button btnAddManualProduct;
         private CheckBox chkEnableAffiliateLink;
-        private Button btnGenerateGeminiPrompt;
-        private Button btnReviewScriptBeforeRender;
-        private Button btnRunAffiliateDeepVideo;
-        private Button btnRunMascotChannelPipeline;
         private Panel tabMascotStory;
-        private PictureBox pbMascotMouthMarker;
-        private Label lblMascotMouthCoord;
-        private Button btnRunMascotProduction;
         private Button btnRunPhilosophyVideo;
-        private Button btnCopyAiVideoPrompt;
-        private Button btnSaveAiVideoPrompt;
         private Button btnRenderAiVideo;
         private TextBox txtAiVideoGenPrompt;
         private TextBox txtMascotImagePath;
         private TextBox txtMascotChannelTheme;
-        private Button btnBrowseMascotImage;
-        private TextBox txtAvatarIdentityPack;
-        private Button btnSelectAvatarIdentityPack;
-        private Button btnPreviewMascotVariants;
-        private PictureBox pbMascotPreview1;
-        private PictureBox pbMascotPreview2;
-        private PictureBox pbMascotPreview3;
-        private PictureBox pbMascotPreview4;
-        private ContextMenuStrip cmsMascotPreview;
-        private ToolStripMenuItem miRegenerateScene;
-        private int _selectedMascotPreviewSceneIndex = -1;
         private List<string> _mascotPreviewSceneScripts = new List<string>();
         private List<string> _mascotPreviewImagePaths = new List<string>();
         private TextBox txtPhilosophyInput;
@@ -204,9 +183,6 @@ namespace tiktok_Omni
         private RichTextBox rtbPhilosophyLog;
         private Button btnPhilosophyClearLog;
         private DataGridView dgvAiVideoScriptReview;
-        private NumericUpDown numAiTransitionDuration;
-        private NumericUpDown numAiTextSize;
-        private NumericUpDown numAiMusicVolume;
         private Panel pnlAiVideoGenStickyHost;
         private Panel pnlAiVideoGenProductArea;
         private Panel pnlAffiliateDeepStoryboardHost;
@@ -223,7 +199,6 @@ namespace tiktok_Omni
         private Panel pnlAffiliateDeepPreviewPromptHost;
         private Panel pnlAffiliateDeepPreviewProgressHost;
         private Label lblAffiliateDeepSectionTitle;
-        private Button btnAffiliateDeepOpenOutput;
         private bool _affiliateDeepRootWired;
         private TableLayoutPanel tblAiVideoGenRoot;
         private Panel pnlAiVideoGenRenderStatusHost;
@@ -245,7 +220,6 @@ namespace tiktok_Omni
         private CancellationTokenSource _autoPostCancellation;
         private const int AiVideoGenRenderStatusHeight = 132;
         private readonly object _sessionLogSync = new object();
-        private ComboBox cbGeminiStyleTemplate;
         private CheckBox chkReupUseVisualHookSfx;
         private TextBox txtReupVisualHookSfx;
         private Button btnBrowseReupVisualHookSfx;
@@ -287,10 +261,6 @@ namespace tiktok_Omni
         private Button btnPushToAiVideoGen;
         private Button btnDownloadSelectedAffiliate;
         private Button btnAffiliateDeepDive;
-        private Button btnAffiliateGenerateScript;
-        private Button btnAffiliateEditScript;
-        private Button btnDeepGenerateScript;
-        private Button btnDeepEditScript;
         private CheckBox chkAffiliateAutoEnrich;
         private Label lblAffiliateEnrichStatus;
         private LinkLabel lnkAffiliateDownloadFolder;
@@ -1733,120 +1703,6 @@ namespace tiktok_Omni
             LogVideoReup($"Video reup: đã xóa {items.Count} dòng (Delete).");
         }
 
-        private void DgvVideoReupInput_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
-        {
-            if (dgvVideoReupInput?.Columns == null || dgvVideoReupInput.Columns.Count == 0)
-            {
-                return;
-            }
-
-            dgvVideoReupInput.EnableHeadersVisualStyles = false;
-            dgvVideoReupInput.ColumnHeadersHeight = AppGridHeaderHeight;
-            dgvVideoReupInput.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            dgvVideoReupInput.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            dgvVideoReupInput.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
-            dgvVideoReupInput.RowTemplate.Height = 30;
-            dgvVideoReupInput.DefaultCellStyle.Font = AppInputFont;
-            ApplyAppGridHeaderChrome(dgvVideoReupInput);
-
-            foreach (DataGridViewColumn col in dgvVideoReupInput.Columns)
-            {
-                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                col.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
-                col.SortMode = DataGridViewColumnSortMode.NotSortable;
-
-                var name = col.DataPropertyName ?? string.Empty;
-                var editable = string.Equals(name, "VideoUrl", StringComparison.OrdinalIgnoreCase) ||
-                               string.Equals(name, "ReupHookDraft", StringComparison.OrdinalIgnoreCase);
-                col.ReadOnly = !editable;
-
-                if (string.Equals(name, "ProductName", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "Sản phẩm";
-                    col.ToolTipText = "Tên dòng — dùng đặt tên file MP4 khi xuất.";
-                    col.FillWeight = 68f;
-                    col.MinimumWidth = 64;
-                }
-                else if (string.Equals(name, "VideoUrl", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "URL video";
-                    col.ToolTipText = "F2 hoặc double-click để sửa trực tiếp trong bảng; hoặc dán vào ô «URL video» bên dưới. Rời ô / Enter để tải qua TikWM.";
-                    col.FillWeight = 88f;
-                    col.MinimumWidth = 72;
-                }
-                else if (string.Equals(name, "ReupHookDraft", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "Hook (4–7s)";
-                    col.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
-                    col.ToolTipText = "Sửa tại đây (F2) hoặc bấm «Gemini: tạo hook» — kết quả ghi vào đúng dòng đang chọn; Voiceover / Render dùng hook của dòng đó.";
-                    col.FillWeight = 110f;
-                    col.MinimumWidth = 120;
-                }
-                else if (string.Equals(name, "Hashtags", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "Hashtag";
-                    col.ToolTipText = "Hashtag affiliate — đưa vào ngữ cảnh Gemini (hook / nhạc).";
-                    col.FillWeight = 38f;
-                    col.MinimumWidth = 52;
-                }
-                else if (string.Equals(name, "VideoScript", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "Phân tích";
-                    col.ToolTipText = "Deep dive / script — ngữ cảnh nội dung cho Gemini khi remix.";
-                    col.FillWeight = 78f;
-                    col.MinimumWidth = 72;
-                }
-                else if (string.Equals(name, "LastRemixOutputPath", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "MP4 remix";
-                    col.ToolTipText = "Đường dẫn file video reup đã xuất (cắt đầu/đuôi, lật, hook voiceover + nhạc).";
-                    col.FillWeight = 72f;
-                    col.MinimumWidth = 72;
-                }
-                else if (string.Equals(name, "RemixStatus", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "Trạng thái remix";
-                    col.ToolTipText = "Trạng thái lần remix gần nhất: Đang xử lý, Xong hoặc Lỗi.";
-                    col.FillWeight = 34f;
-                    col.MinimumWidth = 96;
-                }
-                else if (string.Equals(name, "ProfileName", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "Profile";
-                    col.FillWeight = 16f;
-                    col.MinimumWidth = 64;
-                }
-                else if (string.Equals(name, "RemixLastError", StringComparison.OrdinalIgnoreCase))
-                {
-                    col.HeaderText = "Lỗi";
-                    col.ToolTipText = "Thông báo lỗi remix (nếu có). Rê chuột lên ô để xem đầy đủ nếu bị cắt.";
-                    col.FillWeight = 48f;
-                    col.MinimumWidth = 56;
-                }
-            }
-
-            void SetDisplayIndex(string dataProperty, int displayIndex)
-            {
-                foreach (DataGridViewColumn c in dgvVideoReupInput.Columns)
-                {
-                    if (string.Equals(c.DataPropertyName, dataProperty, StringComparison.OrdinalIgnoreCase))
-                    {
-                        c.DisplayIndex = displayIndex;
-                        return;
-                    }
-                }
-            }
-
-            SetDisplayIndex("ProfileName", 0);
-            SetDisplayIndex("ProductName", 1);
-            SetDisplayIndex("VideoUrl", 2);
-            SetDisplayIndex("ReupHookDraft", 3);
-            SetDisplayIndex("Hashtags", 4);
-            SetDisplayIndex("VideoScript", 5);
-            SetDisplayIndex("LastRemixOutputPath", 6);
-            SetDisplayIndex("RemixStatus", 7);
-            SetDisplayIndex("RemixLastError", 8);
-        }
 
         /// <summary>Render/hook/TTS — cần FFmpeg + API + storage.</summary>
         private void SetVideoReupPipelineControlsEnabled(bool pipelineReady)
@@ -2933,6 +2789,7 @@ namespace tiktok_Omni
                     row,
                     settings,
                     _geminiService,
+                    _affiliateHunter,
                     LogVideoReup,
                     CancellationToken.None).ConfigureAwait(true);
 
@@ -3118,6 +2975,7 @@ namespace tiktok_Omni
                     row,
                     settings,
                     _geminiService,
+                    _affiliateHunter,
                     LogVideoReup,
                     CancellationToken.None).ConfigureAwait(true);
                 await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
@@ -4783,9 +4641,10 @@ namespace tiktok_Omni
             {
                 Log("Caption Gemini: đang tạo caption...");
                 var styleKey = GetSelectedAutoPostCaptionStyleKey();
-                var text = await _geminiService.GenerateTikTokCaptionFromVideoAsync(
+                var text = await _geminiService.GenerateOmnichannelCaptionAsync(
                     explicitPath,
                     styleKey,
+                    "TikTok",
                     settings.AiProvider,
                     settings.AiApiKey,
                     settings.AiModel,
@@ -4831,9 +4690,10 @@ namespace tiktok_Omni
             {
                 Log("Caption Facebook (Gemini): đang tạo...");
                 var styleKey = GetSelectedAutoPostCaptionStyleKey();
-                var text = await _geminiService.GenerateTikTokCaptionFromVideoAsync(
+                var text = await _geminiService.GenerateOmnichannelCaptionAsync(
                     explicitPath,
                     styleKey,
+                    "Facebook",
                     settings.AiProvider,
                     settings.AiApiKey,
                     settings.AiModel,
@@ -4879,9 +4739,10 @@ namespace tiktok_Omni
             {
                 Log("YouTube SEO (Gemini): đang tạo tiêu đề & mô tả...");
                 var styleKey = GetSelectedAutoPostCaptionStyleKey();
-                var text = await _geminiService.GenerateTikTokCaptionFromVideoAsync(
+                var text = await _geminiService.GenerateOmnichannelCaptionAsync(
                     explicitPath,
                     styleKey,
+                    "YouTube",
                     settings.AiProvider,
                     settings.AiApiKey,
                     settings.AiModel,

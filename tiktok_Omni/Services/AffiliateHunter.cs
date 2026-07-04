@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using tiktok_Omni.Helpers;
 using tiktok_Omni.Services.Affiliate;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -233,6 +234,7 @@ namespace tiktok_Omni.Services
             string runningProfileName)
         {
             return BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(runningProfileName),
                 ct => HuntConsumerShopCoreAsync(
                     keywords,
                     maxResults,
@@ -241,6 +243,19 @@ namespace tiktok_Omni.Services
                     configManager,
                     runningProfileName),
                 cancellationToken);
+        }
+
+        public async Task<List<AffiliateCandidate>> HuntWithCookieAsync(string keyword, string cookie)
+        {
+            var service = new TikTokApiService();
+            try
+            {
+                return await service.SearchProductsAsync(keyword, cookie).ConfigureAwait(false);
+            }
+            catch
+            {
+                throw;
+            }
         }
 
         private const string MobileShopUserAgent =
@@ -686,6 +701,34 @@ namespace tiktok_Omni.Services
                     runningProfileName).ConfigureAwait(false);
             }
 
+            AppSettings huntSettings = null;
+            if (configManager != null)
+            {
+                huntSettings = await configManager.LoadAsync().ConfigureAwait(false);
+            }
+
+            if (ShouldHuntTikTokVideoViaRapidApi(huntSettings))
+            {
+                try
+                {
+                    return await HuntVideoViaRapidApiAsync(
+                        keywords,
+                        maxResults,
+                        huntSettings,
+                        cancellationToken,
+                        logAction,
+                        runningProfileName).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (huntSettings?.AffiliateTikTokApiFallbackBrowser ?? true)
+                {
+                    logAction?.Invoke($"[Affiliate] RapidAPI lỗi ({ex.Message}) — chuyển sang Playwright…");
+                }
+            }
+            else if (IsRapidApiHuntMode(huntSettings) && string.IsNullOrWhiteSpace(huntSettings?.TikTokRapidApiKey))
+            {
+                logAction?.Invoke("[Affiliate] Chế độ RapidAPI nhưng chưa có key — dùng Playwright.");
+            }
+
             var browser = new BrowserAutomation();
             var results = new List<AffiliateCandidate>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -836,6 +879,54 @@ namespace tiktok_Omni.Services
             }
         }
 
+        private static bool IsRapidApiHuntMode(AppSettings settings) =>
+            settings != null &&
+            string.Equals(
+                (settings.AffiliateTikTokVideoHuntMode ?? string.Empty).Trim(),
+                TikTokVideoHuntModes.RapidApi,
+                StringComparison.OrdinalIgnoreCase);
+
+        private static bool ShouldHuntTikTokVideoViaRapidApi(AppSettings settings) =>
+            IsRapidApiHuntMode(settings) && !string.IsNullOrWhiteSpace(settings.TikTokRapidApiKey);
+
+        private async Task<List<AffiliateCandidate>> HuntVideoViaRapidApiAsync(
+            string keywords,
+            int maxResults,
+            AppSettings settings,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string runningProfileName)
+        {
+            var profile = ProfileScopedPaths.ResolveProfileName(runningProfileName);
+            logAction?.Invoke($"[Affiliate] RapidAPI «{keywords}» — thu tối đa {maxResults} video, giữ top view/trend…");
+
+            var service = new TikTokApiService();
+            var results = await service.SearchVideosAsync(
+                keywords,
+                maxResults,
+                settings.TikTokRapidApiKey,
+                settings.TikTokRapidApiHost,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
+
+            foreach (var c in results ?? new List<AffiliateCandidate>())
+            {
+                if (c == null)
+                {
+                    continue;
+                }
+
+                c.ProfileName = profile;
+                if (string.IsNullOrWhiteSpace(c.SourcePlatform))
+                {
+                    c.SourcePlatform = AffiliateSourceIds.TikTok;
+                }
+            }
+
+            logAction?.Invoke($"[Affiliate] RapidAPI hoàn tất: {results?.Count ?? 0} video cho «{keywords}» @ {profile}.");
+            return results ?? new List<AffiliateCandidate>();
+        }
+
         private async Task<List<AffiliateCandidate>> HuntShopViaSeleniumAsync(
             string keywords,
             int maxResults,
@@ -873,6 +964,7 @@ namespace tiktok_Omni.Services
             logAction?.Invoke("[Shop/Selenium] Đang chờ lượt Chrome (đóng Chrome khác nếu chờ quá 2 phút)…");
 
             return await BrowserLock.WithLockAsync(
+                    ProfileScopedPaths.ResolveProfileName(effectiveProfileName),
                     ct => Task.Run(
                         () => HuntShopViaSeleniumSync(
                             keywords,
@@ -3027,31 +3119,31 @@ return bestScore >= 20 ? best : null;") as IWebElement;
             foreach (var c in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                sb.Append(EscapeCsv(c.SourceKeyword)).Append(',');
-                sb.Append(EscapeCsv(c.ProductName)).Append(',');
-                sb.Append(EscapeCsv(c.Category)).Append(',');
-                sb.Append(EscapeCsv(c.Price)).Append(',');
-                sb.Append(EscapeCsv(c.ImageUrl)).Append(',');
-                sb.Append(EscapeCsv(c.CommissionRate)).Append(',');
-                sb.Append(EscapeCsv(c.Creator)).Append(',');
-                sb.Append(EscapeCsv(c.VideoUrl)).Append(',');
-                sb.Append(EscapeCsv(c.ProfileUrl)).Append(',');
-                sb.Append(EscapeCsv(c.Hashtags)).Append(',');
-                sb.Append(EscapeCsv(c.LinkedProduct)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.SourceKeyword)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.ProductName)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.Category)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.Price)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.ImageUrl)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.CommissionRate)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.Creator)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.VideoUrl)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.ProfileUrl)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.Hashtags)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.LinkedProduct)).Append(',');
                 sb.Append(c.PlayCount).Append(',');
                 sb.Append(c.LikeCount).Append(',');
                 sb.Append(c.CommentCount).Append(',');
                 sb.Append(c.ShareCount).Append(',');
                 sb.Append(c.CollectCount).Append(',');
                 sb.Append(c.DurationSeconds).Append(',');
-                sb.Append(EscapeCsv(c.CreateTimeUtc == DateTime.MinValue ? string.Empty : c.CreateTimeUtc.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',');
-                sb.Append(EscapeCsv(c.MetricsCapturedAtUtc == DateTime.MinValue ? string.Empty : c.MetricsCapturedAtUtc.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',');
-                sb.Append(EscapeCsv(c.VideoScript)).Append(',');
-                sb.Append(EscapeCsv(c.VoiceoverTranscript)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.CreateTimeUtc == DateTime.MinValue ? string.Empty : c.CreateTimeUtc.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.MetricsCapturedAtUtc == DateTime.MinValue ? string.Empty : c.MetricsCapturedAtUtc.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.VideoScript)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.VoiceoverTranscript)).Append(',');
                 sb.Append(c.SafetyScore).Append(',');
-                sb.Append(EscapeCsv(c.SafetyRiskSummary)).Append(',');
-                sb.Append(EscapeCsv(c.LastDeepDiveError)).Append(',');
-                sb.Append(EscapeCsv(c.LastMetricsError)).AppendLine();
+                sb.Append(TextHelper.EscapeCsv(c.SafetyRiskSummary)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.LastDeepDiveError)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.LastMetricsError)).AppendLine();
             }
 
             using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.Read))
@@ -3294,18 +3386,6 @@ return bestScore >= 20 ? best : null;") as IWebElement;
             }
 
             return url.Substring(start, end - start);
-        }
-
-        private static string EscapeCsv(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return string.Empty;
-            }
-
-            var needsQuotes = value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0;
-            var escaped = value.Replace("\"", "\"\"");
-            return needsQuotes ? "\"" + escaped + "\"" : escaped;
         }
 
         private static async Task LogShopDiagnosticsAsync(BrowserAutomation browserPageWrapper, Action<string> logAction)

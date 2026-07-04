@@ -8,8 +8,6 @@ namespace tiktok_Omni
 {
     public partial class Form1
     {
-        private CheckBox chkUseMultiVoiceNarration;
-
         private static AiVideoGenInputItem CloneAiVideoGenItem(AiVideoGenInputItem source)
         {
             if (source == null)
@@ -22,6 +20,9 @@ namespace tiktok_Omni
                 ProfileName = source.ProfileName ?? string.Empty,
                 SourceKeyword = source.SourceKeyword ?? string.Empty,
                 ProductName = source.ProductName ?? string.Empty,
+                VideoUrl = source.VideoUrl ?? string.Empty,
+                HookText = source.HookText ?? string.Empty,
+                Hashtags = source.Hashtags ?? string.Empty,
                 Price = source.Price ?? string.Empty,
                 ImageUrl = source.ImageUrl ?? string.Empty,
                 AffiliateLink = source.AffiliateLink ?? string.Empty,
@@ -117,6 +118,9 @@ namespace tiktok_Omni
                 ProfileName = ProfileScopedPaths.ResolveProfileFromCandidate(item),
                 SourceKeyword = (item?.SourceKeyword ?? string.Empty).Trim(),
                 ProductName = productName,
+                VideoUrl = (item?.VideoUrl ?? string.Empty).Trim(),
+                HookText = (item?.VoiceoverTranscript ?? string.Empty).Trim(),
+                Hashtags = (item?.Hashtags ?? string.Empty).Trim(),
                 Price = string.IsNullOrWhiteSpace(item?.Price) ? "N/A" : item.Price.Trim(),
                 ImageUrl = (item?.ImageUrl ?? string.Empty).Trim(),
                 AffiliateLink = link,

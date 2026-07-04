@@ -9,6 +9,9 @@ namespace tiktok_Omni.Services
         public string ProfileName { get; set; } = string.Empty;
         public string SourceKeyword { get; set; } = string.Empty;
         public string ProductName { get; set; } = string.Empty;
+        public string VideoUrl { get; set; } = string.Empty;
+        public string HookText { get; set; } = string.Empty;
+        public string Hashtags { get; set; } = string.Empty;
         public string Price { get; set; } = string.Empty;
         public string ImageUrl { get; set; } = string.Empty;
         public string AffiliateLink { get; set; } = string.Empty;

@@ -10,6 +10,9 @@ namespace tiktok_Omni.Services
         public string ErrorMessage { get; set; } = string.Empty;
         public string StatusPollUrl { get; set; } = string.Empty;
 
+        /// <summary>Endpoint nguồn dùng khi poll (nếu statusPollUrl trống).</summary>
+        public string SourceEndpoint { get; set; } = string.Empty;
+
         public bool IsTerminalSuccess =>
             HasMediaUrl && IsSuccessStatus(Status);
 
@@ -28,7 +31,8 @@ namespace tiktok_Omni.Services
         public static bool IsProcessingStatus(string status)
         {
             var s = (status ?? string.Empty).Trim().ToLowerInvariant();
-            return s == "processing" || s == "pending" || s == "queued" || s == "running" || s == "in_progress";
+            return s == "submitted" || s == "processing" || s == "pending" || s == "queued" || s == "running"
+                   || s == "in_progress" || s == "in_queue";
         }
 
         public static bool IsFailedStatus(string status)

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using tiktok_Omni.Services;
+using tiktok_Omni.Services.Affiliate;
 
 namespace tiktok_Omni
 {
@@ -63,6 +64,13 @@ namespace tiktok_Omni
                     return pb.CompareTo(pa);
                 }
 
+                var ta = a?.CreateTimeUtc ?? DateTime.MinValue;
+                var tb = b?.CreateTimeUtc ?? DateTime.MinValue;
+                if (tb != ta)
+                {
+                    return tb.CompareTo(ta);
+                }
+
                 var sa = a?.SafetyScore ?? 0;
                 var sb = b?.SafetyScore ?? 0;
                 if (sb != sa)
@@ -106,6 +114,11 @@ namespace tiktok_Omni
                 var c = working[i];
                 var url = (c?.VideoUrl ?? string.Empty).Trim();
                 if (string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                if (c.PlayCount > 0 && c.MetricsCapturedAtUtc != DateTime.MinValue)
                 {
                     continue;
                 }
@@ -287,6 +300,9 @@ namespace tiktok_Omni
                             settings.AffiliateHuntBufferMultiplier = (double)numAffiliateBufferMultiplier.Value;
                         }
 
+                        settings.AffiliateTikTokVideoHuntMode = ResolveAffiliateTikTokHuntModeFromUi();
+                        settings.AffiliateTikTokApiFallbackBrowser = chkAffiliateTikTokApiFallbackBrowser?.Checked ?? true;
+
                         await _configManager.SaveAsync(settings).ConfigureAwait(true);
                     }
                     catch (Exception ex)
@@ -304,6 +320,49 @@ namespace tiktok_Omni
         {
             UpdateAffiliateRankControlsEnabledState();
             ScheduleAffiliateHuntPrefsSave();
+        }
+
+        private void cbAffiliateTikTokHuntMode_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (chkAffiliateTikTokApiFallbackBrowser != null && !chkAffiliateTikTokApiFallbackBrowser.IsDisposed)
+            {
+                var apiMode = string.Equals(
+                    cbAffiliateTikTokHuntMode?.SelectedItem?.ToString(),
+                    "RapidAPI",
+                    StringComparison.OrdinalIgnoreCase);
+                chkAffiliateTikTokApiFallbackBrowser.Enabled = apiMode;
+            }
+
+            ScheduleAffiliateHuntPrefsSave();
+        }
+
+        private static string ResolveAffiliateTikTokHuntModeFromUi(ComboBox combo)
+        {
+            var label = combo?.SelectedItem?.ToString() ?? string.Empty;
+            return string.Equals(label, "RapidAPI", StringComparison.OrdinalIgnoreCase)
+                ? TikTokVideoHuntModes.RapidApi
+                : TikTokVideoHuntModes.Browser;
+        }
+
+        private string ResolveAffiliateTikTokHuntModeFromUi() =>
+            ResolveAffiliateTikTokHuntModeFromUi(cbAffiliateTikTokHuntMode);
+
+        private void ApplyAffiliateTikTokHuntModeToUi(string mode)
+        {
+            if (cbAffiliateTikTokHuntMode == null || cbAffiliateTikTokHuntMode.IsDisposed)
+            {
+                return;
+            }
+
+            var api = string.Equals(
+                (mode ?? string.Empty).Trim(),
+                TikTokVideoHuntModes.RapidApi,
+                StringComparison.OrdinalIgnoreCase);
+            cbAffiliateTikTokHuntMode.SelectedIndex = api ? 1 : 0;
+            if (chkAffiliateTikTokApiFallbackBrowser != null && !chkAffiliateTikTokApiFallbackBrowser.IsDisposed)
+            {
+                chkAffiliateTikTokApiFallbackBrowser.Enabled = api;
+            }
         }
 
         private void numAffiliateBufferMultiplier_ValueChanged(object sender, EventArgs e)
@@ -599,6 +658,22 @@ namespace tiktok_Omni
             }
             finally
             {
+                try
+                {
+                    if (InvokeRequired)
+                    {
+                        BeginInvoke(new Action(SaveAffiliateHuntResultsToDisk));
+                    }
+                    else
+                    {
+                        SaveAffiliateHuntResultsToDisk();
+                    }
+                }
+                catch
+                {
+                    // form closed
+                }
+
                 _affiliateAutoEnrichRunning = false;
 
                 // Tắt Stop button nếu không còn việc gì đang chạy (Hunt đã xong rồi).

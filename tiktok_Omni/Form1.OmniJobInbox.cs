@@ -11,17 +11,7 @@ namespace tiktok_Omni
 
         private GeminiStyleTemplate GetSelectedGeminiStyleTemplate()
         {
-            if (cbGeminiStyleTemplate?.SelectedItem is GeminiStyleTemplate direct)
-            {
-                return direct;
-            }
-
-            if (cbGeminiStyleTemplate?.SelectedItem != null)
-            {
-                return GeminiStyleTemplateExtensions.Parse(cbGeminiStyleTemplate.SelectedItem.ToString());
-            }
-
-            return GeminiStyleTemplate.Storytelling;
+            return _aiVideoGenControls?.GetSelectedGeminiStyleTemplate() ?? GeminiStyleTemplate.Storytelling;
         }
 
         private string GetReupVisualHookSfxPath()
@@ -43,8 +33,16 @@ namespace tiktok_Omni
                 return;
             }
 
-            row.UseVisualHookSfx = IsReupVisualHookSfxEnabled();
-            row.VisualHookSfxPath = GetReupVisualHookSfxPath();
+            if (!row.UseVisualHookSfx)
+            {
+                return;
+            }
+
+            var path = GetReupVisualHookSfxPath();
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                row.VisualHookSfxPath = path;
+            }
         }
 
         private void SetAutoPostInboxFromJob(OmniJob source, string affiliateLink, string productId)

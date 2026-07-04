@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
+using tiktok_Omni.Helpers;
 using tiktok_Omni.Services;
 
 namespace tiktok_Omni
@@ -61,7 +62,7 @@ namespace tiktok_Omni
                 Orientation = Orientation.Horizontal,
                 FixedPanel = FixedPanel.Panel1,
                 SplitterWidth = 6,
-                Panel1MinSize = 200,
+                Panel1MinSize = 120,
                 Panel2MinSize = 100
             };
             split.Panel1.AutoScroll = true;
@@ -75,14 +76,9 @@ namespace tiktok_Omni
             var pnlHuntProductStatus = BuildHuntProductStatusPanel();
             pnlHuntProductStatus.Dock = DockStyle.Bottom;
 
-            var flpActions = BuildHuntProductActionsPanel();
-            flpActions.Dock = DockStyle.Bottom;
-            flpActions.Height = AffiliateJellyButtonMinHeight + 10;
-
             tab.Controls.Add(split);
             tab.Controls.Add(pnlHuntProductFooter);
             tab.Controls.Add(pnlHuntProductStatus);
-            tab.Controls.Add(flpActions);
 
             void SyncSplit()
             {
@@ -157,7 +153,7 @@ namespace tiktok_Omni
                 ForeColor = Color.FromArgb(160, 210, 175),
                 BackColor = Color.Transparent,
                 Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point),
-                Text = "Sẵn sàng — bấm «Quét sản phẩm» để bắt đầu."
+                Text = "Sẵn sàng — nhập từ khoá, bấm «Săn SP Affiliate» (TikTok chỉ qua RapidAPI key tab Cài đặt, lọc HH > 5%)."
             };
 
             pbHuntProductScan = new ProgressBar
@@ -372,28 +368,50 @@ namespace tiktok_Omni
                 BackColor = Color.Transparent
             };
 
-            var grpAuto = new GroupBox
+            var grp = new GroupBox
             {
-                Name = "grpHuntProductAuto",
-                Text = "Săn tự động",
+                Name = "grpHuntProductScan",
+                Text = "Săn link sản phẩm",
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ForeColor = Color.Gainsboro,
                 Padding = new Padding(10, 6, 10, 10),
-                Margin = new Padding(0, 0, 0, 8)
+                Margin = Padding.Empty
             };
 
-            var tblAuto = new TableLayoutPanel
+            var tbl = new TableLayoutPanel
             {
-                Name = "tblHuntProductAuto",
+                Name = "tblHuntProductScan",
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
                 RowCount = 0
             };
-            tblAuto.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+            EnsureHuntProductActionButtonsCreated();
+
+            txtHuntProductManualLink = new TextBox
+            {
+                Name = "txtHuntProductManualLink",
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(45, 49, 60),
+                ForeColor = Color.Gainsboro
+            };
+            StyleHuntProductEditor(txtHuntProductManualLink, font: HuntProductManualLinkFont);
+            ApplyTextBoxPlaceholder(txtHuntProductManualLink, "https://…");
+
+            btnHuntProductAddManual = CreateAffiliateJellyButton("btnHuntProductAddManual", "Thêm dòng", AffiliateTintPush);
+            btnHuntProductAddManual.Click += btnHuntProductAddManual_Click;
+            AddHuntProductManualLinkRow(
+                tbl,
+                tbl.RowCount,
+                "Link:",
+                txtHuntProductManualLink,
+                btnHuntProductAddManual,
+                btnHuntProductDeleteRow);
 
             txtHuntProductKeyword = new TextBox
             {
@@ -403,30 +421,31 @@ namespace tiktok_Omni
                 ForeColor = Color.Gainsboro
             };
             StyleHuntProductEditor(txtHuntProductKeyword);
-            ApplyTextBoxPlaceholder(txtHuntProductKeyword, "Nhập từ khoá sản phẩm…");
+            ApplyTextBoxPlaceholder(txtHuntProductKeyword, "Từ khoá sản phẩm…");
 
             var flpPlatforms = new FlowLayoutPanel
             {
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 WrapContents = false,
-                FlowDirection = FlowDirection.LeftToRight
+                FlowDirection = FlowDirection.LeftToRight,
+                Margin = new Padding(0, 4, 0, 4)
             };
             chkHuntProductTikTok = new CheckBox
             {
                 Name = "chkHuntProductTikTok",
-                Text = "TikTok Shop (tìm như người mua)",
+                Text = "TikTok",
                 Checked = true,
                 AutoSize = true,
                 ForeColor = Color.Gainsboro,
                 Font = HuntProductFieldFont,
-                Margin = new Padding(0, 0, 16, 0)
+                Margin = new Padding(0, 0, 10, 0)
             };
             chkHuntProductShopee = new CheckBox
             {
                 Name = "chkHuntProductShopee",
                 Text = "Shopee",
-                Checked = true,
+                Checked = false,
                 AutoSize = true,
                 ForeColor = Color.Gainsboro,
                 Font = HuntProductFieldFont
@@ -444,15 +463,6 @@ namespace tiktok_Omni
                 ForeColor = Color.Gainsboro
             };
             StyleHuntProductEditor(numHuntProductMaxResults, (int)HuntProductMaxResultsWidth);
-            AddHuntProductFilterTripleRow(
-                tblAuto,
-                tblAuto.RowCount,
-                "Từ khoá:",
-                txtHuntProductKeyword,
-                "Nền tảng:",
-                flpPlatforms,
-                "Số kết quả:",
-                numHuntProductMaxResults);
 
             numHuntProductMinSales = new NumericUpDown
             {
@@ -464,7 +474,8 @@ namespace tiktok_Omni
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.Gainsboro
             };
-            StyleHuntProductEditor(numHuntProductMinSales, (int)HuntProductNumericEditorWidth);
+            StyleHuntProductEditor(numHuntProductMinSales, 88);
+
             numHuntProductMinRating = new NumericUpDown
             {
                 Name = "numHuntProductMinRating",
@@ -476,14 +487,7 @@ namespace tiktok_Omni
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.Gainsboro
             };
-            StyleHuntProductEditor(numHuntProductMinRating, (int)HuntProductNumericEditorWidth);
-            AddHuntProductFilterPairRow(
-                tblAuto,
-                tblAuto.RowCount,
-                "Lượt bán tối thiểu (0 = bỏ qua):",
-                numHuntProductMinSales,
-                "Điểm đánh giá tối thiểu (0 = bỏ qua):",
-                numHuntProductMinRating);
+            StyleHuntProductEditor(numHuntProductMinRating, 56);
 
             cbHuntProductProfile = new ComboBox
             {
@@ -492,56 +496,172 @@ namespace tiktok_Omni
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.Gainsboro,
                 FlatStyle = FlatStyle.Flat,
-                Width = 280
+                Width = 140
             };
-            StyleHuntProductEditor(cbHuntProductProfile, 280);
+            StyleHuntProductEditor(cbHuntProductProfile, 140);
             cbHuntProductProfile.Items.Add("default");
             cbHuntProductProfile.SelectedIndex = 0;
-            AddHuntProductProfileRow(tblAuto, tblAuto.RowCount, cbHuntProductProfile);
 
-            grpAuto.Controls.Add(tblAuto);
-            host.Controls.Add(grpAuto);
+            AddHuntProductScanCriteriaRow(
+                tbl,
+                tbl.RowCount,
+                txtHuntProductKeyword,
+                flpPlatforms,
+                numHuntProductMaxResults,
+                numHuntProductMinSales,
+                numHuntProductMinRating,
+                cbHuntProductProfile);
+            AddHuntProductMainActionsRow(tbl, tbl.RowCount);
 
-            var grpManual = new GroupBox
-            {
-                Name = "grpHuntProductManual",
-                Text = "Nhập thủ công",
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ForeColor = Color.Gainsboro,
-                Padding = new Padding(10, 6, 10, 10),
-                Margin = Padding.Empty
-            };
-
-            var tblManual = new TableLayoutPanel
-            {
-                Name = "tblHuntProductManual",
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1,
-                RowCount = 0
-            };
-            tblManual.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-            txtHuntProductManualLink = new TextBox
-            {
-                Name = "txtHuntProductManualLink",
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.Gainsboro
-            };
-            StyleHuntProductEditor(txtHuntProductManualLink, font: HuntProductManualLinkFont);
-            ApplyTextBoxPlaceholder(txtHuntProductManualLink, "https://…");
-
-            btnHuntProductAddManual = CreateAffiliateJellyButton("btnHuntProductAddManual", "Thêm dòng", AffiliateTintPush);
-            btnHuntProductAddManual.Click += btnHuntProductAddManual_Click;
-            AddHuntProductManualLinkRow(tblManual, tblManual.RowCount, "Link sản phẩm:", txtHuntProductManualLink, btnHuntProductAddManual);
-
-            grpManual.Controls.Add(tblManual);
-            host.Controls.Add(grpManual);
+            grp.Controls.Add(tbl);
+            host.Controls.Add(grp);
             return host;
+        }
+
+        private static void AddHuntProductScanCriteriaRow(
+            TableLayoutPanel tbl,
+            int row,
+            TextBox txtKeyword,
+            Control platforms,
+            NumericUpDown numMax,
+            NumericUpDown numMinSales,
+            NumericUpDown numMinRating,
+            ComboBox cbProfile)
+        {
+            if (tbl.RowCount <= row)
+            {
+                tbl.RowCount = row + 1;
+            }
+
+            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, HuntProductFilterRowHeight));
+
+            var line = new FlowLayoutPanel
+            {
+                Name = "flpHuntProductScanCriteria",
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                Margin = new Padding(0, 2, 0, 2),
+                Padding = new Padding(0, 2, 0, 2)
+            };
+
+            void AddPair(string labelText, Control editor, int editorWidth, int gapAfter = 16)
+            {
+                var lbl = CreateHuntProductRowLabel(labelText);
+                lbl.AutoSize = true;
+                lbl.Margin = new Padding(0, 8, 6, 0);
+                editor.Margin = new Padding(0, 6, gapAfter, 6);
+                editor.Width = editorWidth;
+                editor.MinimumSize = new Size(editorWidth, HuntProductInputHeight);
+                line.Controls.Add(lbl);
+                line.Controls.Add(editor);
+            }
+
+            var lblKeyword = CreateHuntProductRowLabel("Từ khoá:");
+            lblKeyword.AutoSize = true;
+            lblKeyword.Margin = new Padding(0, 8, 6, 0);
+            txtKeyword.Margin = new Padding(0, 6, 12, 6);
+            txtKeyword.Width = 200;
+            txtKeyword.MinimumSize = new Size(160, HuntProductInputHeight);
+
+            platforms.Margin = new Padding(0, 4, 20, 4);
+
+            line.Controls.Add(lblKeyword);
+            line.Controls.Add(txtKeyword);
+            line.Controls.Add(platforms);
+            AddPair("Max:", numMax, (int)HuntProductMaxResultsWidth + 8, 16);
+            AddPair("Bán≥:", numMinSales, 96, 16);
+            AddPair("Điểm≥:", numMinRating, 64, 16);
+            AddPair("Profile:", cbProfile, 156, 0);
+
+            tbl.Controls.Add(line, 0, row);
+        }
+
+        private void AddHuntProductMainActionsRow(TableLayoutPanel tbl, int row)
+        {
+            if (tbl.RowCount <= row)
+            {
+                tbl.RowCount = row + 1;
+            }
+
+            var rowHeight = AffiliateJellyButtonMinHeight + 14;
+            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, rowHeight));
+
+            var host = new Panel
+            {
+                Name = "pnlHuntProductActionsHost",
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty,
+                BackColor = Color.Transparent
+            };
+
+            var flp = new FlowLayoutPanel
+            {
+                Name = "flpHuntProductActions",
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                Padding = new Padding(0, 4, 0, 2),
+                Margin = Padding.Empty,
+                BackColor = Color.Transparent
+            };
+
+            foreach (var btn in new[] { btnHuntProductAutoScan, btnHuntProductDownloadMedia, btnHuntProductPushDeep, btnHuntProductExportCsv })
+            {
+                if (btn == null)
+                {
+                    continue;
+                }
+
+                PrepareAffiliateToolbarButtonForFlow(btn);
+                btn.Margin = new Padding(0, 2, 10, 2);
+                flp.Controls.Add(btn);
+            }
+
+            host.Controls.Add(flp);
+            void CenterActions()
+            {
+                if (host.IsDisposed || flp.IsDisposed)
+                {
+                    return;
+                }
+
+                flp.Location = new Point(
+                    Math.Max(0, (host.ClientSize.Width - flp.Width) / 2),
+                    Math.Max(0, (host.ClientSize.Height - flp.Height) / 2));
+            }
+
+            host.Resize += (_, __) => CenterActions();
+            flp.SizeChanged += (_, __) => CenterActions();
+            host.HandleCreated += (_, __) => CenterActions();
+
+            tbl.Controls.Add(host, 0, row);
+        }
+
+        private void EnsureHuntProductActionButtonsCreated()
+        {
+            if (btnHuntProductAutoScan != null)
+            {
+                return;
+            }
+
+            btnHuntProductAutoScan = CreateAffiliateJellyButton("btnHuntProductAutoScan", "Săn SP Affiliate", AffiliateTintHunt);
+            btnHuntProductAutoScan.Click += btnHuntProductAutoScan_Click;
+
+            btnHuntProductDownloadMedia = CreateAffiliateJellyButton("btnHuntProductDownloadMedia", "Tải Media", AffiliateTintDownload);
+            btnHuntProductDownloadMedia.Click += btnHuntProductDownloadMedia_Click;
+
+            btnHuntProductPushDeep = CreateAffiliateJellyButton("btnHuntProductPushDeep", "Đẩy sang Affiliate chuyên sâu", AffiliateTintDeepDive);
+            btnHuntProductPushDeep.Click += btnHuntProductPushDeep_Click;
+
+            btnHuntProductDeleteRow = CreateAffiliateJellyButton("btnHuntProductDeleteRow", "Xóa dòng", AffiliateTintStop);
+            btnHuntProductDeleteRow.Click += btnHuntProductDeleteRow_Click;
+
+            btnHuntProductExportCsv = CreateAffiliateJellyButton("btnHuntProductExportCsv", "Xuất CSV", AffiliateTintNeutral);
+            btnHuntProductExportCsv.Click += btnHuntProductExportCsv_Click;
         }
 
         private static Label CreateHuntProductFilterLabel(string text)
@@ -575,7 +695,8 @@ namespace tiktok_Omni
             int row,
             string labelText,
             TextBox txt,
-            Button btn)
+            Button btnAdd,
+            Button btnDelete)
         {
             if (tbl.RowCount <= row)
             {
@@ -584,40 +705,37 @@ namespace tiktok_Omni
 
             tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, HuntProductFilterRowHeight));
 
-            var line = new TableLayoutPanel
+            var line = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 4,
-                RowCount = 1,
-                Margin = Padding.Empty
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                Margin = Padding.Empty,
+                Padding = new Padding(0, 2, 0, 2)
             };
-            line.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            line.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, MeasureHuntProductLabelTextWidth(labelText)));
-            line.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55F));
-            line.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            line.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45F));
 
             var lbl = CreateHuntProductRowLabel(labelText);
-            lbl.Dock = DockStyle.Fill;
+            lbl.AutoSize = true;
+            lbl.Margin = new Padding(0, 8, 6, 0);
 
-            txt.Dock = DockStyle.Fill;
-            txt.Margin = new Padding(0, 0, 12, 0);
+            txt.Dock = DockStyle.None;
+            txt.Margin = new Padding(0, 6, 12, 6);
+            txt.Width = 360;
+            txt.MaximumSize = new Size(360, HuntProductInputHeight);
+            txt.MinimumSize = new Size(280, HuntProductInputHeight);
 
-            PrepareAffiliateToolbarButtonForFlow(btn);
-            btn.Margin = new Padding(0, 4, 8, 4);
-            btn.Anchor = AnchorStyles.Left | AnchorStyles.Top;
+            PrepareAffiliateToolbarButtonForFlow(btnAdd);
+            btnAdd.Margin = new Padding(0, 4, 8, 4);
 
-            var spacer = new Panel
-            {
-                Dock = DockStyle.Fill,
-                Margin = Padding.Empty,
-                BackColor = Color.Transparent
-            };
+            PrepareAffiliateToolbarButtonForFlow(btnDelete);
+            btnDelete.Margin = new Padding(0, 4, 0, 4);
 
-            line.Controls.Add(lbl, 0, 0);
-            line.Controls.Add(txt, 1, 0);
-            line.Controls.Add(btn, 2, 0);
-            line.Controls.Add(spacer, 3, 0);
+            line.Controls.Add(lbl);
+            line.Controls.Add(txt);
+            line.Controls.Add(btnAdd);
+            line.Controls.Add(btnDelete);
             tbl.Controls.Add(line, 0, row);
         }
 
@@ -675,8 +793,8 @@ namespace tiktok_Omni
 
                 filtersHost.PerformLayout();
                 var footer = FindHuntProductControl(tabHuntProduct, "pnlHuntProductFooter");
-                var actions = FindHuntProductControl(tabHuntProduct, "flpHuntProductActions");
-                var chrome = (footer?.Height ?? 22) + (actions?.Height ?? 44) + split.SplitterWidth + 10;
+                var status = FindHuntProductControl(tabHuntProduct, "pnlHuntProductStatusHost");
+                var chrome = (footer?.Height ?? 22) + (status?.Height ?? 48) + split.SplitterWidth + 10;
                 var width = Math.Max(split.Panel1.ClientSize.Width, 120);
                 var preferred = filtersHost.GetPreferredSize(new Size(width, 0));
                 var wanted = preferred.Height + split.Panel1.Padding.Vertical + 6;
@@ -812,99 +930,6 @@ namespace tiktok_Omni
             }
         }
 
-        private FlowLayoutPanel BuildHuntProductActionsPanel()
-        {
-            btnHuntProductAutoScan = CreateAffiliateJellyButton("btnHuntProductAutoScan", "Quét sản phẩm", AffiliateTintHunt);
-            btnHuntProductAutoScan.Click += btnHuntProductAutoScan_Click;
-
-            btnHuntProductDownloadMedia = CreateAffiliateJellyButton("btnHuntProductDownloadMedia", "Tải Media", AffiliateTintDownload);
-            btnHuntProductDownloadMedia.Click += btnHuntProductDownloadMedia_Click;
-
-            btnHuntProductPushDeep = CreateAffiliateJellyButton("btnHuntProductPushDeep", "Đẩy sang Affiliate chuyên sâu", AffiliateTintDeepDive);
-            btnHuntProductPushDeep.Click += btnHuntProductPushDeep_Click;
-
-            btnHuntProductDeleteRow = CreateAffiliateJellyButton("btnHuntProductDeleteRow", "Xóa dòng", AffiliateTintStop);
-            btnHuntProductDeleteRow.Click += btnHuntProductDeleteRow_Click;
-
-
-            btnHuntProductExportCsv = CreateAffiliateJellyButton("btnHuntProductExportCsv", "Xuất CSV", AffiliateTintNeutral);
-            btnHuntProductExportCsv.Click += btnHuntProductExportCsv_Click;
-
-            var flp = new FlowLayoutPanel
-            {
-                Name = "flpHuntProductActions",
-                AutoSize = false,
-                Height = AffiliateJellyButtonMinHeight + 10,
-                MinimumSize = new Size(200, AffiliateJellyButtonMinHeight + 10),
-                WrapContents = true,
-                FlowDirection = FlowDirection.RightToLeft,
-                AutoScroll = false,
-                Padding = new Padding(0, 4, 0, 2),
-                Margin = Padding.Empty,
-                BackColor = Color.Transparent
-            };
-
-            foreach (var btn in new[] { btnHuntProductExportCsv, btnHuntProductDeleteRow, btnHuntProductPushDeep, btnHuntProductDownloadMedia, btnHuntProductAutoScan })
-            {
-                PrepareAffiliateToolbarButtonForFlow(btn);
-                flp.Controls.Add(btn);
-            }
-
-            return flp;
-        }
-
-        private void RefreshHuntProductProfileCombo(AppSettings settings)
-        {
-            if (cbHuntProductProfile == null)
-            {
-                return;
-            }
-
-            var previous = cbHuntProductProfile.SelectedItem?.ToString();
-            cbHuntProductProfile.Items.Clear();
-            cbHuntProductProfile.Items.Add("default");
-            foreach (var profile in settings?.Profiles ?? new List<AutomationProfile>())
-            {
-                var name = (profile?.Name ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(name) || cbHuntProductProfile.Items.Contains(name))
-                {
-                    continue;
-                }
-
-                cbHuntProductProfile.Items.Add(name);
-            }
-
-            var target = string.IsNullOrWhiteSpace(previous) ? "default" : previous.Trim();
-            var index = cbHuntProductProfile.Items.IndexOf(target);
-            cbHuntProductProfile.SelectedIndex = index >= 0 ? index : 0;
-        }
-
-        private void RefreshAffiliateHuntProfileCombo(AppSettings settings)
-        {
-            if (cbAffiliateHuntProfile == null)
-            {
-                return;
-            }
-
-            var previous = cbAffiliateHuntProfile.SelectedItem?.ToString();
-            cbAffiliateHuntProfile.Items.Clear();
-            cbAffiliateHuntProfile.Items.Add("default");
-            foreach (var profile in settings?.Profiles ?? new List<AutomationProfile>())
-            {
-                var name = (profile?.Name ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(name) || cbAffiliateHuntProfile.Items.Contains(name))
-                {
-                    continue;
-                }
-
-                cbAffiliateHuntProfile.Items.Add(name);
-            }
-
-            var target = string.IsNullOrWhiteSpace(previous) ? "default" : previous.Trim();
-            var index = cbAffiliateHuntProfile.Items.IndexOf(target);
-            cbAffiliateHuntProfile.SelectedIndex = index >= 0 ? index : 0;
-        }
-
         private void btnHuntProductAddManual_Click(object sender, EventArgs e)
         {
             if (_huntProductBindingList == null)
@@ -926,9 +951,7 @@ namespace tiktok_Omni
                 profile = GetRunningProfileName();
             }
 
-            var platform = link.IndexOf("shopee", StringComparison.OrdinalIgnoreCase) >= 0
-                ? "Shopee"
-                : (link.IndexOf("tiktok", StringComparison.OrdinalIgnoreCase) >= 0 ? "TikTok" : "Web");
+            var platform = HuntProductScanner.DeterminePlatform(link);
 
             _huntProductBindingList.Add(new HuntProductCandidate
             {
@@ -1011,13 +1034,13 @@ namespace tiktok_Omni
                     foreach (var row in _huntProductBindingList)
                     {
                         lines.Add(string.Join(",",
-                            EscapeHuntProductCsv(row.ProfileName),
-                            EscapeHuntProductCsv(row.ProductName),
-                            EscapeHuntProductCsv(row.ProductLink),
+                            TextHelper.EscapeCsv(row.ProfileName),
+                            TextHelper.EscapeCsv(row.ProductName),
+                            TextHelper.EscapeCsv(row.ProductLink),
                             row.SalesVolume.ToString(),
                             row.Rating.ToString("0.0"),
-                            EscapeHuntProductCsv(row.Price),
-                            EscapeHuntProductCsv(row.Commission)));
+                            TextHelper.EscapeCsv(row.Price),
+                            TextHelper.EscapeCsv(row.Commission)));
                     }
 
                     File.WriteAllLines(dialog.FileName, lines, Encoding.UTF8);
@@ -1030,24 +1053,117 @@ namespace tiktok_Omni
             }
         }
 
-        private static string EscapeHuntProductCsv(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return string.Empty;
-            }
-
-            if (value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0)
-            {
-                return "\"" + value.Replace("\"", "\"\"") + "\"";
-            }
-
-            return value;
-        }
-
         private void btnHuntProductPushDeep_Click(object sender, EventArgs e)
         {
             Log("Đẩy sang Affiliate chuyên sâu: tính năng sẽ được bổ sung trong bản cập nhật tiếp theo.");
+        }
+
+        private static Control FindAffiliateUiControl(Control root, string name)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            if (string.Equals(root.Name, name, StringComparison.Ordinal))
+            {
+                return root;
+            }
+
+            foreach (Control child in root.Controls)
+            {
+                var hit = FindAffiliateUiControl(child, name);
+                if (hit != null)
+                {
+                    return hit;
+                }
+            }
+
+            return null;
+        }
+
+        private static void SyncAffiliateFilterChildWidths(FlowLayoutPanel filtersHost, int innerWidth)
+        {
+            if (filtersHost == null || filtersHost.IsDisposed)
+            {
+                return;
+            }
+
+            foreach (Control child in filtersHost.Controls)
+            {
+                child.Width = Math.Max(120, innerWidth - child.Margin.Horizontal);
+                child.PerformLayout();
+            }
+        }
+
+        private static void SyncAffiliateKeywordLineWidth(Control kwHost, TableLayoutPanel kwLine, Control shell)
+        {
+            if (shell == null || shell.IsDisposed)
+            {
+                return;
+            }
+
+            var shellW = Math.Max(200, shell.ClientSize.Width);
+            if (kwHost != null && !kwHost.IsDisposed)
+            {
+                kwHost.Width = shellW;
+            }
+
+            if (kwLine == null || kwLine.IsDisposed)
+            {
+                return;
+            }
+
+            kwLine.Width = kwHost != null ? kwHost.ClientSize.Width : shellW;
+            kwLine.PerformLayout();
+        }
+
+        private void EnsureAffiliateFiltersLayout()
+        {
+            if (tabAffiliateHunter == null || tabAffiliateHunter.IsDisposed)
+            {
+                return;
+            }
+
+            tabAffiliateHunter.AutoScroll = false;
+            tabAffiliateHunter.AutoScrollMinSize = Size.Empty;
+            DisableAutoScrollRecursive(tabAffiliateHunter);
+
+            var shell = FindAffiliateUiControl(tabAffiliateHunter, "pnlAffiliateShell");
+            var filtersHost = FindAffiliateUiControl(tabAffiliateHunter, "tblAffiliateFilters") as FlowLayoutPanel;
+            var actionsFlow = FindAffiliateUiControl(tabAffiliateHunter, "flpAffiliateActions") as FlowLayoutPanel;
+
+            var tabH = tabAffiliateHunter.ClientSize.Height;
+            var tabW = tabAffiliateHunter.ClientSize.Width;
+            if (tabH < 150 || tabW < 150)
+            {
+                return;
+            }
+
+            if (actionsFlow != null)
+            {
+                actionsFlow.WrapContents = tabW < 1100;
+            }
+
+            var kwHost = FindAffiliateUiControl(tabAffiliateHunter, "pnlAffiliateKeywordHost");
+            var kwLine = FindAffiliateUiControl(tabAffiliateHunter, "pnlAffiliateKeywordLine") as TableLayoutPanel;
+            if (filtersHost != null && shell != null)
+            {
+                var shellW = Math.Max(120, shell.ClientSize.Width);
+                SyncAffiliateKeywordLineWidth(kwHost, kwLine, shell);
+
+                filtersHost.Width = shellW;
+                var innerWidth = Math.Max(120, shellW - filtersHost.Margin.Horizontal);
+                SyncAffiliateFilterChildWidths(filtersHost, innerWidth);
+
+                filtersHost.MaximumSize = Size.Empty;
+                shell.PerformLayout();
+                kwLine?.PerformLayout();
+                filtersHost.PerformLayout();
+            }
+
+            EnableHuntProductTabAutoScroll();
+            RefreshHuntProductFilterScrollLayout();
         }
     }
 }

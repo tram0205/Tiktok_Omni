@@ -39,6 +39,8 @@ namespace tiktok_Omni
 
         private void SyncBuffersToGrids()
         {
+            SaveAllProductGridState();
+
             if (dgvAiVideoGenInput != null)
             {
                 dgvAiVideoGenInput.DataSource = null;
@@ -54,6 +56,117 @@ namespace tiktok_Omni
                     .Where(ShouldShowAiVideoGenItem)
                     .ToList();
             }
+        }
+
+        /// <summary>Commit ô đang sửa trên lưới Slideshow và ghi ngược vào <see cref="_slideshowBuffer"/>.</summary>
+        public void SaveCurrentGridState()
+        {
+            SaveProductGridStateToBuffer(dgvAiVideoGenInput, GetSlideshowBuffer(), notifySlideshowDraftDirty: true);
+        }
+
+        /// <summary>Commit ô đang sửa trên lưới Affiliate Deep và ghi ngược vào <see cref="_deepDiveBuffer"/>.</summary>
+        public void SaveDeepDiveGridState()
+        {
+            SaveProductGridStateToBuffer(dgvDeepDiveInput, GetDeepDiveBuffer(), notifySlideshowDraftDirty: false);
+        }
+
+        /// <summary>Lưu cả hai lưới sản phẩm trước rebind / render / đổi tab.</summary>
+        public void SaveAllProductGridState()
+        {
+            SaveDeepDiveGridState();
+            SaveCurrentGridState();
+        }
+
+        private void SaveProductGridStateToBuffer(
+            DataGridView grid,
+            List<AiVideoGenInputItem> buffer,
+            bool notifySlideshowDraftDirty)
+        {
+            if (grid == null || grid.IsDisposed || buffer == null)
+            {
+                return;
+            }
+
+            if (grid.IsCurrentCellInEditMode)
+            {
+                grid.EndEdit(DataGridViewDataErrorContexts.Commit);
+            }
+
+            var changed = false;
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                if (!(row.DataBoundItem is AiVideoGenInputItem gridItem))
+                {
+                    continue;
+                }
+
+                var target = buffer.FirstOrDefault(x => ReferenceEquals(x, gridItem))
+                    ?? buffer.FirstOrDefault(x => AiVideoGenItemsMatch(x, gridItem));
+                if (target == null)
+                {
+                    continue;
+                }
+
+                if (ApplyGridRowToAiVideoGenItem(grid, row, target))
+                {
+                    changed = true;
+                }
+            }
+
+            if (changed && notifySlideshowDraftDirty)
+            {
+                NotifySlideshowDraftDirty();
+            }
+        }
+
+        private static bool ApplyGridRowToAiVideoGenItem(DataGridView grid, DataGridViewRow row, AiVideoGenInputItem target)
+        {
+            if (grid == null || row == null || target == null)
+            {
+                return false;
+            }
+
+            var profile = ReadGridCellText(grid, row, "colAiProfile");
+            var product = ReadGridCellText(grid, row, "colAiProduct");
+            var videoUrl = ReadGridCellText(grid, row, "colAiUrl");
+            var hook = ReadGridCellText(grid, row, "colAiHook");
+            var hashtags = ReadGridCellText(grid, row, "colAiHashtag");
+
+            var changed = false;
+            changed |= SetIfDifferent(target.ProfileName, profile, v => target.ProfileName = ProfileScopedPaths.ResolveProfileName(v));
+            changed |= SetIfDifferent(target.ProductName, product, v => target.ProductName = v);
+            changed |= SetIfDifferent(target.VideoUrl, videoUrl, v => target.VideoUrl = v);
+            changed |= SetIfDifferent(target.HookText, hook, v => target.HookText = v);
+            changed |= SetIfDifferent(target.Hashtags, hashtags, v => target.Hashtags = v);
+            return changed;
+        }
+
+        private static string ReadGridCellText(DataGridView grid, DataGridViewRow row, string columnName)
+        {
+            if (grid == null || row == null || !grid.Columns.Contains(columnName))
+            {
+                return string.Empty;
+            }
+
+            var value = row.Cells[columnName].Value;
+            return value == null ? string.Empty : value.ToString().Trim();
+        }
+
+        private static bool SetIfDifferent(string current, string incoming, Action<string> apply)
+        {
+            var normalized = incoming ?? string.Empty;
+            if (string.Equals(current ?? string.Empty, normalized, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            apply(normalized);
+            return true;
         }
 
         private void ReplaceSlideshowBuffer(IEnumerable<AiVideoGenInputItem> items)
@@ -121,7 +234,7 @@ namespace tiktok_Omni
                 AutoGenerateColumns = false,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
-                ReadOnly = true,
+                ReadOnly = false,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = true,
@@ -257,7 +370,6 @@ namespace tiktok_Omni
                 dgvAiVideoGenInput = CreateProductInputGrid("dgvSlideshow");
                 dgvAiVideoGenInput.SelectionChanged += DgvAiVideoGenInput_SelectionChanged_Production;
                 slideshowGridHost.Controls.Add(dgvAiVideoGenInput);
-                dgvAiVideoGenInput.BringToFront();
             }
 
             if (deepDiveGridHost != null)
@@ -275,6 +387,9 @@ namespace tiktok_Omni
 
             SyncBuffersToGrids();
             InitializeSlideshowDraftAutoSave();
+            WireSlideshowProductGridLayout();
+            WireDeepDiveProductGridLayout();
+            RefreshAllProfileSelectors();
         }
 
         public void SyncProductGridVisibilityForMode(int modeTabIndex)
@@ -300,6 +415,7 @@ namespace tiktok_Omni
         private Task<AiVideoGenInputItem> ScrapeProductDetailsAsync(string url, CancellationToken cancellationToken = default)
         {
             return WithBrowserLockAsync(
+                GetRunningProfileName(),
                 ct => ScrapeProductDetailsCoreAsync(url, ct),
                 cancellationToken);
         }

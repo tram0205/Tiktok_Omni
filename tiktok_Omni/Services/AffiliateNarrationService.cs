@@ -13,7 +13,6 @@ namespace tiktok_Omni.Services
     /// <summary>TTS đơn giản hoặc đa giọng (ghép segment bằng FFmpeg).</summary>
     public sealed class AffiliateNarrationService
     {
-        private static readonly string[] MultiVoiceIds = { "vi-VN-female", "vi-VN-male", "vi-VN-female-alt" };
         private readonly VideoService _videoService;
 
         public AffiliateNarrationService(VideoService videoService = null)
@@ -35,13 +34,13 @@ namespace tiktok_Omni.Services
                 throw new ArgumentException("Narration text is required.", nameof(text));
             }
 
-            if (!useMultiVoice)
+            if (useMultiVoice)
             {
-                await GenerateSingleVoiceAsync(text, settings, outputAudioFile, log, cancellationToken).ConfigureAwait(false);
+                await GenerateMultiVoiceAsync(text, settings, outputAudioFile, workDirectory, log, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            await GenerateMultiVoiceAsync(text, settings, outputAudioFile, workDirectory, log, cancellationToken).ConfigureAwait(false);
+            await GenerateSingleVoiceAsync(text, settings, outputAudioFile, log, cancellationToken).ConfigureAwait(false);
         }
 
         private async Task GenerateSingleVoiceAsync(
@@ -56,18 +55,18 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException("Missing TTS API key/endpoint.");
             }
 
-            log?.Invoke("[TTS] Sinh giọng đọc đơn…");
-            var audioUrl = await _videoService.GenerateAudioAsync(
+            log?.Invoke("[TTS] Sinh giọng đọc (nguyên đoạn script)…");
+            var audioRef = await _videoService.GenerateAudioAsync(
                 text,
-                settings.TtsApiKey,
-                settings.TtsEndpoint,
-                cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(audioUrl))
+                settings,
+                cancellationToken,
+                emphaticHook: false).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(audioRef))
             {
-                throw new InvalidOperationException("TTS returned empty audioUrl.");
+                throw new InvalidOperationException("TTS returned empty audio.");
             }
 
-            await DownloadToFileAsync(audioUrl, outputAudioFile, cancellationToken).ConfigureAwait(false);
+            await PersistAudioResultAsync(audioRef, outputAudioFile, cancellationToken).ConfigureAwait(false);
         }
 
         private async Task GenerateMultiVoiceAsync(
@@ -91,38 +90,24 @@ namespace tiktok_Omni.Services
             for (var i = 0; i < segments.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var voiceId = MultiVoiceIds[i % MultiVoiceIds.Length];
                 var partPath = Path.Combine(workDirectory, "voice_part_" + (i + 1).ToString("D2", CultureInfo.InvariantCulture) + ".mp3");
-                var audioUrl = await _videoService.GenerateAudioAsync(
+                var audioRef = await _videoService.GenerateAudioAsync(
                     segments[i],
-                    settings.TtsApiKey,
-                    settings.TtsEndpoint,
+                    settings,
                     cancellationToken,
-                    voiceId).ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(audioUrl))
+                    emphaticHook: false).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(audioRef))
                 {
-                    throw new InvalidOperationException("TTS segment " + (i + 1) + " returned empty audioUrl.");
+                    throw new InvalidOperationException("TTS segment " + (i + 1) + " returned empty audio.");
                 }
 
-                await DownloadToFileAsync(audioUrl, partPath, cancellationToken).ConfigureAwait(false);
+                await PersistAudioResultAsync(audioRef, partPath, cancellationToken).ConfigureAwait(false);
                 partFiles.Add(partPath);
             }
 
-            await ConcatAudioPartsAsync(partFiles, outputAudioFile, settings.FfmpegPath, log, cancellationToken).ConfigureAwait(false);
-            foreach (var p in partFiles)
-            {
-                try
-                {
-                    if (File.Exists(p))
-                    {
-                        File.Delete(p);
-                    }
-                }
-                catch
-                {
-                    // ignored
-                }
-            }
+            var ffmpeg = ResolveFfmpegPath(settings);
+            await ConcatAudioPartsAsync(partFiles, outputAudioFile, ffmpeg, log, cancellationToken).ConfigureAwait(false);
+            CleanupTempFiles(partFiles);
         }
 
         private static List<string> SplitNarrationSegments(string text)
@@ -139,6 +124,34 @@ namespace tiktok_Omni.Services
             return parts.Take(12).ToList();
         }
 
+        private static async Task PersistAudioResultAsync(string audioUrlOrLocalPath, string outputPath, CancellationToken cancellationToken)
+        {
+            var src = (audioUrlOrLocalPath ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(src))
+            {
+                throw new InvalidOperationException("TTS returned empty audio reference.");
+            }
+
+            var targetDir = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(targetDir))
+            {
+                Directory.CreateDirectory(targetDir);
+            }
+
+            if (File.Exists(src))
+            {
+                if (File.Exists(outputPath))
+                {
+                    File.Delete(outputPath);
+                }
+
+                File.Copy(src, outputPath);
+                return;
+            }
+
+            await DownloadToFileAsync(src, outputPath, cancellationToken).ConfigureAwait(false);
+        }
+
         private static async Task ConcatAudioPartsAsync(
             IList<string> partFiles,
             string outputFile,
@@ -146,19 +159,74 @@ namespace tiktok_Omni.Services
             Action<string> log,
             CancellationToken cancellationToken)
         {
-            var listFile = Path.Combine(Path.GetDirectoryName(outputFile) ?? ".", "voice_concat_list.txt");
+            if (partFiles == null || partFiles.Count == 0)
+            {
+                throw new InvalidOperationException("Không có file MP3 để ghép.");
+            }
+
+            if (partFiles.Count == 1)
+            {
+                if (File.Exists(outputFile))
+                {
+                    File.Delete(outputFile);
+                }
+
+                File.Copy(partFiles[0], outputFile);
+                return;
+            }
+
+            var listFile = Path.Combine(Path.GetDirectoryName(outputFile) ?? ".", "narration_concat_" + Guid.NewGuid().ToString("N") + ".txt");
             var lines = partFiles.Select(p => "file '" + p.Replace("'", "'\\''") + "'");
             File.WriteAllLines(listFile, lines, TextFileEncoding.Utf8NoBom);
             var ffmpeg = string.IsNullOrWhiteSpace(ffmpegPath) || !File.Exists(ffmpegPath) ? "ffmpeg" : ffmpegPath;
             var args = "-y -f concat -safe 0 -i \"" + listFile + "\" -c copy \"" + outputFile + "\"";
+            log?.Invoke("[TTS] FFmpeg: ghép " + partFiles.Count + " đoạn MP3 → narration hoàn chỉnh…");
             await RunFfmpegAsync(ffmpeg, args, log, cancellationToken).ConfigureAwait(false);
             try
             {
-                File.Delete(listFile);
+                if (File.Exists(listFile))
+                {
+                    File.Delete(listFile);
+                }
             }
             catch
             {
                 // ignored
+            }
+        }
+
+        private static string ResolveFfmpegPath(AppSettings settings)
+        {
+            if (FfmpegToolkitService.TryResolve(settings, out var toolkit, out _))
+            {
+                return toolkit.FfmpegExe;
+            }
+
+            var bundled = FfmpegToolkitService.GetBundledFfmpegPath();
+            if (File.Exists(bundled))
+            {
+                return bundled;
+            }
+
+            var p = (settings?.FfmpegPath ?? string.Empty).Trim();
+            return !string.IsNullOrWhiteSpace(p) && File.Exists(p) ? p : bundled;
+        }
+
+        private static void CleanupTempFiles(IEnumerable<string> paths)
+        {
+            foreach (var p in paths)
+            {
+                try
+                {
+                    if (File.Exists(p))
+                    {
+                        File.Delete(p);
+                    }
+                }
+                catch
+                {
+                    // ignored
+                }
             }
         }
 

@@ -20,7 +20,9 @@ namespace tiktok_Omni.Services
         private readonly GeminiService _geminiService;
         private readonly ConfigManager _configManager;
         private readonly CaptchaService _captchaService;
+        private readonly VideoProcessingService _videoProcessingService = new VideoProcessingService();
         private readonly Random _random = new Random();
+        private static readonly Random _humanRng = new Random();
         private BrowserAutomation _autoPostBrowser;
         private BrowserPlatform _autoPostBrowserPlatform = BrowserPlatform.TikTok;
         private const int MaxCaptchaSolveAttempts = 3;
@@ -57,6 +59,7 @@ namespace tiktok_Omni.Services
             }
 
             return BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(runningProfileName),
                 ct => StartWarmupCoreAsync(
                     keywords,
                     videoCount,
@@ -374,6 +377,7 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction) =>
             BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(runningProfileName),
                 ct => OpenTikTokLoginBrowserCoreAsync(runningProfileName, ct, logAction),
                 cancellationToken);
 
@@ -456,6 +460,7 @@ namespace tiktok_Omni.Services
             }
 
             return BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(profileName),
                 ct => ManualLoginCoreAsync(profileName, ct, logAction),
                 cancellationToken);
         }
@@ -607,6 +612,7 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction) =>
             BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(runningProfileName),
                 ct => OpenManualTikTokBrowserCoreAsync(runningProfileName, ct, logAction),
                 cancellationToken);
 
@@ -1399,7 +1405,8 @@ namespace tiktok_Omni.Services
             bool reuseExistingAutoPostBrowser = false,
             bool keepBrowserOpenAfter = false,
             string affiliateLink = null,
-            string productId = null)
+            string productId = null,
+            bool skipFolderScopeCheck = false)
         {
             if (string.IsNullOrWhiteSpace(videoFolder) || !Directory.Exists(videoFolder))
             {
@@ -1409,18 +1416,34 @@ namespace tiktok_Omni.Services
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
             ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
             var effectiveProfile = string.IsNullOrWhiteSpace(runningProfileName) ? "default" : runningProfileName.Trim();
-            ProfileScopedPaths.ValidateAutoPostPathsForProfile(
-                settings.StorageRootPath,
-                effectiveProfile,
-                videoFolder,
-                explicitVideoPath);
+            if (!skipFolderScopeCheck)
+                ProfileScopedPaths.ValidateAutoPostPathsForProfile(
+                    settings.StorageRootPath, effectiveProfile, videoFolder, explicitVideoPath);
             var videoPath = ResolveAutoPostVideoPath(
-                videoFolder,
-                explicitVideoPath,
-                logAction,
-                "TikTok",
-                effectiveProfile,
-                settings.StorageRootPath);
+                videoFolder, explicitVideoPath, logAction,
+                "TikTok", effectiveProfile, settings.StorageRootPath,
+                skipFolderScopeCheck);
+
+            // ── Anti-duplicate remaster (strip metadata, random name, crop/rotate/eq) ──
+            string remasteredPath = null;
+            try
+            {
+                logAction?.Invoke("Auto Post: đang remaster video để tránh bị TikTok chặn nội dung trùng lặp…");
+                remasteredPath = await _videoProcessingService
+                    .RemasterForAutoPostAsync(videoPath, logAction, cancellationToken)
+                    .ConfigureAwait(false);
+                videoPath = remasteredPath;   // use remastered file for upload
+            }
+            catch (InvalidOperationException remEx) when (remEx.Message.Contains("độ phân giải"))
+            {
+                // Quality gate triggered — abort with clear message, close nothing (no browser opened yet)
+                throw;
+            }
+            catch (Exception remEx)
+            {
+                // Non-fatal: log and continue with original file
+                logAction?.Invoke($"Auto Post: remaster thất bại ({remEx.Message}) — dùng file gốc.");
+            }
             var browser = await EnsureAutoPostBrowserSessionAsync(
                 settings,
                 runningProfileName,
@@ -1438,6 +1461,11 @@ namespace tiktok_Omni.Services
             }).ConfigureAwait(false);
 
             logAction?.Invoke("Auto Post: Creator Center upload page opened.");
+
+            // Intercept any "Are you sure you want to leave?" browser dialogs and DISMISS them
+            // so TikTok's exit-confirmation never navigates away mid-post.
+            AttachExitDialogGuard(page, logAction);
+
             await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
 
             await page.SetInputFilesAsync("input[type='file']", videoPath).ConfigureAwait(false);
@@ -1482,25 +1510,48 @@ namespace tiktok_Omni.Services
             }
 
             await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+            await SimulatePageScrollAsync(page, cancellationToken, logAction).ConfigureAwait(false);
             var posted = await TryClickPublishButtonAsync(page, cancellationToken, logAction).ConfigureAwait(false);
             if (!posted)
             {
-                logAction?.Invoke("Auto Post TikTok: không bấm được nút Đăng — hãy kiểm tra giao diện TikTok và bấm tay.");
+                logAction?.Invoke("Auto Post TikTok: ✗ Không bấm được nút Đăng — hãy kiểm tra giao diện TikTok và bấm tay.");
                 if (!keepBrowserOpenAfter)
-                {
                     await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
-                }
-
                 return;
             }
 
-            await Task.Delay(4000, cancellationToken).ConfigureAwait(false);
-            await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
-            logAction?.Invoke("Auto Post TikTok: đã gửi lệnh đăng bài (kiểm tra trạng thái trên TikTok).");
+            // Wait for TikTok to confirm the post was submitted
+            logAction?.Invoke("Auto Post TikTok: đang chờ xác nhận từ TikTok…");
+            var (confirmed, warningText) = await WaitForPostConfirmationAsync(page, cancellationToken, logAction).ConfigureAwait(false);
+
+            if (!confirmed)
+            {
+                // Close the browser before throwing so Chrome doesn't stay open
+                await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+
+                // Clean up temp remastered file on failure too
+                if (!string.IsNullOrEmpty(remasteredPath) && File.Exists(remasteredPath))
+                {
+                    try { File.Delete(remasteredPath); } catch { /* non-critical */ }
+                }
+
+                var reason = string.IsNullOrEmpty(warningText)
+                    ? "Không nhận được xác nhận từ TikTok sau 35 giây (timeout)."
+                    : $"TikTok từ chối nội dung / cảnh báo chính sách:\n{warningText}";
+                throw new InvalidOperationException(reason);
+            }
+
+            logAction?.Invoke("Auto Post TikTok: ✓ Video đã được gửi lên TikTok thành công.");
 
             if (!keepBrowserOpenAfter)
             {
                 await CloseAutoPostBrowserInternalAsync(logAction).ConfigureAwait(false);
+            }
+
+            // Clean up the temp remastered file (it served its purpose)
+            if (!string.IsNullOrEmpty(remasteredPath) && File.Exists(remasteredPath))
+            {
+                try { File.Delete(remasteredPath); } catch { /* non-critical */ }
             }
         }
 
@@ -1516,7 +1567,8 @@ namespace tiktok_Omni.Services
             bool reuseExistingAutoPostBrowser = true,
             bool keepBrowserOpenAfter = false,
             bool attachShopeeLink = false,
-            string facebookShopeeLink = null)
+            string facebookShopeeLink = null,
+            bool skipFolderScopeCheck = false)
         {
             if (string.IsNullOrWhiteSpace(videoFolder) || !Directory.Exists(videoFolder))
             {
@@ -1526,18 +1578,13 @@ namespace tiktok_Omni.Services
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
             ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
             var effectiveProfile = string.IsNullOrWhiteSpace(runningProfileName) ? "default" : runningProfileName.Trim();
-            ProfileScopedPaths.ValidateAutoPostPathsForProfile(
-                settings.StorageRootPath,
-                effectiveProfile,
-                videoFolder,
-                explicitVideoPath);
+            if (!skipFolderScopeCheck)
+                ProfileScopedPaths.ValidateAutoPostPathsForProfile(
+                    settings.StorageRootPath, effectiveProfile, videoFolder, explicitVideoPath);
             var videoPath = ResolveAutoPostVideoPath(
-                videoFolder,
-                explicitVideoPath,
-                logAction,
-                "Facebook",
-                effectiveProfile,
-                settings.StorageRootPath);
+                videoFolder, explicitVideoPath, logAction,
+                "Facebook", effectiveProfile, settings.StorageRootPath,
+                skipFolderScopeCheck);
             var browser = await EnsureAutoPostBrowserSessionAsync(
                 settings,
                 runningProfileName,
@@ -1632,6 +1679,7 @@ namespace tiktok_Omni.Services
 
             await browser.RandomDelayAsync(3000, 5000, cancellationToken).ConfigureAwait(false);
             await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+            await SimulatePageScrollAsync(page, cancellationToken, logAction).ConfigureAwait(false);
 
             var fbPublishSelectors = new[]
             {
@@ -1671,7 +1719,8 @@ namespace tiktok_Omni.Services
             string explicitVideoPath = null,
             bool clickPublish = true,
             bool reuseExistingAutoPostBrowser = true,
-            bool keepBrowserOpenAfter = false)
+            bool keepBrowserOpenAfter = false,
+            bool skipFolderScopeCheck = false)
         {
             if (string.IsNullOrWhiteSpace(videoFolder) || !Directory.Exists(videoFolder))
             {
@@ -1681,18 +1730,13 @@ namespace tiktok_Omni.Services
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
             ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
             var effectiveProfile = string.IsNullOrWhiteSpace(runningProfileName) ? "default" : runningProfileName.Trim();
-            ProfileScopedPaths.ValidateAutoPostPathsForProfile(
-                settings.StorageRootPath,
-                effectiveProfile,
-                videoFolder,
-                explicitVideoPath);
+            if (!skipFolderScopeCheck)
+                ProfileScopedPaths.ValidateAutoPostPathsForProfile(
+                    settings.StorageRootPath, effectiveProfile, videoFolder, explicitVideoPath);
             var videoPath = ResolveAutoPostVideoPath(
-                videoFolder,
-                explicitVideoPath,
-                logAction,
-                "YouTube",
-                effectiveProfile,
-                settings.StorageRootPath);
+                videoFolder, explicitVideoPath, logAction,
+                "YouTube", effectiveProfile, settings.StorageRootPath,
+                skipFolderScopeCheck);
             var browser = await EnsureAutoPostBrowserSessionAsync(
                 settings,
                 runningProfileName,
@@ -1777,6 +1821,7 @@ namespace tiktok_Omni.Services
 
             await browser.RandomDelayAsync(3000, 5000, cancellationToken).ConfigureAwait(false);
             await EnsureNoCaptchaResolvedAsync(browser, settings, cancellationToken, logAction).ConfigureAwait(false);
+            await SimulatePageScrollAsync(page, cancellationToken, logAction).ConfigureAwait(false);
 
             var nextSelectors = new[]
             {
@@ -1904,13 +1949,12 @@ namespace tiktok_Omni.Services
             Action<string> logAction,
             string platformLabel,
             string lockedProfileName,
-            string storageRoot)
+            string storageRoot,
+            bool skipFolderScopeCheck = false)
         {
-            ProfileScopedPaths.ValidateAutoPostPathsForProfile(
-                storageRoot,
-                lockedProfileName,
-                videoFolder,
-                explicitVideoPath);
+            if (!skipFolderScopeCheck)
+                ProfileScopedPaths.ValidateAutoPostPathsForProfile(
+                    storageRoot, lockedProfileName, videoFolder, explicitVideoPath);
 
             var videoPath = (explicitVideoPath ?? string.Empty).Trim();
             if (!string.IsNullOrWhiteSpace(videoPath) && File.Exists(videoPath))
@@ -2015,21 +2059,28 @@ namespace tiktok_Omni.Services
             Action<string> logAction,
             string fieldLabel)
         {
+            // Dismiss any onboarding overlay first
+            await DismissJoyrideOverlayAsync(page, cancellationToken).ConfigureAwait(false);
+
             foreach (var selector in selectors)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var locator = page.Locator(selector).First;
-                if (!await locator.IsVisibleAsync().ConfigureAwait(false))
-                {
-                    continue;
-                }
+                if (!await locator.IsVisibleAsync().ConfigureAwait(false)) continue;
 
                 try
                 {
-                    await locator.ClickAsync().ConfigureAwait(false);
+                    await locator.HoverAsync(new Microsoft.Playwright.LocatorHoverOptions
+                        { Force = true }).ConfigureAwait(false);
+                    await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+                    await locator.ClickAsync(new Microsoft.Playwright.LocatorClickOptions
+                        { Force = true }).ConfigureAwait(false);
+                    await Task.Delay(350, cancellationToken).ConfigureAwait(false);
                     await page.Keyboard.PressAsync("Control+A").ConfigureAwait(false);
+                    await Task.Delay(120, cancellationToken).ConfigureAwait(false);
                     await page.Keyboard.PressAsync("Backspace").ConfigureAwait(false);
-                    await page.Keyboard.TypeAsync(text).ConfigureAwait(false);
+                    await Task.Delay(150, cancellationToken).ConfigureAwait(false);
+                    await TypeHumanLikeAsync(page, text, cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 catch (Exception ex)
@@ -2067,7 +2118,10 @@ namespace tiktok_Omni.Services
                         continue;
                     }
 
+                    // Mô phỏng chuột người dùng: di chuyển đến nút → đợi 0.5s → click
                     await locator.ScrollIntoViewIfNeededAsync().ConfigureAwait(false);
+                    await locator.HoverAsync().ConfigureAwait(false);
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
                     await locator.ClickAsync().ConfigureAwait(false);
                     return true;
                 }
@@ -2089,12 +2143,17 @@ namespace tiktok_Omni.Services
 
         private static readonly string[] PublishButtonSelectors =
         {
+            // Most specific — TikTok Creator Center desktop (data-e2e attributes)
+            "button[data-e2e='post-button']",
             "button[data-e2e='post_video']",
-            "button[data-e2e=\"post_video\"]",
-            "button[aria-label*='Post']",
-            "button:has-text(\"Post\")",
-            "button:has-text(\"Đăng\")",
-            "[data-e2e='post_video'] button"
+            "div[data-e2e='post-button'] button",
+            // Footer-scoped (Post button is always at the bottom of the form)
+            "div.footer-container button[type='button']:not([disabled])",
+            "div[class*='footer'] button[type='button']:not([disabled])",
+            "div[class*='btn-container'] button[type='button']:not([disabled])",
+            // Text-based fallbacks (last resort)
+            "button:has-text('Post')",
+            "button:has-text('Đăng')",
         };
 
         private async Task WaitForCaptionEditorReadyWithCaptchaAsync(
@@ -2116,6 +2175,8 @@ namespace tiktok_Omni.Services
                     if (await locator.IsVisibleAsync().ConfigureAwait(false))
                     {
                         logAction?.Invoke("Auto Post: khung mô tả / caption đã sẵn sàng.");
+                        // Install overlay killer as soon as upload page is ready
+                        await DismissJoyrideOverlayAsync(page, cancellationToken).ConfigureAwait(false);
                         return;
                     }
                 }
@@ -2126,60 +2187,578 @@ namespace tiktok_Omni.Services
             throw new TimeoutException("Timeout waiting for TikTok upload UI (caption editor).");
         }
 
-        private static async Task<bool> TryClickPublishButtonAsync(
+        /// <summary>
+        /// Mô phỏng thao tác người dùng lướt trang: cuộn chuột ngẫu nhiên 100–300 px
+        /// lên/xuống, ~4 lần trong 2–3 giây, giúp giảm khả năng bị phát hiện bot trước
+        /// khi thực hiện thao tác đăng bài.
+        /// </summary>
+        private static async Task SimulatePageScrollAsync(
             IPage page,
             CancellationToken cancellationToken,
             Action<string> logAction)
         {
+            logAction?.Invoke("[Human] Lướt trang trước khi đăng…");
+            const int steps = 4;
+            for (var i = 0; i < steps; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                int deltaY;
+                lock (_humanRng) deltaY = (_humanRng.Next(0, 2) == 0 ? 1 : -1) * _humanRng.Next(100, 301);
+                try
+                {
+                    await page.Mouse.WheelAsync(0, deltaY).ConfigureAwait(false);
+                }
+                catch { /* ignore — page may not be scrollable at this point */ }
+                int delayMs;
+                lock (_humanRng) delayMs = _humanRng.Next(420, 760);
+                await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private async Task<bool> TryClickPublishButtonAsync(
+            IPage page,
+            CancellationToken cancellationToken,
+            Action<string> logAction)
+        {
+            // Kill overlay before touching the publish button
+            await DismissJoyrideOverlayAsync(page, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(400, cancellationToken).ConfigureAwait(false);
+
+            // ── Pass 1: try each selector in priority order ───────────────────────
             foreach (var selector in PublishButtonSelectors)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var locator = page.Locator(selector).First;
-                if (!await locator.IsVisibleAsync().ConfigureAwait(false))
+                try
                 {
-                    continue;
+                    if (!await IsLocatorVisibleWithinAsync(locator, 1500f).ConfigureAwait(false)) continue;
                 }
+                catch { continue; }
 
                 try
                 {
-                    var disabled = await locator.GetAttributeAsync("disabled").ConfigureAwait(false);
+                    var disabled     = await locator.GetAttributeAsync("disabled").ConfigureAwait(false);
                     var ariaDisabled = await locator.GetAttributeAsync("aria-disabled").ConfigureAwait(false);
-                    if (string.Equals(disabled, "true", StringComparison.OrdinalIgnoreCase) ||
+                    if (string.Equals(disabled,     "true", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(ariaDisabled, "true", StringComparison.OrdinalIgnoreCase))
                     {
+                        logAction?.Invoke($"Auto Post: nút ({selector}) đang disabled — chờ 3s…");
+                        await Task.Delay(3000, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
 
+                    // Screenshot before click for debugging
+                    await TakeDebugScreenshotAsync(page, "before_post_click", logAction).ConfigureAwait(false);
+
                     await locator.ScrollIntoViewIfNeededAsync().ConfigureAwait(false);
-                    await locator.ClickAsync().ConfigureAwait(false);
+                    await locator.HoverAsync(new Microsoft.Playwright.LocatorHoverOptions { Force = true })
+                        .ConfigureAwait(false);
+                    await Task.Delay(600, cancellationToken).ConfigureAwait(false);
+                    await locator.ClickAsync(new Microsoft.Playwright.LocatorClickOptions { Force = true })
+                        .ConfigureAwait(false);
+
+                    logAction?.Invoke($"Auto Post: ✓ Đã click nút Đăng qua selector «{selector}»");
                     return true;
                 }
                 catch (Exception ex)
                 {
-                    logAction?.Invoke("Auto Post: thử nhấn nút đăng lỗi (" + selector + "): " + ex.Message);
+                    logAction?.Invoke($"Auto Post: thử selector «{selector}» lỗi: {ex.Message}");
                 }
+            }
+
+            // ── Pass 2: JS fallback — find bottom-most enabled button on page ─────
+            logAction?.Invoke("Auto Post: selector thông thường thất bại — thử JS tìm nút thấp nhất…");
+            try
+            {
+                var result = await page.EvaluateAsync<string>(@"() => {
+                    // Collect all visible, enabled buttons
+                    const candidates = Array.from(document.querySelectorAll('button'))
+                        .filter(b => {
+                            if (b.disabled) return false;
+                            if (b.getAttribute('aria-disabled') === 'true') return false;
+                            const r = b.getBoundingClientRect();
+                            if (r.width === 0 || r.height === 0) return false;
+                            const text = (b.innerText || b.textContent || '').trim().toLowerCase();
+                            return text === 'post' || text === 'đăng' ||
+                                   text.includes('post') || text.includes('đăng');
+                        });
+                    if (candidates.length === 0) return null;
+                    // Pick the one with the largest bottom coordinate (lowest on page)
+                    const btn = candidates.reduce((a, b) =>
+                        a.getBoundingClientRect().bottom >= b.getBoundingClientRect().bottom ? a : b);
+                    const r = btn.getBoundingClientRect();
+                    return JSON.stringify({
+                        text: btn.innerText,
+                        bottom: Math.round(r.bottom),
+                        x: Math.round(r.left + r.width / 2),
+                        y: Math.round(r.top  + r.height / 2),
+                        dataE2e: btn.getAttribute('data-e2e') || '',
+                        className: btn.className
+                    });
+                }").ConfigureAwait(false);
+
+                if (result != null)
+                {
+                    dynamic info = Newtonsoft.Json.JsonConvert.DeserializeObject(result);
+                    string text    = info.text;
+                    int    x       = (int)info.x;
+                    int    y       = (int)info.y;
+                    string dataE2e = info.dataE2e;
+                    logAction?.Invoke($"Auto Post: JS tìm thấy nút «{text}» (data-e2e={dataE2e}) tại ({x},{y}) — bottom={info.bottom}px");
+
+                    await TakeDebugScreenshotAsync(page, "before_post_click_js", logAction).ConfigureAwait(false);
+
+                    await page.Mouse.MoveAsync(x, y).ConfigureAwait(false);
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                    await page.Mouse.ClickAsync(x, y).ConfigureAwait(false);
+
+                    logAction?.Invoke($"Auto Post: ✓ Đã click nút Đăng qua JS tại ({x},{y})");
+                    return true;
+                }
+                else
+                {
+                    logAction?.Invoke("Auto Post: JS không tìm thấy nút Post nào trên trang.");
+                    await TakeDebugScreenshotAsync(page, "no_post_button_found", logAction).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke($"Auto Post: JS fallback lỗi: {ex.Message}");
             }
 
             return false;
         }
 
+        /// <summary>
+        /// Takes a full-page screenshot and logs the file path for debugging.
+        /// File is saved next to the app executable in a "debug_screenshots" folder.
+        /// </summary>
+        private static async Task TakeDebugScreenshotAsync(IPage page, string label, Action<string> logAction)
+        {
+            try
+            {
+                var dir = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(
+                        System.Reflection.Assembly.GetExecutingAssembly().Location) ?? ".",
+                    "debug_screenshots");
+                System.IO.Directory.CreateDirectory(dir);
+                var ts   = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var path = System.IO.Path.Combine(dir, $"{label}_{ts}.png");
+                await page.ScreenshotAsync(new Microsoft.Playwright.PageScreenshotOptions
+                {
+                    Path     = path,
+                    FullPage = false   // viewport only — faster
+                }).ConfigureAwait(false);
+                logAction?.Invoke($"  [Screenshot] {path}");
+            }
+            catch { /* non-critical */ }
+        }
+
+        /// <summary>
+        /// After clicking Post, polls up to 45 s for TikTok to show a result:
+        ///   - Success signal  → returns (true, null)
+        ///   - Soft warning (still postable, e.g. "You can still post") → clicks the
+        ///     in-dialog Post/Continue button and keeps waiting for a success signal.
+        ///   - Hard block (cannot post, copyright strike, etc.) → returns (false, warningText)
+        ///   - Timeout → returns (false, null)
+        /// </summary>
+        private static async Task<(bool success, string warningText)> WaitForPostConfirmationAsync(
+            IPage page,
+            CancellationToken cancellationToken,
+            Action<string> logAction)
+        {
+            var deadline  = DateTime.UtcNow.AddSeconds(45);
+            var uploadUrl = page.Url;
+
+            // Keywords whose presence inside a modal/dialog implies a TikTok policy issue
+            var warnKeywords = new[]
+            {
+                "violat", "policy", "community guideline", "copyright",
+                "không được phép", "vi phạm", "bản quyền", "nội dung bị",
+                "cảnh báo", "warning", "blocked", "removed", "restricted",
+                "unable to post", "không thể đăng", "chính sách", "unoriginal",
+                "low-quality", "qr code"
+            };
+
+            // Phrases that indicate TikTok is still ALLOWING the user to post (soft advisory)
+            var softAllowPhrases = new[]
+            {
+                "you can still post",
+                "bạn vẫn có thể đăng",
+                "still post",
+                "vẫn có thể đăng",
+                "may be restricted",
+                "improve visibility",
+            };
+
+            // Selectors for dialog containers
+            var dialogSelectors = new[]
+            {
+                "[data-e2e='modal-dialog']",
+                "div[role='dialog']",
+                "div[class*='modal'][class*='wrapper']",
+                "div[class*='Modal'][class*='Wrapper']",
+                "div[class*='Modal'][class*='Container']",
+                "div[class*='dialog']",
+                "div[class*='Dialog']",
+            };
+
+            while (DateTime.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Delay(1500, cancellationToken).ConfigureAwait(false);
+
+                // ── Check for modal/dialog ────────────────────────────────────────
+                foreach (var sel in dialogSelectors)
+                {
+                    try
+                    {
+                        var el = page.Locator(sel).First;
+                        if (!await IsLocatorVisibleWithinAsync(el, 400f).ConfigureAwait(false)) continue;
+
+                        var modalText = (await el.InnerTextAsync(
+                            new Microsoft.Playwright.LocatorInnerTextOptions { Timeout = 1200 })
+                            .ConfigureAwait(false) ?? string.Empty).Trim();
+
+                        var lower = modalText.ToLowerInvariant();
+
+                        // Not a policy dialog — skip
+                        if (!warnKeywords.Any(k => lower.Contains(k))) continue;
+
+                        var snippet = modalText.Length > 300
+                            ? modalText.Substring(0, 300) + "…"
+                            : modalText;
+
+                        await TakeDebugScreenshotAsync(page, "tiktok_policy_dialog", logAction)
+                            .ConfigureAwait(false);
+
+                        // ── Soft warning: "You can still post" ───────────────────
+                        if (softAllowPhrases.Any(p => lower.Contains(p)))
+                        {
+                            logAction?.Invoke($"  ⚠ TikTok cảnh báo nội dung (soft — vẫn cho đăng):");
+                            logAction?.Invoke($"  \"{snippet}\"");
+                            logAction?.Invoke("  → Đang bấm nút đăng trong hộp thoại…");
+
+                            var clicked = await TryClickPostInsideDialogAsync(el, page, cancellationToken, logAction)
+                                .ConfigureAwait(false);
+
+                            if (clicked)
+                            {
+                                // Reset deadline and keep polling for a success signal
+                                deadline = DateTime.UtcNow.AddSeconds(30);
+                                break;   // exit inner foreach, continue outer while
+                            }
+                            // If we couldn't click the button, fall through to hard-block logic
+                        }
+
+                        // ── Hard block: TikTok won't let us post ──────────────────
+                        logAction?.Invoke($"  ✗ TikTok chặn nội dung (hard block):");
+                        logAction?.Invoke($"  \"{snippet}\"");
+                        return (false, snippet);
+                    }
+                    catch { }
+                }
+
+                // ── JS scan for warning modal (fallback when Playwright selector misses it) ──
+                try
+                {
+                    var jsResult = await page.EvaluateAsync<string>(@"() => {
+                        const warnKw = ['violat','policy','guideline','copyright','vi phạm',
+                            'bản quyền','nội dung bị','cảnh báo','warning','blocked','restricted',
+                            'unable to post','không thể đăng','chính sách','unoriginal','low-quality','qr code'];
+                        const softKw = ['you can still post','bạn vẫn có thể đăng','still post',
+                            'may be restricted','improve visibility'];
+                        const containers = document.querySelectorAll(
+                            '[role=""dialog""], [class*=""modal""], [class*=""Modal""], ' +
+                            '[class*=""dialog""], [class*=""Dialog""]');
+                        for (const el of containers) {
+                            const r = el.getBoundingClientRect();
+                            if (r.width === 0 || r.height === 0) continue;
+                            const text = (el.innerText || '').toLowerCase();
+                            if (!warnKw.some(k => text.includes(k))) continue;
+                            const isSoft = softKw.some(k => text.includes(k));
+                            // Try to click a post/continue button inside the dialog
+                            if (isSoft) {
+                                const btns = Array.from(el.querySelectorAll('button'));
+                                const postBtn = btns.find(b => {
+                                    const t = (b.innerText || '').trim().toLowerCase();
+                                    return t === 'post' || t === 'đăng' || t === 'continue' ||
+                                           t === 'tiếp tục' || t.includes('post anyway') ||
+                                           t.includes('đăng quá');
+                                });
+                                if (postBtn) { postBtn.click(); return 'soft_clicked'; }
+                                return 'soft_no_button';
+                            }
+                            return 'hard:' + (el.innerText || '').trim().substring(0, 300);
+                        }
+                        return null;
+                    }").ConfigureAwait(false);
+
+                    if (!string.IsNullOrEmpty(jsResult))
+                    {
+                        if (jsResult == "soft_clicked")
+                        {
+                            logAction?.Invoke("  ⚠ Soft warning (JS) — đã click nút đăng trong dialog, chờ xác nhận…");
+                            deadline = DateTime.UtcNow.AddSeconds(30);
+                        }
+                        else if (jsResult == "soft_no_button")
+                        {
+                            logAction?.Invoke("  ⚠ Soft warning (JS) — không tìm thấy nút đăng trong dialog.");
+                            await TakeDebugScreenshotAsync(page, "soft_warning_no_btn", logAction).ConfigureAwait(false);
+                            return (false, "Soft warning nhưng không tìm được nút đăng trong dialog.");
+                        }
+                        else if (jsResult.StartsWith("hard:"))
+                        {
+                            var hardText = jsResult.Substring(5);
+                            logAction?.Invoke($"  ✗ TikTok chặn nội dung (JS hard block): \"{hardText}\"");
+                            await TakeDebugScreenshotAsync(page, "hard_block_js", logAction).ConfigureAwait(false);
+                            return (false, hardText);
+                        }
+                    }
+                }
+                catch { }
+
+                // ── Success: URL navigated away from upload page ──────────────────
+                if (!string.Equals(page.Url, uploadUrl, StringComparison.OrdinalIgnoreCase) &&
+                    !page.Url.Contains("/upload", StringComparison.OrdinalIgnoreCase))
+                {
+                    logAction?.Invoke($"  → Trang chuyển sang: {page.Url}");
+                    return (true, null);
+                }
+
+                // ── Success: toast / success modal ────────────────────────────────
+                var successSelectors = new[]
+                {
+                    "[data-e2e='upload-success']",
+                    "div:has-text('Your video is being uploaded')",
+                    "div:has-text('Video uploaded')",
+                    "div:has-text('Đăng thành công')",
+                    "div:has-text('successfully posted')",
+                };
+                foreach (var sel in successSelectors)
+                {
+                    try
+                    {
+                        if (await IsLocatorVisibleWithinAsync(page.Locator(sel).First, 500f).ConfigureAwait(false))
+                        {
+                            logAction?.Invoke($"  → Phát hiện thông báo thành công: {sel}");
+                            return (true, null);
+                        }
+                    }
+                    catch { }
+                }
+
+                // ── Success: upload progress bar disappeared ──────────────────────
+                try
+                {
+                    var progress = page.Locator("[data-e2e='upload-progress'], .upload-progress").First;
+                    if (!await IsLocatorVisibleWithinAsync(progress, 300f).ConfigureAwait(false))
+                    {
+                        logAction?.Invoke("  → Thanh tiến trình upload không còn hiển thị.");
+                        return (true, null);
+                    }
+                }
+                catch { }
+            }
+
+            return (false, null);
+        }
+
+        /// <summary>
+        /// Tries to find and click the "Post" / "Post anyway" / "Continue" button
+        /// inside an already-located dialog element.
+        /// </summary>
+        private static async Task<bool> TryClickPostInsideDialogAsync(
+            ILocator dialogEl,
+            IPage page,
+            CancellationToken cancellationToken,
+            Action<string> logAction)
+        {
+            // Playwright locators scoped to the dialog
+            var buttonTexts = new[]
+            {
+                "Post",
+                "Đăng",
+                "Post anyway",
+                "Đăng quá",
+                "Continue",
+                "Tiếp tục",
+                "Confirm",
+                "Xác nhận",
+            };
+
+            foreach (var text in buttonTexts)
+            {
+                try
+                {
+                    var btn = dialogEl.Locator($"button:has-text('{text}')").First;
+                    if (await IsLocatorVisibleWithinAsync(btn, 600f).ConfigureAwait(false))
+                    {
+                        await btn.ScrollIntoViewIfNeededAsync().ConfigureAwait(false);
+                        await btn.HoverAsync(new Microsoft.Playwright.LocatorHoverOptions
+                            { Force = true }).ConfigureAwait(false);
+                        await Task.Delay(400, cancellationToken).ConfigureAwait(false);
+                        await btn.ClickAsync(new Microsoft.Playwright.LocatorClickOptions
+                            { Force = true }).ConfigureAwait(false);
+                        logAction?.Invoke($"  → Đã click «{text}» trong dialog cảnh báo.");
+                        return true;
+                    }
+                }
+                catch { }
+            }
+
+            return false;
+        }
+
+        private static async Task<bool> IsLocatorVisibleWithinAsync(ILocator locator, float timeoutMs)
+        {
+            if (locator == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                await locator.WaitForAsync(new LocatorWaitForOptions
+                {
+                    State = WaitForSelectorState.Visible,
+                    Timeout = timeoutMs
+                }).ConfigureAwait(false);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static async Task FillCaptionAsync(IPage page, string caption, CancellationToken cancellationToken)
         {
+            // Dismiss any Joyride / onboarding overlay that would intercept pointer events
+            await DismissJoyrideOverlayAsync(page, cancellationToken).ConfigureAwait(false);
+
             foreach (var selector in CaptionInputSelectors)
             {
                 var locator = page.Locator(selector).First;
-                if (await locator.IsVisibleAsync().ConfigureAwait(false))
-                {
-                    await locator.ClickAsync().ConfigureAwait(false);
-                    await page.Keyboard.PressAsync("Control+A").ConfigureAwait(false);
-                    await page.Keyboard.PressAsync("Backspace").ConfigureAwait(false);
-                    await page.Keyboard.TypeAsync(caption).ConfigureAwait(false);
-                    return;
-                }
+                if (!await locator.IsVisibleAsync().ConfigureAwait(false)) continue;
+
+                // Hover then click with Force to bypass any remaining overlay
+                await locator.HoverAsync(new Microsoft.Playwright.LocatorHoverOptions
+                    { Force = true }).ConfigureAwait(false);
+                await Task.Delay(300, cancellationToken).ConfigureAwait(false);
+                await locator.ClickAsync(new Microsoft.Playwright.LocatorClickOptions
+                    { Force = true }).ConfigureAwait(false);
+                await Task.Delay(400, cancellationToken).ConfigureAwait(false);
+
+                // Clear existing text
+                await page.Keyboard.PressAsync("Control+A").ConfigureAwait(false);
+                await Task.Delay(150, cancellationToken).ConfigureAwait(false);
+                await page.Keyboard.PressAsync("Backspace").ConfigureAwait(false);
+                await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+
+                // Type caption human-like — char by char with random delay
+                await TypeHumanLikeAsync(page, caption, cancellationToken).ConfigureAwait(false);
+                return;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException("Could not find caption input on TikTok upload page.");
+        }
+
+        /// <summary>
+        /// Attaches a one-time dialog handler that DISMISSES (rejects) any browser-level
+        /// confirmation dialog (window.confirm / window.onbeforeunload) that TikTok may
+        /// show asking "Are you sure you want to leave?".
+        /// Must be called right after GotoAsync for the upload page.
+        /// </summary>
+        private static void AttachExitDialogGuard(IPage page, Action<string> logAction)
+        {
+            page.Dialog += async (_, dialog) =>
+            {
+                var msg = dialog.Message ?? string.Empty;
+                // Only dismiss exit-style dialogs; accept anything else (e.g. alerts we expect)
+                var isExitDialog =
+                    msg.Contains("exit",  StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("leave", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("discard", StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("rời",   StringComparison.OrdinalIgnoreCase) ||
+                    msg.Contains("thoát", StringComparison.OrdinalIgnoreCase);
+
+                if (isExitDialog)
+                {
+                    logAction?.Invoke($"  [Guard] Chặn dialog thoát trang: \"{msg}\" → Dismiss");
+                    await dialog.DismissAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    await dialog.AcceptAsync().ConfigureAwait(false);
+                }
+            };
+        }
+
+        /// <summary>
+        /// Injects a persistent MutationObserver that removes the react-joyride overlay
+        /// the moment it appears — called once per page load, safe to call multiple times.
+        /// Also removes any existing instance immediately.
+        /// </summary>
+        private static async Task DismissJoyrideOverlayAsync(IPage page, CancellationToken cancellationToken)
+        {
+            try
+            {
+                const string script = @"
+                    (function() {
+                        // Remove existing overlay now
+                        document.querySelectorAll(
+                            '#react-joyride-portal, .react-joyride__overlay, [data-test-id=""overlay""]'
+                        ).forEach(function(el) { el.remove(); });
+
+                        // Set up a watcher so any future injection is removed immediately
+                        if (!window.__joyrideKillerActive) {
+                            window.__joyrideKillerActive = true;
+                            var obs = new MutationObserver(function() {
+                                document.querySelectorAll(
+                                    '#react-joyride-portal, .react-joyride__overlay, [data-test-id=""overlay""]'
+                                ).forEach(function(el) { el.remove(); });
+                            });
+                            obs.observe(document.documentElement, { childList: true, subtree: true });
+                        }
+
+                        // Suppress beforeunload so TikTok cannot show 'leave page?' prompt
+                        if (!window.__beforeUnloadBlocked) {
+                            window.__beforeUnloadBlocked = true;
+                            window.addEventListener('beforeunload', function(e) {
+                                e.stopImmediatePropagation();
+                                delete e['returnValue'];
+                            }, true);
+                        }
+                    })();
+                ";
+                await page.EvaluateAsync(script).ConfigureAwait(false);
+                await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            }
+            catch { /* page may already be closing — ignore */ }
+        }
+
+        private static readonly Random _typingRng = new Random();
+
+        /// <summary>
+        /// Types text character by character with random inter-key delay (30–90 ms),
+        /// mimicking a real user. Pauses slightly after punctuation/spaces.
+        /// </summary>
+        private static async Task TypeHumanLikeAsync(IPage page, string text, CancellationToken cancellationToken)
+        {
+            foreach (var ch in text)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await page.Keyboard.TypeAsync(ch.ToString()).ConfigureAwait(false);
+
+                // Longer pause after sentence-ending chars or spaces for realism
+                int delayMs = ch == ' ' ? _typingRng.Next(60, 130)
+                            : char.IsPunctuation(ch) ? _typingRng.Next(80, 180)
+                            : _typingRng.Next(28, 85);
+
+                await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         private static string BuildAutoPostCaption(string productName, string hashtags)

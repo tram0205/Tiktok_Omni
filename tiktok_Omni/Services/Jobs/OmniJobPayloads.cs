@@ -68,11 +68,42 @@ namespace tiktok_Omni.Services.Jobs
         public string VideoTypeFolder { get; set; } = "Reup";
         public string AffiliateLink { get; set; }
         public string ProductId { get; set; }
+
+        /// <summary>
+        /// When true (schedule-originated jobs), the executor inserts a random
+        /// 30–90 s jitter before starting the browser session.
+        /// </summary>
+        public bool ApplyPrePostJitter { get; set; } = false;
+
+        /// <summary>
+        /// When true, the executor checks <see cref="BrowserLockService"/> before
+        /// posting. If the profile is busy it waits up to 3 × 60 s before giving up.
+        /// </summary>
+        public bool CheckBrowserBusy { get; set; } = false;
+
+        /// <summary>
+        /// When true, skips the profile-scoped folder check inside TikTokAutomation /
+        /// SocialAutomation so that videos stored outside the profile tree can be posted.
+        /// Set by the manual Auto Post Schedule queue.
+        /// </summary>
+        public bool SkipFolderScopeCheck { get; set; } = false;
     }
 
     public sealed class PhilosophyVideoJobPayload
     {
         public string QuoteText { get; set; } = string.Empty;
+
+        /// <summary>Nội dung kịch bản (ưu tiên hơn QuoteText).</summary>
+        public string Content { get; set; } = string.Empty;
+
+        public string Mood { get; set; } = "reflective";
+
+        public string BRollFolder { get; set; } = string.Empty;
+
+        public string MusicFolder { get; set; } = string.Empty;
+
+        public string AmbientFolder { get; set; } = string.Empty;
+
         public string ProfileName { get; set; } = "default";
         public string VoiceId { get; set; } = string.Empty;
         public string VideoStyle { get; set; } = string.Empty;

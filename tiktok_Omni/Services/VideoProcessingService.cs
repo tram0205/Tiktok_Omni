@@ -23,6 +23,8 @@ namespace tiktok_Omni.Services
         private readonly EmotionEngine _emotionEngine = new EmotionEngine();
         private readonly AffiliateNarrationService _affiliateNarrationService = new AffiliateNarrationService();
         private readonly AffiliateVideoPostProcessingService _affiliatePostProcessing = new AffiliateVideoPostProcessingService();
+        private readonly ElevenLabsTtsService _elevenLabsTtsService;
+        private readonly AssSubtitleGeneratorService _assSubtitleGenerator = new AssSubtitleGeneratorService();
         private readonly Random _random = new Random();
 
         private AsyncTasksRebootStore _asyncTasksRebootStore;
@@ -31,6 +33,34 @@ namespace tiktok_Omni.Services
         {
             _asyncTasksRebootStore = rebootStore;
             _mascotWorker = new MascotWorker(_videoService, rebootStore);
+            _elevenLabsTtsService = new ElevenLabsTtsService(_videoService);
+        }
+
+        /// <summary>Gemini sinh danh sách kịch bản Triết lý (Quotes / Story).</summary>
+        public Task<IReadOnlyList<PhilosophyScriptItem>> GeneratePhilosophyScriptsAsync(
+            string topic,
+            string mode,
+            int count,
+            AppSettings settings,
+            int minDurationSeconds = 15,
+            int maxDurationSeconds = 60,
+            CancellationToken cancellationToken = default)
+        {
+            if (settings == null || string.IsNullOrWhiteSpace(settings.AiApiKey))
+            {
+                throw new InvalidOperationException("Cần AI API Key trong Cài đặt.");
+            }
+
+            return _geminiService.GeneratePhilosophyScriptsAsync(
+                topic,
+                mode,
+                count,
+                settings.AiProvider,
+                settings.AiApiKey,
+                settings.AiModel,
+                minDurationSeconds,
+                maxDurationSeconds,
+                cancellationToken);
         }
 
         public async Task<List<string>> GenerateProductVideosAsync(
@@ -1094,6 +1124,240 @@ namespace tiktok_Omni.Services
             progressCallback?.Invoke(100, "Completed");
 
             return outputFile;
+        }
+
+        public async Task<string> RunFullVideoPipelineAsync(
+            IList<AiVideoGenInputItem> items,
+            string script,
+            AppSettings settings,
+            string profileName,
+            Action<string> logAction,
+            Action<VideoRenderProgress> progressAction,
+            CancellationToken cancellationToken)
+        {
+            logAction?.Invoke("[Pipeline] Đang chạy bước Render...");
+            var renderedVideo = await GenerateProductVideoAsync(
+                items,
+                script,
+                settings,
+                profileName,
+                logAction,
+                cancellationToken,
+                (p, s) => progressAction?.Invoke(new VideoRenderProgress { Percent = p, Stage = s })
+            ).ConfigureAwait(false);
+
+            logAction?.Invoke("[Pipeline] Đang chạy bước Đóng gói (Post-processing)...");
+            var baseDir = Path.GetDirectoryName(renderedVideo);
+
+            var finalPath = await _affiliatePostProcessing.ApplyCtaTailOverlayOnlyAsync(
+                renderedVideo,
+                settings,
+                baseDir,
+                logAction,
+                cancellationToken
+            ).ConfigureAwait(false);
+
+            return finalPath;
+        }
+
+        /// <summary>
+        /// Điểm tiếp nhận tab Video reup: ElevenLabs → ASS → FFmpeg burn-in.
+        /// </summary>
+        public async Task RunFullVideoPipelineAsync(
+            VideoReupRowItem item,
+            bool useElevenLabs,
+            bool burnSubtitle,
+            Action<string> logAction,
+            CancellationToken ct)
+        {
+            if (item == null)
+            {
+                throw new ArgumentNullException(nameof(item));
+            }
+
+            ct.ThrowIfCancellationRequested();
+            EnsureReupStageFolder(item);
+            ResolveReupPipelinePaths(item);
+
+            if (useElevenLabs && string.IsNullOrWhiteSpace((item.HookText ?? string.Empty).Trim()))
+            {
+                throw new InvalidOperationException(
+                    "Hook trống — gõ hook vào cột «Hook» hoặc bấm «Gemini: tạo hook».");
+            }
+
+            var sourceVideo = (item.VideoPath ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(sourceVideo) || !File.Exists(sourceVideo))
+            {
+                throw new InvalidOperationException(
+                    "Chưa có video nguồn — nhập URL (rời ô để tải), hoặc chạy «Voiceover đọc hook» / «Tạo video thành phẩm».");
+            }
+
+            if (useElevenLabs)
+            {
+                logAction?.Invoke("[Pipeline] ElevenLabs TTS...");
+                var transcript = await _elevenLabsTtsService.GenerateAndGetTranscriptAsync(
+                    item.HookText,
+                    item.AudioPath,
+                    ct).ConfigureAwait(false);
+                item.Transcript = transcript;
+            }
+
+            string assPath = string.Empty;
+            if (burnSubtitle && item.Transcript != null)
+            {
+                _assSubtitleGenerator.WorkDirectory = item.ReupStageFolder;
+                var settings = await new ConfigManager().LoadAsync().ConfigureAwait(false);
+                if (File.Exists(item.AudioPath) &&
+                    VideoReupRemixService.TryValidateFfmpegToolkit(settings, out _))
+                {
+                    var ms = await SubtitleTimingHelper.GetAudioDurationMsAsync(
+                        settings.FfmpegPath,
+                        item.AudioPath,
+                        ct).ConfigureAwait(false);
+                    _assSubtitleGenerator.DurationMsOverride = ms;
+                }
+
+                assPath = _assSubtitleGenerator.Generate(
+                    item.Transcript,
+                    ReupSubtitleStyleHelper.BuildOptions(settings));
+                logAction?.Invoke("[Pipeline] Phụ đề đã tạo tại: " + assPath);
+            }
+
+            logAction?.Invoke("[Pipeline] FFmpeg burn-in...");
+            await ExecuteFfmpegBurnInAsync(item.VideoPath, assPath, item.OutputPath, logAction, ct)
+                .ConfigureAwait(false);
+
+            item.IsProcessed = true;
+            item.RemixStatus = "Xong";
+            logAction?.Invoke("[Pipeline] Hoàn tất → " + item.OutputPath);
+        }
+
+        private static void ResolveReupPipelinePaths(VideoReupRowItem item)
+        {
+            if (string.IsNullOrWhiteSpace(item.AudioPath))
+            {
+                var tempDir = ProfileScopedPaths.GetTempDownloadsRoot(item.ProfileName);
+                Directory.CreateDirectory(tempDir);
+                item.AudioPath = Path.Combine(tempDir, "hook_pipeline_" + Guid.NewGuid().ToString("N") + ".mp3");
+            }
+
+            if (string.IsNullOrWhiteSpace(item.OutputPath))
+            {
+                var outDir = ProfileScopedPaths.GetVideoReupOutputRoot(item.ProfileName);
+                Directory.CreateDirectory(outDir);
+                var safe = VideoReupCaptionService.SanitizeFileNameFragment(item.ProductName);
+                if (string.IsNullOrWhiteSpace(safe))
+                {
+                    safe = "video";
+                }
+
+                item.OutputPath = Path.Combine(
+                    outDir,
+                    "reup_burnin_" + safe + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".mp4");
+            }
+        }
+
+        private async Task ExecuteFfmpegBurnInAsync(
+            string videoPath,
+            string assPath,
+            string outputPath,
+            Action<string> logAction,
+            CancellationToken cancellationToken)
+        {
+            var settings = await new ConfigManager().LoadAsync().ConfigureAwait(false);
+            if (!VideoReupRemixService.TryValidateFfmpegToolkit(settings, out var ffmpegErr))
+            {
+                throw new InvalidOperationException(ffmpegErr);
+            }
+
+            await ExecuteFfmpegBurnInAsync(
+                videoPath,
+                assPath,
+                outputPath,
+                settings,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        private static async Task ExecuteFfmpegBurnInAsync(
+            string videoPath,
+            string assPath,
+            string outputPath,
+            AppSettings settings,
+            Action<string> logAction,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath))
+            {
+                throw new FileNotFoundException("Không tìm thấy video nguồn để burn-in.", videoPath ?? string.Empty);
+            }
+
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                throw new ArgumentException("OutputPath trống.", nameof(outputPath));
+            }
+
+            var outDir = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(outDir))
+            {
+                Directory.CreateDirectory(outDir);
+            }
+
+            var ffmpeg = (settings.FfmpegPath ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(ffmpeg))
+            {
+                throw new InvalidOperationException("Chưa cấu hình FFmpeg Path.");
+            }
+
+            string args;
+            if (!string.IsNullOrWhiteSpace(assPath) && File.Exists(assPath))
+            {
+                var esc = KaraokeAssSubtitleService.EscapePathForFfmpegSubtitleFilter(assPath);
+                var vf = "subtitles='" + esc + "'";
+                args = "-y -i \"" + videoPath + "\" -vf \"" + vf +
+                       "\" -c:v libx264 -preset medium -crf 23 -c:a copy \"" + outputPath + "\"";
+                logAction?.Invoke("[Pipeline] Burn-in ASS: " + assPath);
+            }
+            else
+            {
+                args = "-y -i \"" + videoPath + "\" -c copy \"" + outputPath + "\"";
+                logAction?.Invoke("[Pipeline] Không có ASS — copy video.");
+            }
+
+            try
+            {
+                await VideoReupRemixService.RunFfmpegPublicAsync(ffmpeg, args, logAction, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                KaraokeAssSubtitleService.SafeDeleteAssFile(assPath);
+            }
+
+            if (!File.Exists(outputPath))
+            {
+                throw new InvalidOperationException("FFmpeg không tạo được file output.");
+            }
+        }
+
+        private static void EnsureReupStageFolder(VideoReupRowItem item)
+        {
+            if (!string.IsNullOrWhiteSpace(item.ReupStageFolder) && Directory.Exists(item.ReupStageFolder))
+            {
+                return;
+            }
+
+            var safe = VideoReupCaptionService.SanitizeFileNameFragment(item.ProductName);
+            if (string.IsNullOrWhiteSpace(safe))
+            {
+                safe = "video";
+            }
+
+            var hash = (item.VideoUrl ?? string.Empty).GetHashCode().ToString("X8");
+            var stagesRoot = ProfileScopedPaths.GetVideoReupStagesRoot(item.ProfileName);
+            var dir = Path.Combine(stagesRoot, safe + "_" + hash);
+            Directory.CreateDirectory(dir);
+            item.ReupStageFolder = dir;
         }
 
         private async Task<List<DownloadedProductImage>> DownloadImagesAsync(
@@ -2641,7 +2905,7 @@ namespace tiktok_Omni.Services
             return $"{voiceHint} {narration}".Trim();
         }
 
-        private Task GenerateNarrationWithTtsStrictAsync(
+        private async Task GenerateNarrationWithTtsStrictAsync(
             string text,
             AppSettings settings,
             string outputAudioFile,
@@ -2650,14 +2914,28 @@ namespace tiktok_Omni.Services
             bool useMultiVoiceNarration = false,
             string workDirectory = null)
         {
-            return _affiliateNarrationService.GenerateNarrationAsync(
-                text,
+            var prepared = text;
+            if (VideoService.IsElevenLabsEndpoint(settings?.TtsEndpoint))
+            {
+                prepared = await VietnameseTtsTextNormalizer.PrepareNarrationForElevenLabsAsync(
+                    text,
+                    settings,
+                    logAction,
+                    cancellationToken).ConfigureAwait(false);
+                if (!string.Equals(prepared, (text ?? string.Empty).Trim(), StringComparison.Ordinal))
+                {
+                    logAction?.Invoke("[TTS] Đã chỉnh dấu/câu script trước ElevenLabs.");
+                }
+            }
+
+            await _affiliateNarrationService.GenerateNarrationAsync(
+                prepared,
                 settings,
                 outputAudioFile,
                 useMultiVoiceNarration,
                 workDirectory ?? Path.GetDirectoryName(outputAudioFile) ?? ".",
                 logAction,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
         }
 
         private static string NormalizeName(string value)
@@ -2760,6 +3038,121 @@ namespace tiktok_Omni.Services
             }
 
             return videoPath;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  AUTO-POST PRE-PROCESSING  (anti-duplicate fingerprint for TikTok)
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Re-masters a video before uploading to TikTok to reduce the risk of
+        /// "Unoriginal / Low-quality / QR code" policy rejection.
+        ///
+        /// Steps applied in a single FFmpeg pass:
+        ///   1. Edge crop (default 3 %) + slight clockwise rotation (1.5°) via affine transform
+        ///   2. Subtle brightness +2 % and saturation +5 % via eq/hue filters
+        ///   3. All metadata stripped (-map_metadata -1)
+        ///
+        /// Returns the path of the remastered file (in the same folder, new random name).
+        /// Throws if the source video is below 720 p (height).
+        /// </summary>
+        public async Task<string> RemasterForAutoPostAsync(
+            string sourceVideoPath,
+            Action<string> logAction,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(sourceVideoPath) || !File.Exists(sourceVideoPath))
+                throw new FileNotFoundException("Video file not found: " + sourceVideoPath);
+
+            // ── 1. Probe resolution ──────────────────────────────────────────
+            var (width, height) = await ProbeVideoResolutionAsync(sourceVideoPath, logAction, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (height > 0 && height < 720)
+                throw new InvalidOperationException(
+                    $"Video độ phân giải quá thấp ({width}×{height}). TikTok yêu cầu tối thiểu 720p — không đăng để tránh bị đánh lỗi chất lượng.");
+
+            logAction?.Invoke($"  Remaster: nguồn {width}×{height} — bắt đầu xử lý…");
+
+            // ── 2. Build output path (random name, same folder, .mp4) ────────
+            var dir      = Path.GetDirectoryName(sourceVideoPath) ?? ".";
+            var outName  = Guid.NewGuid().ToString("N").Substring(0, 16) + ".mp4";
+            var outPath  = Path.Combine(dir, outName);
+
+            // ── 3. Randomise parameters slightly each run ────────────────────
+            var rng        = new Random();
+            double cropPct = 0.02 + rng.NextDouble() * 0.02;       // 2–4 %
+            double rotDeg  = 0.8  + rng.NextDouble() * 1.4;        // 0.8–2.2 °
+            double bright  = 0.01 + rng.NextDouble() * 0.02;       // +1–3 %
+            double satMul  = 1.04 + rng.NextDouble() * 0.04;       // ×1.04–1.08
+
+            // crop=iw*(1-2*c):ih*(1-2*c) then affine rotation (scale=1 to avoid black bands)
+            // eq filter: brightness shift, saturation multiply
+            var cropExpr  = $"crop=iw*(1-2*{cropPct:F4}):ih*(1-2*{cropPct:F4})";
+            var rotExpr   = $"rotate={rotDeg:F4}*PI/180:c=black:ow=iw:oh=ih";
+            var eqExpr    = $"eq=brightness={bright:F4}:saturation={satMul:F4}";
+            var filterStr = $"{cropExpr},{rotExpr},{eqExpr},scale=trunc(iw/2)*2:trunc(ih/2)*2";
+
+            // Minimal re-encode: libx264 fast, aac copy-through, strip all metadata
+            var args = $"-y -i \"{sourceVideoPath}\" " +
+                       $"-vf \"{filterStr}\" " +
+                       $"-c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p " +
+                       $"-c:a aac -b:a 128k " +
+                       $"-map_metadata -1 " +
+                       $"\"{outPath}\"";
+
+            logAction?.Invoke($"  Remaster: crop={cropPct*100:F1}% rot={rotDeg:F2}° bright=+{bright*100:F1}% sat×{satMul:F2}");
+            await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+
+            if (!File.Exists(outPath) || new FileInfo(outPath).Length < 50_000L)
+                throw new InvalidOperationException("Remaster output file missing or too small.");
+
+            logAction?.Invoke($"  Remaster: ✓ → {outName}");
+            return outPath;
+        }
+
+        /// <summary>
+        /// Uses ffprobe to get the (width, height) of a video in pixels.
+        /// Returns (0, 0) on failure.
+        /// </summary>
+        private static async Task<(int width, int height)> ProbeVideoResolutionAsync(
+            string videoPath,
+            Action<string> logAction,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var ffprobe = ResolveFfprobeExecutablePath();
+                var args    = $"-v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 \"{videoPath}\"";
+                var psi     = new ProcessStartInfo
+                {
+                    FileName               = ffprobe,
+                    Arguments              = args,
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                    CreateNoWindow         = true
+                };
+                using (var proc = new Process { StartInfo = psi })
+                {
+                    proc.Start();
+                    var outTask = proc.StandardOutput.ReadToEndAsync();
+                    var errTask = proc.StandardError.ReadToEndAsync();
+                    await ProcessCancellationHelper.WaitUntilExitAsync(proc, cancellationToken, 30)
+                        .ConfigureAwait(false);
+                    var text = (await outTask.ConfigureAwait(false)).Trim();
+                    var parts = text.Split(',');
+                    if (parts.Length >= 2 &&
+                        int.TryParse(parts[0], out var w) &&
+                        int.TryParse(parts[1], out var h))
+                        return (w, h);
+                }
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("  Remaster probe lỗi: " + ex.Message);
+            }
+            return (0, 0);
         }
     }
 

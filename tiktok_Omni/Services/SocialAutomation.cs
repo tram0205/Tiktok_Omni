@@ -68,6 +68,7 @@ namespace tiktok_Omni.Services
             }
 
             return BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(payload.Profile),
                 ct => RunOmnichannelAutoPostCoreAsync(payload, ct, logAction),
                 cancellationToken);
         }
@@ -132,7 +133,8 @@ namespace tiktok_Omni.Services
                     reuseExistingAutoPostBrowser: reuseBrowser,
                     keepBrowserOpenAfter: moreAfterTikTok,
                     affiliateLink: attachLink,
-                    productId: attachProductId).ConfigureAwait(false);
+                    productId: attachProductId,
+                    skipFolderScopeCheck: payload.SkipFolderScopeCheck).ConfigureAwait(false);
                 reuseBrowser = moreAfterTikTok;
             }
 
@@ -159,7 +161,8 @@ namespace tiktok_Omni.Services
                     reuseExistingAutoPostBrowser: reuseBrowser || payload.PostTikTok,
                     keepBrowserOpenAfter: moreAfterFacebook,
                     attachShopeeLink: payload.FacebookAttachShopeeLink,
-                    facebookShopeeLink: payload.FacebookShopeeLink).ConfigureAwait(false);
+                    facebookShopeeLink: payload.FacebookShopeeLink,
+                    skipFolderScopeCheck: payload.SkipFolderScopeCheck).ConfigureAwait(false);
                 reuseBrowser = moreAfterFacebook;
             }
 
@@ -176,7 +179,8 @@ namespace tiktok_Omni.Services
                     payload.VideoFilePath,
                     clickPublish: true,
                     reuseExistingAutoPostBrowser: reuseBrowser || payload.PostTikTok || payload.PostFacebook,
-                    keepBrowserOpenAfter: false).ConfigureAwait(false);
+                    keepBrowserOpenAfter: false,
+                    skipFolderScopeCheck: payload.SkipFolderScopeCheck).ConfigureAwait(false);
             }
 
             await _tikTokAutomation.CloseAutoPostBrowserAsync(logAction).ConfigureAwait(false);
@@ -202,6 +206,7 @@ namespace tiktok_Omni.Services
             }
 
             return BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(profileName),
                 ct => LoginAllSocialCoreAsync(profileName, profile, ct, logAction),
                 cancellationToken);
         }
@@ -413,6 +418,7 @@ namespace tiktok_Omni.Services
             }
 
             return BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(profileName),
                 ct => ScrapeAffiliateRevenueReportCoreAsync(profileName, profile, ct, logAction),
                 cancellationToken);
         }
@@ -769,6 +775,7 @@ return rows;") as System.Collections.ObjectModel.ReadOnlyCollection<object>;
             }
 
             return BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(profileName),
                 ct => RunPlatformManualLoginCoreAsync(
                     profileName,
                     profile,

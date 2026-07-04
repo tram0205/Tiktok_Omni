@@ -121,9 +121,10 @@ namespace tiktok_Omni.Services
                     return CheckVideoFile(output, out errorMessage);
                 }
 
-                if (payload.UseVisualHookSfx)
+                if (VideoReupRemixService.ShouldUseVisualHookSfx(row))
                 {
-                    if (!CheckAudioFile(payload.VisualHookSfxPath, "Hook SFX 3s", out errorMessage))
+                    var sfx = (row.VisualHookSfxPath ?? payload.VisualHookSfxPath ?? string.Empty).Trim();
+                    if (!CheckAudioFile(sfx, "Hook SFX 3s", out errorMessage))
                     {
                         return false;
                     }

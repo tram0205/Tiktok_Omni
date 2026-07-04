@@ -13,8 +13,6 @@ namespace tiktok_Omni
     public partial class Form1
     {
         private Button btnEmergencyStop;
-        private Button btnClearAiGenGrid;
-        private Button btnOpenOutputFolder;
 
         private void btnEmergencyStop_Click(object sender, EventArgs e)
         {
@@ -51,6 +49,8 @@ namespace tiktok_Omni
             TryCancel(_affiliateRowEnrichCts);
             TryCancel(_affiliateCategorizeCts);
             TryCancel(_aiVideoGenCancellation);
+            TryCancel(_philosophyRenderCts);
+            _philosophyRenderPaused = true;
             DisposeActiveJobCancellation();
 
             _globalJobQueue?.ClearAll();
@@ -153,14 +153,12 @@ namespace tiktok_Omni
                     break;
                 case AiVideoGenMode.Mascot:
                     _mascotPreviewSceneScripts?.Clear();
-                    _mascotPreviewImagePaths?.Clear();
-                    _selectedMascotPreviewSceneIndex = -1;
                     Log("[Grid] Đã làm sạch preview Mascot.");
                     break;
                 case AiVideoGenMode.Philosophy:
-                    if (txtPhilosophyInput != null)
+                    if (txtPhilosophyTopic != null)
                     {
-                        txtPhilosophyInput.Clear();
+                        txtPhilosophyTopic.Clear();
                     }
 
                     Log("[Grid] Đã làm sạch nội dung Triết lý.");
@@ -225,7 +223,7 @@ namespace tiktok_Omni
             }
         }
 
-        /// <summary>Các dòng đang hiển thị trên lưới affiliate (đã áp filter HQ nếu bật).</summary>
+        /// <summary>Các dòng đang hiển thị trên lưới affiliate (khi không tô dòng nào).</summary>
         private List<AffiliateCandidate> GetVisibleAffiliateCandidatesForPush()
         {
             if (_affiliateBindingList == null || _affiliateBindingList.Count == 0)
@@ -233,38 +231,57 @@ namespace tiktok_Omni
                 return new List<AffiliateCandidate>();
             }
 
-            if (dgvAffiliateResults?.SelectedRows != null && dgvAffiliateResults.SelectedRows.Count > 0)
-            {
-                var selected = new List<AffiliateCandidate>();
-                foreach (DataGridViewRow row in dgvAffiliateResults.SelectedRows)
-                {
-                    if (row?.DataBoundItem is AffiliateCandidate candidate)
-                    {
-                        selected.Add(candidate);
-                    }
-                }
-
-                if (selected.Count > 0)
-                {
-                    return selected;
-                }
-            }
-
             return _affiliateBindingList.Where(x => x != null).ToList();
         }
 
-        private void PushVisibleAffiliateRowsToAiVideoGen(bool targetDeepDive)
+        /// <summary>Chụp dòng đang tô trên lưới affiliate (trước dialog — tránh mất selection khi ShowDialog).</summary>
+        private List<AffiliateCandidate> GetSelectedAffiliateCandidatesSnapshot()
         {
-            var visible = GetVisibleAffiliateCandidatesForPush();
+            var list = new List<AffiliateCandidate>();
+            if (dgvAffiliateResults?.SelectedRows == null || dgvAffiliateResults.SelectedRows.Count == 0)
+            {
+                return list;
+            }
+
+            foreach (DataGridViewRow row in dgvAffiliateResults.SelectedRows
+                         .Cast<DataGridViewRow>()
+                         .Where(r => r != null && !r.IsNewRow)
+                         .OrderBy(r => r.Index))
+            {
+                if (row.DataBoundItem is AffiliateCandidate candidate && candidate != null)
+                {
+                    list.Add(candidate);
+                }
+            }
+
+            return list;
+        }
+
+        /// <summary>Các dòng để đẩy: ưu tiên snapshot đã chọn, không thì toàn bộ lưới đang hiển thị.</summary>
+        private List<AffiliateCandidate> ResolveAffiliateCandidatesForPush(IList<AffiliateCandidate> selectedOverride)
+        {
+            if (selectedOverride != null && selectedOverride.Count > 0)
+            {
+                return selectedOverride
+                    .Where(x => x != null)
+                    .GroupBy(x => (x.VideoUrl ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First())
+                    .ToList();
+            }
+
+            return GetVisibleAffiliateCandidatesForPush();
+        }
+
+        private void PushAffiliateRowsToAiVideoGen(bool targetDeepDive, IList<AffiliateCandidate> selectedOverride = null)
+        {
+            var visible = ResolveAffiliateCandidatesForPush(selectedOverride);
             if (visible.Count == 0)
             {
-                Log("Không có dòng affiliate hiển thị trên lưới để đẩy sang AI Video Gen.");
+                Log("Không có dòng affiliate để đẩy sang AI Video Gen (hãy tô dòng hoặc săn trước).");
                 return;
             }
 
             var mapped = visible
-                .GroupBy(x => (x.VideoUrl ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.First())
                 .Select(MapAffiliateToAiVideoInput)
                 .Where(x => x != null)
                 .ToList();
@@ -282,9 +299,12 @@ namespace tiktok_Omni
                 txtAiVideoGenPrompt.Text = string.Empty;
             }
 
+            var selectionNote = selectedOverride != null && selectedOverride.Count > 0
+                ? $"{selectedOverride.Count} dòng đã tô"
+                : "toàn bộ lưới đang hiển thị";
             var onlyHigh = chkAffiliateOnlyHighQuality?.Checked ?? false;
             Log(
-                $"Đã đẩy {mapped.Count} sản phẩm (lưới đang hiển thị{(onlyHigh ? ", lọc HQ" : string.Empty)}) sang " +
+                $"Đã đẩy {mapped.Count} sản phẩm ({selectionNote}{(onlyHigh && selectedOverride == null ? ", lọc HQ" : string.Empty)}) sang " +
                 $"{(targetDeepDive ? "Affiliate Deep" : "Slideshow")} (có ảnh: {withImage}, nick: {string.Join(", ", nicks)}).");
 
             if (!targetDeepDive)
@@ -300,17 +320,24 @@ namespace tiktok_Omni
             SwitchToMainTab(tabAiVideoGen);
         }
 
-        private void PushVisibleAffiliateRowsToVideoReup()
+        /// <summary>Giữ tên cũ cho pipeline công nghiệp — đẩy toàn bộ lưới hiển thị.</summary>
+        private void PushVisibleAffiliateRowsToAiVideoGen(bool targetDeepDive) =>
+            PushAffiliateRowsToAiVideoGen(targetDeepDive, selectedOverride: null);
+
+        private void PushAffiliateRowsToVideoReup(IList<AffiliateCandidate> selectedOverride = null)
         {
-            var visible = GetVisibleAffiliateCandidatesForPush();
+            var visible = ResolveAffiliateCandidatesForPush(selectedOverride);
             if (visible.Count == 0)
             {
-                LogVideoReup("Video reup: không có dòng affiliate trên lưới để đẩy.");
+                LogVideoReup("Video reup: không có dòng affiliate để đẩy (hãy tô dòng hoặc săn trước).");
                 return;
             }
 
             PushAffiliateCandidatesToVideoReup(visible);
         }
+
+        private void PushVisibleAffiliateRowsToVideoReup() =>
+            PushAffiliateRowsToVideoReup(selectedOverride: null);
 
         private Button CreateClearGridButton()
         {

@@ -142,6 +142,13 @@ namespace tiktok_Omni.Services
 
         public string PostFingerprint { get; set; } = string.Empty;
 
+        /// <summary>
+        /// When true, skips the profile-scoped folder check so that any video file
+        /// can be posted regardless of where it lives on disk.
+        /// Used by the manual Auto Post Schedule queue.
+        /// </summary>
+        public bool SkipFolderScopeCheck { get; set; }
+
 
 
         /// <summary>Null hoặc rỗng = video nuôi kênh (không gắn sản phẩm).</summary>

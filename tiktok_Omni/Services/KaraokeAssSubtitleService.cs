@@ -30,7 +30,8 @@ namespace tiktok_Omni.Services
             string openAiApiKey = null,
             AssSubtitleGeneratorOptions assOptions = null,
             string assFileName = null,
-            IReadOnlyList<WordTimestamp> precomputedWordTimestamps = null)
+            IReadOnlyList<WordTimestamp> precomputedWordTimestamps = null,
+            double? knownAudioDurationSeconds = null)
         {
             if (string.IsNullOrWhiteSpace(audioFilePath) || !File.Exists(audioFilePath))
             {
@@ -46,7 +47,7 @@ namespace tiktok_Omni.Services
                     log?.Invoke("[Karaoke ASS] Dùng " + timestamps.Count + " từ Whisper đã bóc sẵn.");
                 }
 
-                var apiKey = (openAiApiKey ?? string.Empty).Trim();
+                var apiKey = LooksLikeOpenAiApiKey(openAiApiKey) ? openAiApiKey.Trim() : null;
                 if ((timestamps == null || timestamps.Count == 0) && !string.IsNullOrEmpty(apiKey))
                 {
                     try
@@ -87,10 +88,12 @@ namespace tiktok_Omni.Services
                         return null;
                     }
 
-                    var durationMs = await SubtitleTimingHelper.GetAudioDurationMsAsync(
-                        ffmpegExecutablePath,
-                        audioFilePath,
-                        cancellationToken).ConfigureAwait(false);
+                    var durationMs = knownAudioDurationSeconds.HasValue && knownAudioDurationSeconds.Value > 0.05d
+                        ? knownAudioDurationSeconds.Value * 1000d
+                        : await SubtitleTimingHelper.GetAudioDurationMsAsync(
+                            ffmpegExecutablePath,
+                            audioFilePath,
+                            cancellationToken).ConfigureAwait(false);
                     if (durationMs < 50d)
                     {
                         log?.Invoke("[Karaoke ASS] Bỏ qua phụ đề — không đọc được thời lượng audio.");
@@ -126,6 +129,12 @@ namespace tiktok_Omni.Services
                 log?.Invoke("[Karaoke ASS] Không tạo được phụ đề: " + ex.Message);
                 return null;
             }
+        }
+
+        public static bool LooksLikeOpenAiApiKey(string apiKey)
+        {
+            var trimmed = (apiKey ?? string.Empty).Trim();
+            return trimmed.StartsWith("sk-", StringComparison.OrdinalIgnoreCase);
         }
 
         public static void SafeDeleteAssFile(string assFilePath)

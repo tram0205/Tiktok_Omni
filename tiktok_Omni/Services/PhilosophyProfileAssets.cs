@@ -27,6 +27,101 @@ namespace tiktok_Omni.Services
             return found ?? new AutomationProfile { Name = target };
         }
 
+        public static IEnumerable<string> GetMusicSearchDirectories(string profileName, AppSettings settings)
+        {
+            var root = GetAssetsRoot(profileName);
+            yield return Path.Combine(root, "music");
+            yield return root;
+            yield return VideoReupRemixService.GetMusicLibraryDirectory(settings);
+        }
+
+        /// <summary>Liệt kê tên file nhạc (.mp3/.wav/.m4a) từ profile + thư viện Video reup.</summary>
+        public static List<string> EnumerateMusicFileNames(string profileName, AppSettings settings)
+        {
+            var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var dir in GetMusicSearchDirectories(profileName, settings))
+            {
+                if (!Directory.Exists(dir))
+                {
+                    continue;
+                }
+
+                foreach (var ext in new[] { "*.mp3", "*.wav", "*.m4a" })
+                {
+                    foreach (var path in Directory.GetFiles(dir, ext, SearchOption.TopDirectoryOnly))
+                    {
+                        var name = Path.GetFileName(path);
+                        if (!string.IsNullOrWhiteSpace(name) && !names.ContainsKey(name))
+                        {
+                            names[name] = path;
+                        }
+                    }
+                }
+            }
+
+            return names.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>Giá trị ô Nhạc: tên file, đường dẫn đầy đủ, hoặc thư mục (legacy).</summary>
+        public static string ResolveMusicPath(string selection, string profileName, AppSettings settings, string mood)
+        {
+            var sel = (selection ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(sel))
+            {
+                return string.Empty;
+            }
+
+            if (File.Exists(sel))
+            {
+                return sel;
+            }
+
+            foreach (var dir in GetMusicSearchDirectories(profileName, settings))
+            {
+                if (!Directory.Exists(dir))
+                {
+                    continue;
+                }
+
+                var path = Path.Combine(dir, sel);
+                if (File.Exists(path))
+                {
+                    return path;
+                }
+            }
+
+            if (Directory.Exists(sel))
+            {
+                return TryPickMusicFromDirectory(sel, mood);
+            }
+
+            return string.Empty;
+        }
+
+        private static string TryPickMusicFromDirectory(string folder, string mood)
+        {
+            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            {
+                return string.Empty;
+            }
+
+            var files = new List<string>();
+            foreach (var ext in new[] { "*.mp3", "*.wav", "*.m4a" })
+            {
+                files.AddRange(Directory.GetFiles(folder, ext, SearchOption.TopDirectoryOnly));
+            }
+
+            if (files.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var key = (mood ?? string.Empty).Trim().ToLowerInvariant();
+            var match = files.FirstOrDefault(f =>
+                Path.GetFileName(f).IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
+            return match ?? files[0];
+        }
+
         public static string TryPickMusicFile(string profileName, string mood)
         {
             var root = GetAssetsRoot(profileName);
@@ -182,6 +277,20 @@ namespace tiktok_Omni.Services
             }
 
             return string.Empty;
+        }
+
+        /// <summary>Thư mục mặc định đặt video phân cảnh tự làm (mode 3): Assets\{profile}\philosophy-scenes\</summary>
+        public static string GetPreRenderedScenesDirectory(string profileName)
+        {
+            return Path.Combine(GetAssetsRoot(profileName), "philosophy-scenes");
+        }
+
+        /// <summary>Tạo thư mục philosophy-scenes nếu chưa có và trả đường dẫn tuyệt đối.</summary>
+        public static string EnsurePreRenderedScenesDirectory(string profileName)
+        {
+            var dir = GetPreRenderedScenesDirectory(profileName);
+            Directory.CreateDirectory(dir);
+            return dir;
         }
     }
 }

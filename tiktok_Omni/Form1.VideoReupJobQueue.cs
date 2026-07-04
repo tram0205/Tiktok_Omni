@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,9 @@ namespace tiktok_Omni
     public partial class Form1
     {
         private readonly HashSet<Guid> _videoReupBatchJobIds = new HashSet<Guid>();
+        private int _videoReupBatchRunExpected;
+        private int _videoReupBatchRunSuccess;
+        private int _videoReupBatchRunFail;
 
         private async void btnVideoReupRenderBatch_Click(object sender, EventArgs e)
         {
@@ -56,6 +60,9 @@ namespace tiktok_Omni
                 _videoReupBindingList?.ResetBindings();
                 LogVideoReup($"[JobQueue] Video reup lô: đã xếp {enqueued}/{list.Count} job. Bấm «Dừng» để hủy các job đang chờ.");
                 SetVideoReupProgress($"Đã xếp {enqueued} job vào hàng đợi", 5);
+                _videoReupBatchRunExpected = enqueued;
+                _videoReupBatchRunSuccess = 0;
+                _videoReupBatchRunFail = 0;
             }
             catch (Exception ex)
             {
@@ -78,6 +85,7 @@ namespace tiktok_Omni
             ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(settings.StorageRootPath, profile);
             var cts = new CancellationTokenSource();
             ApplyReupVisualHookSettingsToRow(row);
+            VideoReupRemixService.SanitizeStaleReupCache(row);
             var payload = new VideoReupJobPayload
             {
                 Row = CloneVideoReupRowForJob(row),
@@ -171,9 +179,18 @@ namespace tiktok_Omni
             CancellationToken cancellationToken)
         {
             var url = (payload.Row.VideoUrl ?? string.Empty).Trim();
+            FlushVideoReupHookDraftFromEditor();
+            FlushVideoReupVideoUrlFromEditor();
             var row = FindVideoReupRowByVideoUrl(url) ?? payload.Row;
+            VideoReupRemixService.SanitizeStaleReupCache(row);
+            if (ReferenceEquals(row, payload.Row) == false)
+            {
+                VideoReupRemixService.SanitizeStaleReupCache(payload.Row);
+            }
+
             var settings = await _configManager.LoadAsync().ConfigureAwait(true);
             ProfileScopedPaths.SetConfiguredStorageRoot(payload.StorageRootPath ?? settings.StorageRootPath);
+            ApplyReupVisualHookSettingsToRow(row);
 
             if (payload.BatchTotal > 0)
             {
@@ -182,7 +199,15 @@ namespace tiktok_Omni
             }
 
             ui.Log("Video reup [Job] «" + row.ProductName + "»…");
-            ui.Log(VideoReupRemixService.DescribePipelineBlockers(row, settings));
+            if (!VideoReupRemixService.LooksLikeHttpVideoUrl(row.VideoUrl))
+            {
+                ui.Log("Video reup [Job]: URL video không hợp lệ — cần link TikTok http(s).");
+            }
+            else if (string.IsNullOrWhiteSpace((row.ReupDownloadedVideoPath ?? string.Empty).Trim())
+                     || !File.Exists(row.ReupDownloadedVideoPath))
+            {
+                ui.Log("Video reup [Job]: chưa có source.mp4 — pipeline sẽ tự tải ở bước 1/4.");
+            }
 
             try
             {

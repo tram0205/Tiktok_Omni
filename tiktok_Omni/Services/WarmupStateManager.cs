@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 
@@ -8,6 +10,7 @@ namespace tiktok_Omni.Services
     public class WarmupStateManager
     {
         private const string StateFileName = "warmup_state.json";
+        private const string ProfileChannelStatesFileName = "profile_channel_states.json";
 
         public async Task<WarmupRunState> LoadAsync()
         {
@@ -55,10 +58,98 @@ namespace tiktok_Omni.Services
             return Task.CompletedTask;
         }
 
+        public async Task<Dictionary<string, ProfileChannelState>> LoadProfileChannelStatesAsync()
+        {
+            var path = GetProfileChannelStatesPath();
+            if (!File.Exists(path))
+            {
+                return new Dictionary<string, ProfileChannelState>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            try
+            {
+                var json = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return new Dictionary<string, ProfileChannelState>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                var list = JsonConvert.DeserializeObject<List<ProfileChannelState>>(json) ?? new List<ProfileChannelState>();
+                return list
+                    .Where(s => s != null && !string.IsNullOrWhiteSpace(s.ProfileName))
+                    .GroupBy(s => s.ProfileName.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return new Dictionary<string, ProfileChannelState>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        public async Task SaveProfileChannelStatesAsync(IEnumerable<ProfileChannelState> states)
+        {
+            var list = (states ?? Enumerable.Empty<ProfileChannelState>())
+                .Where(s => s != null && !string.IsNullOrWhiteSpace(s.ProfileName))
+                .Select(s =>
+                {
+                    s.ProfileName = s.ProfileName.Trim();
+                    return s;
+                })
+                .GroupBy(s => s.ProfileName, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.Last())
+                .OrderBy(s => s.ProfileName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var json = JsonConvert.SerializeObject(list, Formatting.Indented);
+            await Task.Run(() => File.WriteAllText(GetProfileChannelStatesPath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
+        }
+
+        public async Task<ProfileChannelState> GetOrCreateProfileChannelStateAsync(string profileName)
+        {
+            var key = (profileName ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(key))
+            {
+                key = "default";
+            }
+
+            var map = await LoadProfileChannelStatesAsync().ConfigureAwait(false);
+            if (map.TryGetValue(key, out var existing) && existing != null)
+            {
+                return existing;
+            }
+
+            return new ProfileChannelState
+            {
+                ProfileName = key,
+                Mode = ProfileOperationalMode.Posting
+            };
+        }
+
         private static string GetStatePath()
         {
             return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, StateFileName);
         }
+
+        private static string GetProfileChannelStatesPath()
+        {
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ProfileChannelStatesFileName);
+        }
+    }
+
+    public enum ProfileOperationalMode
+    {
+        Posting = 0,
+        WarmupNormal = 1,
+        HighIntensityWarmup = 2
+    }
+
+    public class ProfileChannelState
+    {
+        public string ProfileName { get; set; } = string.Empty;
+        public ProfileOperationalMode Mode { get; set; } = ProfileOperationalMode.Posting;
+        public DateTime? LastTransitionUtc { get; set; }
+        public DateTime? LastHealthCheckUtc { get; set; }
+        public ChannelHealthSnapshot LastSnapshot { get; set; }
     }
 
     public class WarmupRunState

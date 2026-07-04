@@ -70,6 +70,70 @@ namespace tiktok_Omni
                 tslStatusMain.Text = $"Jobs: {running} chạy, {pending} chờ";
             }
 
+            // ── Schedule-entry status sync ────────────────────────────────────────
+            // Note: the InvokeRequired guard at the top of this method already
+            // ensures we are on the UI thread (via BeginInvoke). The explicit
+            // Invoke call below adds belt-and-suspenders safety for any future
+            // code path that might call this method directly from a worker thread.
+            if (_scheduleJobMap.TryGetValue(job.Id, out var scheduleSlot))
+            {
+                var (entry, dgv) = scheduleSlot;
+                bool   isFinal   = false;
+                string newStatus = entry.Status;
+                string newError  = entry.LastError;
+
+                switch (job.Status)
+                {
+                    case OmniJobStatus.Running:
+                        newStatus = "Running";
+                        newError  = string.Empty;
+                        break;
+                    case OmniJobStatus.RetryPending:
+                        newStatus = "Đang thử lại…";
+                        break;
+                    case OmniJobStatus.Completed:
+                        newStatus = "Done";
+                        newError  = string.Empty;
+                        _scheduleJobMap.TryRemove(job.Id, out _);
+                        isFinal   = true;
+                        break;
+                    case OmniJobStatus.Failed:
+                        newStatus = "Failed";
+                        newError  = job.LastError;
+                        _scheduleJobMap.TryRemove(job.Id, out _);
+                        isFinal   = true;
+                        break;
+                    case OmniJobStatus.Cancelled:
+                        newStatus = "Pending";
+                        newError  = string.Empty;
+                        _scheduleJobMap.TryRemove(job.Id, out _);
+                        isFinal   = true;
+                        break;
+                }
+
+                void ApplyToGrid()
+                {
+                    entry.Status    = newStatus;
+                    entry.LastError = newError;
+                    dgv?.Refresh();
+                }
+                if (dgv?.InvokeRequired ?? false)
+                    dgv.Invoke((Action)ApplyToGrid);
+                else
+                    ApplyToGrid();
+
+                if (isFinal)
+                {
+                    var remaining = Interlocked.Decrement(ref _pendingScheduleJobCount);
+                    if (remaining <= 0 && _isAutoPostScheduleQueueRunning)
+                    {
+                        _isAutoPostScheduleQueueRunning = false;
+                        RefreshAutoPostScheduleStatus();
+                        LogAutoPost("[Lịch đăng] ✓ Tất cả job đã hoàn tất.");
+                    }
+                }
+            }
+
             if (job.Status == OmniJobStatus.Failed || job.Status == OmniJobStatus.Cancelled)
             {
                 if (ReferenceEquals(job, _activeHuntJob))
@@ -147,6 +211,18 @@ namespace tiktok_Omni
                 _videoReupBatchJobIds.Remove(jobId);
             }
 
+            if (_videoReupBatchRunExpected > 0)
+            {
+                if (success)
+                {
+                    _videoReupBatchRunSuccess++;
+                }
+                else if (!string.IsNullOrWhiteSpace(error) && !string.Equals(error, "Đã hủy", StringComparison.OrdinalIgnoreCase))
+                {
+                    _videoReupBatchRunFail++;
+                }
+            }
+
             var url = (videoUrl ?? string.Empty).Trim();
             if (success && result != null && !string.IsNullOrWhiteSpace(result.OutputPath))
             {
@@ -186,6 +262,18 @@ namespace tiktok_Omni
 
             if (_videoReupBatchJobIds.Count == 0 && pendingReup == 0)
             {
+                if (_videoReupBatchRunExpected > 0)
+                {
+                    var expected = _videoReupBatchRunExpected;
+                    var ok = _videoReupBatchRunSuccess;
+                    var fail = _videoReupBatchRunFail;
+                    _videoReupBatchRunExpected = 0;
+                    _videoReupBatchRunSuccess = 0;
+                    _videoReupBatchRunFail = 0;
+                    SetVideoReupProgress("Render lô: xong " + ok + "/" + expected, 100);
+                    ShowVideoReupBatchDoneMessage("Render lô (hàng đợi)", ok, fail, expected);
+                }
+
                 if (!_affiliateAutoEnrichRunning && _huntCancellation == null && !_affiliateDownloadingBatch)
                 {
                     btnStopHunt.Enabled = false;
@@ -204,7 +292,14 @@ namespace tiktok_Omni
                 .ConfigureAwait(false);
         }
 
-        void IJobUiBridge.Log(string message) => Log(message);
+        void IJobUiBridge.Log(string message)
+        {
+            Log(message);
+            // Mirror job-level messages (from TikTokAutomation, SocialAutomation, etc.) to the
+            // AutoPost tab log panel whenever a schedule-originated job is actively running.
+            if (_scheduleJobMap.Count > 0 || _isAutoPostScheduleQueueRunning)
+                AppendToAutoPostLog(message);
+        }
 
         public void OnHuntKeywordStarted(int index, int total, string keyword, string profileName)
         {
@@ -230,11 +325,15 @@ namespace tiktok_Omni
                 return;
             }
 
-            MergeAffiliateHuntResultsIntoAll(_affiliateAllResults, batch ?? new List<AffiliateCandidate>(), keyword);
+            var huntBatch = batch ?? new List<AffiliateCandidate>();
+            SortAffiliateCandidatesByViewsDescending(huntBatch);
+            MergeAffiliateHuntResultsIntoAll(_affiliateAllResults, huntBatch, keyword);
+            SortAffiliateCandidatesByViewsDescending(_affiliateAllResults);
             RefreshAffiliateGridByQualityFilter();
             _affiliateBindingList?.ResetBindings();
             dgvAffiliateResults?.Invalidate();
             RecomputeAffiliateDeepDiveErrorColumnVisibility();
+            SaveAffiliateHuntResultsToDisk();
 
             var withMetrics = (batch ?? new List<AffiliateCandidate>())
                 .Count(c => c != null && c.MetricsCapturedAtUtc != DateTime.MinValue);
@@ -328,6 +427,7 @@ namespace tiktok_Omni
 
             RefreshAffiliateGridByQualityFilter();
             _affiliateBindingList?.ResetBindings();
+            SaveAffiliateHuntResultsToDisk();
             Log("[Category] Đã cập nhật cột Ngách trên lưới.");
         }
 
@@ -372,6 +472,7 @@ namespace tiktok_Omni
             _affiliateBindingList?.ResetBindings();
             RecomputeAffiliateDeepDiveErrorColumnVisibility();
             RefreshAffiliateToolbarButtons();
+            SaveAffiliateHuntResultsToDisk();
         }
 
         private AffiliateCandidate FindAffiliateCandidateByVideoUrl(string videoUrl)
@@ -579,7 +680,7 @@ namespace tiktok_Omni
         private void FinishRenderJobUi(bool success, string error)
         {
             _activeRenderJob = null;
-            btnRenderAiVideo.Enabled = true;
+            btnProcessVideo.Enabled = true;
             btnGenerateGeminiPrompt.Enabled = true;
             _aiVideoGenCancellation?.Dispose();
             _aiVideoGenCancellation = null;
@@ -754,7 +855,6 @@ namespace tiktok_Omni
             }
 
             _mascotPreviewSceneScripts = (sceneScripts ?? new List<string>()).ToList();
-            BindMascotPreviewImages(_mascotPreviewImagePaths, _mascotPreviewSceneScripts);
             Log("[Mascot] Đã tạo kịch bản " + _mascotPreviewSceneScripts.Count + " cảnh (Gemini).");
         }
 
@@ -871,7 +971,7 @@ namespace tiktok_Omni
 
             _activeAffiliateDeepRenderJobId = null;
             btnRunAffiliateDeepVideo.Enabled = true;
-            btnRenderAiVideo.Enabled = true;
+            btnProcessVideo.Enabled = true;
             btnGenerateGeminiPrompt.Enabled = true;
             btnReviewScriptBeforeRender.Enabled = true;
 

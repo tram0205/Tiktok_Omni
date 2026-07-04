@@ -42,6 +42,13 @@ namespace tiktok_Omni
         private readonly System.Windows.Forms.Timer _autoPostTabRefreshTimer = new System.Windows.Forms.Timer();
         private readonly System.Windows.Forms.Timer _autoPostFolderDebounceTimer = new System.Windows.Forms.Timer();
 
+        // ── AutoPost log panels ───────────────────────────────────────────────
+        private RichTextBox rtbAutoPostLog;         // shared bottom log strip
+        private RichTextBox rtbLogTikTok;           // per-platform inline logs
+        private RichTextBox rtbLogFb;
+        private RichTextBox rtbLogYt;
+        private const int AutoPostLogMaxLines = 600;
+
         private void BuildAutoPostUi()
         {
             tabAutoPost.SuspendLayout();
@@ -50,12 +57,12 @@ namespace tiktok_Omni
             BuildAutoPostSharedControls();
             pnlAutoPostShared = BuildAutoPostSharedPanel();
 
-            tabTikTokPost = new TabPage("TikTok") { Name = "tabTikTokPost" };
+            tabTikTokPost   = new TabPage("TikTok")   { Name = "tabTikTokPost" };
             tabFacebookPost = new TabPage("Facebook") { Name = "tabFacebookPost" };
-            tabYouTubePost = new TabPage("YouTube") { Name = "tabYouTubePost" };
-            ConfigureAutoPostPlatformTab(tabTikTokPost, AutoPostTikTokSurface);
+            tabYouTubePost  = new TabPage("YouTube")  { Name = "tabYouTubePost" };
+            ConfigureAutoPostPlatformTab(tabTikTokPost,   AutoPostTikTokSurface);
             ConfigureAutoPostPlatformTab(tabFacebookPost, AutoPostFacebookSurface);
-            ConfigureAutoPostPlatformTab(tabYouTubePost, AutoPostYouTubeSurface);
+            ConfigureAutoPostPlatformTab(tabYouTubePost,  AutoPostYouTubeSurface);
 
             tabMultiPlatformPost = new TabControl
             {
@@ -74,45 +81,46 @@ namespace tiktok_Omni
             tabMultiPlatformPost.TabPages.Add(tabYouTubePost);
             WireAutoPostPlatformTabDraw();
 
-            MountAutoPostPlatformTab(tabTikTokPost, BuildAutoPostTikTokPanel(), scrollContent: true);
-            MountAutoPostPlatformTab(tabFacebookPost, BuildAutoPostFacebookPanel(), scrollContent: true);
-            MountAutoPostPlatformTab(tabYouTubePost, BuildAutoPostYouTubePanel());
+            // Each tab now contains its own toolbar + DataGridView (inline editing)
+            MountAutoPostPlatformTab(tabTikTokPost,
+                BuildPlatformScheduleContent("TikTok",   AutoPostTikTokAccent,   AutoPostTikTokSurface));
+            MountAutoPostPlatformTab(tabFacebookPost,
+                BuildPlatformScheduleContent("Facebook", AutoPostFacebookAccent, AutoPostFacebookSurface));
+            MountAutoPostPlatformTab(tabYouTubePost,
+                BuildPlatformScheduleContent("YouTube",  AutoPostYouTubeAccent,  AutoPostYouTubeSurface));
 
             pnlAutoPostActions = BuildAutoPostActionsPanel();
 
             var pnlAutoPostBanner = CreateBannerHostPanel();
-            CreateStepBanner(pnlAutoPostBanner, "① Chọn video  →  ② Soạn caption (TikTok/FB/YT)  →  ③ Thêm lịch  →  ④ Đăng");
+            CreateStepBanner(pnlAutoPostBanner,
+                "① Duyệt thư mục  →  ② Thêm vào lịch đăng  →  ③ Sửa Caption / Link / Giờ trực tiếp trên lưới  →  ④ BẮT ĐẦU ĐĂNG");
 
-            var pnlAutoPostSchedule = BuildAutoPostSchedulePanel();
-
+            // 4-row layout: Banner | Shared panel | Platform tabs (grids) | Actions
             var tblAutoPostMain = new TableLayoutPanel
             {
                 Name = "tblAutoPostMain",
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 5,
+                RowCount = 4,
                 BackColor = darkTab,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
             tblAutoPostMain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.Percent, 58F));
-            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.Percent, 42F));
-            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.Absolute,  34F));   // row 0: banner
+            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));          // row 1: shared panel
+            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));     // row 2: platform tabs + grids
+            tblAutoPostMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));          // row 3: actions bar
 
-            pnlAutoPostBanner.Dock = DockStyle.Fill;
-            pnlAutoPostShared.Dock = DockStyle.Fill;
-            pnlAutoPostSchedule.Dock = DockStyle.Fill;
+            pnlAutoPostBanner.Dock    = DockStyle.Fill;
+            pnlAutoPostShared.Dock    = DockStyle.Fill;
             tabMultiPlatformPost.Dock = DockStyle.Fill;
-            pnlAutoPostActions.Dock = DockStyle.Fill;
+            pnlAutoPostActions.Dock   = DockStyle.Fill;
 
-            tblAutoPostMain.Controls.Add(pnlAutoPostBanner, 0, 0);
-            tblAutoPostMain.Controls.Add(pnlAutoPostShared, 0, 1);
+            tblAutoPostMain.Controls.Add(pnlAutoPostBanner,    0, 0);
+            tblAutoPostMain.Controls.Add(pnlAutoPostShared,    0, 1);
             tblAutoPostMain.Controls.Add(tabMultiPlatformPost, 0, 2);
-            tblAutoPostMain.Controls.Add(pnlAutoPostSchedule, 0, 3);
-            tblAutoPostMain.Controls.Add(pnlAutoPostActions, 0, 4);
+            tblAutoPostMain.Controls.Add(pnlAutoPostActions,   0, 3);
 
             tabAutoPost.Controls.Clear();
             tabAutoPost.Controls.Add(tblAutoPostMain);
@@ -213,14 +221,14 @@ namespace tiktok_Omni
                 Name = "pnlAutoPostShared",
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 7,
+                RowCount = 6,
                 BackColor = AutoPostPanelBack,
                 Padding = new Padding(8, 8, 8, 4),
                 Margin = Padding.Empty
             };
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148F));
+            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170F));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            for (var i = 0; i < 7; i++)
+            for (var i = 0; i < 6; i++)
             {
                 tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             }
@@ -241,16 +249,20 @@ namespace tiktok_Omni
             AddAutoPostTableRow(tbl, 1, "Profile", cbAutoPostProfile, addRowStyle: false);
             AddAutoPostTableRow(tbl, 2, "Loại video", cbAutoPostVideoType, addRowStyle: false);
             AddAutoPostTableRow(tbl, 3, "Video file", cbAutoPostVideoFile, addRowStyle: false);
-            AddAutoPostTableRow(tbl, 4, "Hashtag chung", txtAutoPostHashtags, addRowStyle: false);
-            AddAutoPostTableRow(tbl, 5, "Caption Style", cbCaptionStyle, addRowStyle: false);
+            // "Hashtag chung" row removed — hashtags are now per-entry columns in each schedule grid
+            AddAutoPostTableRow(tbl, 4, "Caption Style", cbCaptionStyle, addRowStyle: false);
 
             chkEnableAffiliateLink.Margin = new Padding(10, 8, 10, 6);
-            tbl.Controls.Add(chkEnableAffiliateLink, 0, 6);
+            tbl.Controls.Add(chkEnableAffiliateLink, 0, 5);
             tbl.SetColumnSpan(chkEnableAffiliateLink, 2);
 
             return tbl;
         }
 
+        // These three methods are no longer called — each tab now hosts a
+        // DataGridView built by BuildPlatformScheduleContent() in
+        // Form1.AutoPostScheduleQueue.cs. Kept as empty stubs so any surviving
+        // call sites compile without error.
         private Control BuildAutoPostTikTokPanel()
         {
             var root = CreateAutoPostPlatformRoot(AutoPostTikTokSurface);
@@ -642,6 +654,177 @@ namespace tiktok_Omni
             AddAutoPostRootRow(root, txtAutoPostYtDescription, SizeType.Percent, 100F);
 
             return root;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────────
+        //  LOG PANEL  (real-time progress for the schedule queue)
+        // ─────────────────────────────────────────────────────────────────────────
+
+        private Panel BuildAutoPostLogPanel()
+        {
+            var pnl = new Panel
+            {
+                Name      = "pnlAutoPostLog",
+                Dock      = DockStyle.Fill,
+                BackColor = Color.FromArgb(18, 20, 26),
+                Padding   = Padding.Empty,
+                Margin    = Padding.Empty
+            };
+
+            // Header bar: title label + clear button
+            var header = new Panel
+            {
+                Dock      = DockStyle.Top,
+                Height    = 26,
+                BackColor = Color.FromArgb(30, 32, 40),
+                Padding   = Padding.Empty
+            };
+
+            var lblTitle = new Label
+            {
+                Text      = "  LOG — tiến trình đăng bài",
+                Dock      = DockStyle.Fill,
+                ForeColor = Color.FromArgb(160, 180, 220),
+                Font      = new Font("Segoe UI", 8.5F, FontStyle.Regular),
+                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                Padding   = new Padding(4, 0, 0, 0)
+            };
+
+            var btnClear = new Button
+            {
+                Text      = "Xóa",
+                Dock      = DockStyle.Right,
+                Width     = 52,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(45, 48, 58),
+                ForeColor = Color.FromArgb(160, 160, 160),
+                Font      = new Font("Segoe UI", 8F),
+                Cursor    = Cursors.Hand
+            };
+            btnClear.FlatAppearance.BorderSize = 0;
+            btnClear.Click += (s, e) =>
+            {
+                if (rtbAutoPostLog != null && !rtbAutoPostLog.IsDisposed)
+                    rtbAutoPostLog.Clear();
+            };
+
+            header.Controls.Add(lblTitle);
+            header.Controls.Add(btnClear);
+
+            rtbAutoPostLog = new RichTextBox
+            {
+                Name        = "rtbAutoPostLog",
+                Dock        = DockStyle.Fill,
+                ReadOnly    = true,
+                BackColor   = Color.FromArgb(18, 20, 26),
+                ForeColor   = Color.FromArgb(200, 205, 215),
+                Font        = new Font("Consolas", 8.5F),
+                BorderStyle = BorderStyle.None,
+                ScrollBars  = RichTextBoxScrollBars.Vertical,
+                WordWrap    = true,
+                Padding     = new Padding(4, 2, 4, 2)
+            };
+
+            pnl.Controls.Add(rtbAutoPostLog);
+            pnl.Controls.Add(header);
+            return pnl;
+        }
+
+        /// <summary>
+        /// Thread-safe, color-coded append to any <see cref="RichTextBox"/>.
+        /// Trims to <see cref="AutoPostLogMaxLines"/> lines to prevent unbounded growth.
+        /// </summary>
+        internal void AppendToRtb(RichTextBox rtb, string msg)
+        {
+            if (rtb == null || rtb.IsDisposed) return;
+
+            void Append()
+            {
+                var ts   = DateTime.Now.ToString("HH:mm:ss");
+                var line = $"[{ts}] {msg}";
+
+                Color col;
+                if (msg.Contains("✓") || msg.Contains("Hoàn tất") || msg.Contains("Done") ||
+                    msg.Contains("xong") || msg.Contains("đã gửi"))
+                    col = Color.FromArgb(100, 220, 100);
+                else if (msg.Contains("✗") || msg.Contains("lỗi") || msg.Contains("Lỗi") ||
+                         msg.Contains("Failed") || msg.Contains("thất bại") || msg.Contains("error"))
+                    col = Color.FromArgb(255, 90, 90);
+                else if (msg.Contains("⊗") || msg.Contains("Hủy") || msg.Contains("Bỏ qua") ||
+                         msg.Contains("không bấm được"))
+                    col = Color.FromArgb(255, 185, 50);
+                else if (msg.Contains("[Human]") || msg.Contains("Lướt trang") || msg.Contains("Jitter"))
+                    col = Color.FromArgb(100, 180, 255);
+                else if (msg.Contains("[Lịch đăng]") || msg.Contains("Xếp hàng") || msg.Contains("Queued"))
+                    col = Color.FromArgb(180, 160, 255);
+                else if (msg.Contains("[Caption AI]") || msg.Contains("Gemini") || msg.Contains("hashtag"))
+                    col = Color.FromArgb(200, 160, 240);
+                else if (msg.Contains("Auto Post") || msg.Contains("TikTok") ||
+                         msg.Contains("Facebook") || msg.Contains("YouTube"))
+                    col = Color.FromArgb(220, 220, 180);
+                else
+                    col = Color.FromArgb(190, 195, 205);
+
+                rtb.SelectionStart  = rtb.TextLength;
+                rtb.SelectionLength = 0;
+                rtb.SelectionColor  = col;
+                rtb.AppendText(line + Environment.NewLine);
+                rtb.ScrollToCaret();
+
+                if (rtb.Lines.Length > AutoPostLogMaxLines)
+                {
+                    var trimmed = string.Join(
+                        Environment.NewLine,
+                        rtb.Lines.Skip(AutoPostLogMaxLines / 5));
+                    rtb.Clear();
+                    rtb.AppendText(trimmed + Environment.NewLine);
+                    rtb.SelectionStart = rtb.TextLength;
+                    rtb.ScrollToCaret();
+                }
+            }
+
+            if (rtb.InvokeRequired)
+                rtb.BeginInvoke((Action)Append);
+            else
+                Append();
+        }
+
+        /// <summary>Appends to the shared AutoPost log strip at the bottom of the tab.</summary>
+        internal void AppendToAutoPostLog(string msg) => AppendToRtb(rtbAutoPostLog, msg);
+
+        /// <summary>
+        /// Writes to: main app log (+ session file) + shared AutoPost strip.
+        /// Use for schedule-queue / caption-AI messages not tied to a specific platform.
+        /// </summary>
+        internal void LogAutoPost(string msg)
+        {
+            Log(msg);
+            AppendToAutoPostLog(msg);
+        }
+
+        // ── Per-platform log helpers ──────────────────────────────────────────
+        // Each method writes to: main log (file), shared strip, AND the inline
+        // per-platform RichTextBox inside the platform's own tab.
+
+        internal void LogTikTok(string msg)
+        {
+            Log($"[TikTok] {msg}");
+            AppendToAutoPostLog($"[TikTok] {msg}");
+            AppendToRtb(rtbLogTikTok, msg);
+        }
+
+        internal void LogFacebook(string msg)
+        {
+            Log($"[Facebook] {msg}");
+            AppendToAutoPostLog($"[Facebook] {msg}");
+            AppendToRtb(rtbLogFb, msg);
+        }
+
+        internal void LogYouTube(string msg)
+        {
+            Log($"[YouTube] {msg}");
+            AppendToAutoPostLog($"[YouTube] {msg}");
+            AppendToRtb(rtbLogYt, msg);
         }
 
         private Panel BuildAutoPostActionsPanel()
@@ -1409,26 +1592,30 @@ namespace tiktok_Omni
 
         private void btnValidatePost_Click(object sender, EventArgs e)
         {
-            ClearAutoPostValidationHighlights();
-            var issues = CollectAutoPostValidationIssues();
-            if (issues.Count == 0)
+            var tikPending   = _tikTokList?.Count(x => string.Equals(x?.Status, "Pending",   StringComparison.OrdinalIgnoreCase)) ?? 0;
+            var tikScheduled = _tikTokList?.Count(x => string.Equals(x?.Status, "Scheduled", StringComparison.OrdinalIgnoreCase)) ?? 0;
+            var fbPending    = _facebookList?.Count(x => string.Equals(x?.Status, "Pending",   StringComparison.OrdinalIgnoreCase)) ?? 0;
+            var fbScheduled  = _facebookList?.Count(x => string.Equals(x?.Status, "Scheduled", StringComparison.OrdinalIgnoreCase)) ?? 0;
+            var ytPending    = _youTubeList?.Count(x => string.Equals(x?.Status, "Pending",   StringComparison.OrdinalIgnoreCase)) ?? 0;
+            var ytScheduled  = _youTubeList?.Count(x => string.Equals(x?.Status, "Scheduled", StringComparison.OrdinalIgnoreCase)) ?? 0;
+
+            var total = (_tikTokList?.Count ?? 0) + (_facebookList?.Count ?? 0) + (_youTubeList?.Count ?? 0);
+            if (total == 0)
             {
-                MessageBox.Show(
-                    this,
-                    "Đủ điều kiện: caption, link affiliate (nếu bật), video và duyệt.",
-                    "Kiểm tra trước khi đăng",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                MessageBox.Show(this,
+                    "3 lưới đang trống — hãy duyệt thư mục và nhấn \"Thêm vào lịch đăng\" để thêm video.",
+                    "Kiểm tra lịch đăng", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            ApplyAutoPostValidationHighlights(issues);
-            MessageBox.Show(
-                this,
-                string.Join(Environment.NewLine, issues.Select(i => "• " + i.Message)),
-                "Kiểm tra trước khi đăng",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            var msg = $"Trạng thái lịch đăng:{Environment.NewLine}" +
+                      $"  TikTok  : {_tikTokList?.Count ?? 0} dòng  (Pending {tikPending} · Scheduled {tikScheduled}){Environment.NewLine}" +
+                      $"  Facebook: {_facebookList?.Count ?? 0} dòng  (Pending {fbPending} · Scheduled {fbScheduled}){Environment.NewLine}" +
+                      $"  YouTube : {_youTubeList?.Count ?? 0} dòng  (Pending {ytPending} · Scheduled {ytScheduled}){Environment.NewLine}" +
+                      $"{Environment.NewLine}Các dòng Pending sẽ được đăng ngay khi bấm «BẮT ĐẦU ĐĂNG».{Environment.NewLine}" +
+                      $"Các dòng Scheduled sẽ tự động chạy khi đến giờ hẹn (timer 15 giây).";
+
+            MessageBox.Show(this, msg, "Kiểm tra lịch đăng", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private sealed class AutoPostValidationIssue
@@ -1638,6 +1825,7 @@ namespace tiktok_Omni
             try
             {
                 await WithBrowserLockAsync(
+                    GetRunningProfileName(),
                     async cancellationToken =>
                     {
                         var fetch = await _affiliateHunter

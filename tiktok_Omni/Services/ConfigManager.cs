@@ -50,6 +50,84 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>Tên profile TikTok đã đăng nhập (đọc từ appsettings hiện tại).</summary>
+        public IReadOnlyList<string> GetLoadedProfiles()
+        {
+            var settings = LoadAsync().ConfigureAwait(true).GetAwaiter().GetResult();
+            return BuildLoadedProfileNames(settings);
+        }
+
+        private static List<string> BuildLoadedProfileNames(AppSettings settings)
+        {
+            var result = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void Add(string name)
+            {
+                var n = (name ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(n) || !seen.Add(n))
+                {
+                    return;
+                }
+
+                result.Add(n);
+            }
+
+            foreach (var profile in settings?.Profiles ?? Enumerable.Empty<AutomationProfile>())
+            {
+                if (profile == null || !profile.IsTTLoggedIn)
+                {
+                    continue;
+                }
+
+                Add(profile.Name);
+            }
+
+            if (result.Count == 0)
+            {
+                Add("default");
+                foreach (var profile in settings?.Profiles ?? Enumerable.Empty<AutomationProfile>())
+                {
+                    Add(profile?.Name);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>Danh sách profile cho ComboBox (DisplayMember / ValueMember = <see cref="ProfileComboEntry.Name"/>).</summary>
+        public async Task<IReadOnlyList<ProfileComboEntry>> GetProfileComboEntriesAsync()
+        {
+            var settings = await LoadAsync().ConfigureAwait(false);
+            return BuildProfileComboEntries(settings);
+        }
+
+        /// <summary>Xây danh sách profile từ cấu hình (luôn có «default»).</summary>
+        public static List<ProfileComboEntry> BuildProfileComboEntries(AppSettings settings)
+        {
+            var result = new List<ProfileComboEntry>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void Add(string name)
+            {
+                var n = (name ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(n) || !seen.Add(n))
+                {
+                    return;
+                }
+
+                result.Add(new ProfileComboEntry { Name = n });
+            }
+
+            Add("default");
+            foreach (var profile in settings?.Profiles ?? Enumerable.Empty<AutomationProfile>())
+            {
+                Add(profile?.Name);
+            }
+
+            return result;
+        }
+
         public async Task SaveAsync(AppSettings settings)
         {
             if (settings == null)
@@ -185,6 +263,7 @@ namespace tiktok_Omni.Services
             settings.TwoCaptchaApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.TwoCaptchaApiKey ?? string.Empty);
             settings.VeoApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.VeoApiKey ?? string.Empty);
             settings.TtsApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.TtsApiKey ?? string.Empty);
+            settings.TikTokRapidApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.TikTokRapidApiKey ?? string.Empty);
             settings.NotificationSmtpPassword = DpapiSecretProtector.UnprotectAfterLoad(settings.NotificationSmtpPassword ?? string.Empty);
             if (settings.Profiles != null)
             {
@@ -211,6 +290,7 @@ namespace tiktok_Omni.Services
             settings.TwoCaptchaApiKey = DpapiSecretProtector.ProtectForStorage(settings.TwoCaptchaApiKey ?? string.Empty);
             settings.VeoApiKey = DpapiSecretProtector.ProtectForStorage(settings.VeoApiKey ?? string.Empty);
             settings.TtsApiKey = DpapiSecretProtector.ProtectForStorage(settings.TtsApiKey ?? string.Empty);
+            settings.TikTokRapidApiKey = DpapiSecretProtector.ProtectForStorage(settings.TikTokRapidApiKey ?? string.Empty);
             settings.NotificationSmtpPassword = DpapiSecretProtector.ProtectForStorage(settings.NotificationSmtpPassword ?? string.Empty);
             if (settings.Profiles != null)
             {
@@ -364,6 +444,21 @@ namespace tiktok_Omni.Services
             settings.VeoApiKey = (settings.VeoApiKey ?? string.Empty).Trim();
             settings.TtsApiKey = (settings.TtsApiKey ?? string.Empty).Trim();
             settings.TtsEndpoint = (settings.TtsEndpoint ?? string.Empty).Trim();
+            settings.TtsElevenLabsModel = (settings.TtsElevenLabsModel ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(settings.TtsElevenLabsModel)
+                || string.Equals(settings.TtsElevenLabsModel, "eleven_multilingual_v2", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(settings.TtsElevenLabsModel, "eleven_flash_v2_5", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(settings.TtsElevenLabsModel, "eleven_turbo_v2_5", StringComparison.OrdinalIgnoreCase))
+            {
+                settings.TtsElevenLabsModel = ElevenLabsTtsHelper.DefaultVietnameseModel;
+            }
+
+            settings.TtsLanguageCode = (settings.TtsLanguageCode ?? string.Empty).Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(settings.TtsLanguageCode))
+            {
+                settings.TtsLanguageCode = ElevenLabsTtsHelper.DefaultLanguageCode;
+            }
+
             settings.NotificationSmtpHost = (settings.NotificationSmtpHost ?? string.Empty).Trim();
             settings.NotificationSmtpUser = (settings.NotificationSmtpUser ?? string.Empty).Trim();
             settings.NotificationSmtpPassword = (settings.NotificationSmtpPassword ?? string.Empty).Trim();
@@ -509,6 +604,24 @@ namespace tiktok_Omni.Services
                 settings.Profiles[i] = profile;
             }
 
+            settings.TikTokRapidApiKey = (settings.TikTokRapidApiKey ?? string.Empty).Trim();
+            settings.TikTokRapidApiHost = (settings.TikTokRapidApiHost ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(settings.TikTokRapidApiHost))
+            {
+                settings.TikTokRapidApiHost = "tiktok-api23.p.rapidapi.com";
+            }
+
+            settings.TikTokRapidApiCountryCode = (settings.TikTokRapidApiCountryCode ?? string.Empty).Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(settings.TikTokRapidApiCountryCode))
+            {
+                settings.TikTokRapidApiCountryCode = "VN";
+            }
+
+            var huntMode = (settings.AffiliateTikTokVideoHuntMode ?? string.Empty).Trim();
+            settings.AffiliateTikTokVideoHuntMode = string.Equals(huntMode, "RapidApi", StringComparison.OrdinalIgnoreCase)
+                ? "RapidApi"
+                : "Browser";
+
             return settings;
         }
 
@@ -585,8 +698,24 @@ namespace tiktok_Omni.Services
         public string TwoCaptchaApiKey { get; set; } = string.Empty;
         public string VeoApiKey { get; set; } = string.Empty;
         public string TtsApiKey { get; set; } = string.Empty;
-        public string VeoEndpoint { get; set; } = "https://api.veo.example.com/v1/videos";
+        public string VeoEndpoint { get; set; } = RapidApiGoogleVeoHelper.DefaultBaseUrl;
         public string TtsEndpoint { get; set; } = "https://api.example.com/v1/tts/synthesize";
+
+        /// <summary>ElevenLabs model — mặc định eleven_v3 (language_code vi).</summary>
+        public string TtsElevenLabsModel { get; set; } = "eleven_v3";
+
+        /// <summary>Mã ngôn ngữ ElevenLabs (ISO 639-1), ví dụ vi.</summary>
+        public string TtsLanguageCode { get; set; } = "vi";
+
+        /// <summary>ElevenLabs voice_id cho mood melancholic / sad (tab Triết lý).</summary>
+        public string VoiceId_Melancholic { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id cho mood intense / hopeful (tab Triết lý).</summary>
+        public string VoiceId_Intense { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id cho mood calm / reflective và mặc định (tab Triết lý).</summary>
+        public string VoiceId_Calm { get; set; } = string.Empty;
+
         public bool NotificationEnabled { get; set; } = false;
         public bool NotificationEmailEnabled { get; set; } = false;
         public string NotificationSmtpHost { get; set; } = "smtp.gmail.com";
@@ -615,6 +744,28 @@ namespace tiktok_Omni.Services
 
         public bool ReupUseVisualHookSfx { get; set; }
 
+        /// <summary>Font phụ đề karaoke hook Video reup.</summary>
+        public string ReupSubtitleFontName { get; set; } = "Segoe UI Bold";
+
+        /// <summary>Cỡ chữ phụ đề hook (px ASS).</summary>
+        public int ReupSubtitleFontSize { get; set; } = 88;
+
+        /// <summary>Bottom | Middle | Top</summary>
+        public string ReupSubtitlePosition { get; set; } = "Bottom";
+
+        /// <summary>Pop | Highlight | FadeIn | Plain</summary>
+        public string ReupSubtitleAnimation { get; set; } = "Pop";
+
+        /// <summary>Lề dọc ASS (0 = tự theo vị trí).</summary>
+        public int ReupSubtitleMarginV { get; set; }
+
+        public bool ReupSubtitleBold { get; set; } = true;
+
+        public bool ReupSubtitleItalic { get; set; }
+
+        /// <summary>Số từ mỗi dòng karaoke hook.</summary>
+        public int ReupSubtitleWordsPerLine { get; set; } = 6;
+
         /// <summary>Knowledge | Review | Storytelling — mẫu prompt Gemini khi render.</summary>
         public string GeminiStyleTemplate { get; set; } = "Storytelling";
 
@@ -641,6 +792,32 @@ namespace tiktok_Omni.Services
         /// <summary>Bật tự động enrich (Metrics + Anchor) sau khi Hunt Affiliate hoàn tất.</summary>
         public bool AffiliateAutoEnrichEnabled { get; set; } = true;
 
+        /// <summary>Bật trigger điều phối tự động theo dõi sức khỏe kênh TikTok.</summary>
+        public bool ChannelHealthMonitorEnabled { get; set; } = true;
+
+        /// <summary>Chu kỳ quét sức khỏe kênh (giờ).</summary>
+        public int ChannelHealthCheckIntervalHours { get; set; } = 6;
+
+        /// <summary>Ngưỡng view trung bình video gần nhất — dưới mức này nghi ngờ shadowban.</summary>
+        public long ChannelHealthMinRecentVideoAvgViews { get; set; } = 100;
+
+        /// <summary>Số video gần nhất dùng để tính view trung bình.</summary>
+        public int ChannelHealthRecentVideoSampleCount { get; set; } = 5;
+
+        /// <summary>Thời gian chờ tối thiểu giữa hai lần chuyển Warm-up cường độ cao (giờ).</summary>
+        public int ChannelHealthTransitionCooldownHours { get; set; } = 24;
+
+        /// <summary>Số video khi tự động đưa nick vào Warm-up cường độ cao.</summary>
+        public int ChannelHealthHighIntensityVideoCount { get; set; } = 15;
+
+        /// <summary>Tổng giây xem tối thiểu / tối đa cho Warm-up cường độ cao.</summary>
+        public int ChannelHealthHighIntensityWatchSecondsMin { get; set; } = 45;
+
+        public int ChannelHealthHighIntensityWatchSecondsMax { get; set; } = 120;
+
+        /// <summary>Từ khóa ngách mặc định khi tự enqueue Warm-up cường độ cao.</summary>
+        public string ChannelHealthWarmupKeywords { get; set; } = "tiktok shop affiliate";
+
         /// <summary>
         /// Chế độ Video: săn thêm ứng viên (buffer), gọi TikWM để chấm engagement, giữ top «Max Results».
         /// </summary>
@@ -649,7 +826,28 @@ namespace tiktok_Omni.Services
         /// <summary>Hệ số nhân buffer so với Max Results (ví dụ 2.5 × 20 → săn tối đa ~50 rồi cắt còn 20).</summary>
         public double AffiliateHuntBufferMultiplier { get; set; } = 2.5d;
 
+        /// <summary>RapidAPI key (tiktok-api23) — săn video TikTok và sản phẩm top-products không cần browser.</summary>
+        public string TikTokRapidApiKey { get; set; } = string.Empty;
+
+        /// <summary>Host RapidAPI TikTok (mặc định tiktok-api23.p.rapidapi.com).</summary>
+        public string TikTokRapidApiHost { get; set; } = "tiktok-api23.p.rapidapi.com";
+
+        /// <summary>Mã quốc gia cho GET /api/trending/top-products (mặc định VN).</summary>
+        public string TikTokRapidApiCountryCode { get; set; } = "VN";
+
+        /// <summary>Browser hoặc RapidApi — chế độ săn video TikTok.</summary>
+        public string AffiliateTikTokVideoHuntMode { get; set; } = "Browser";
+
+        /// <summary>Khi RapidAPI lỗi, tự chuyển sang Playwright (nếu tắt thì báo lỗi).</summary>
+        public bool AffiliateTikTokApiFallbackBrowser { get; set; } = true;
+
         public List<AutomationProfile> Profiles { get; set; } = new List<AutomationProfile>();
+    }
+
+    /// <summary>Mục dropdown profile — dùng cho DataGridViewComboBoxColumn (DisplayMember / ValueMember = Name).</summary>
+    public sealed class ProfileComboEntry
+    {
+        public string Name { get; set; } = string.Empty;
     }
 
     public class AutomationProfile

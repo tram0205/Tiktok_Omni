@@ -9,6 +9,7 @@ using System.Windows.Forms;
 using Newtonsoft.Json;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
+using tiktok_Omni.Controls;
 
 namespace tiktok_Omni
 {
@@ -31,7 +32,6 @@ namespace tiktok_Omni
         private Label lblHealthVideos;
         private Label lblHealthErrors;
         private Label lblHealthPending;
-        private Button btnAffiliateBatchPipeline;
 
         private void BuildHealthDashboardUi()
         {
@@ -364,27 +364,6 @@ namespace tiktok_Omni
             }
         }
 
-        private async void btnAffiliateBatchPipeline_Click(object sender, EventArgs e)
-        {
-            var keywords = (GetAffiliateKeywordsTextFromUi() ?? string.Empty).Trim();
-            if (string.IsNullOrWhiteSpace(keywords))
-            {
-                MessageBox.Show(this,
-                    "Nhập từ khóa ở ô «từ khoá» (tab Săn Video) trước khi chạy Pipeline hàng loạt.",
-                    "Pipeline hàng loạt",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                txtAffiliateKeywords?.Focus();
-                return;
-            }
-
-            _industrialBatchPhase = IndustrialBatchPhase.Hunt;
-            Log("[Batch Pipeline] 1/5 — Hunt → Queue…");
-            btnHuntAffiliates_Click(sender, e);
-            await Task.Delay(500).ConfigureAwait(true);
-            await ContinueIndustrialBatchAfterHuntAsync().ConfigureAwait(true);
-        }
-
         private async Task ContinueIndustrialBatchAfterHuntAsync()
         {
             if (_industrialBatchPhase != IndustrialBatchPhase.Hunt)
@@ -416,12 +395,12 @@ namespace tiktok_Omni
             }
 
             Log("[Batch Pipeline] 3/5 — Gemini scripting…");
-            btnReviewScriptBeforeRender_Click(this, EventArgs.Empty);
+            await ((IAiVideoGenControlsHost)this).ReviewScriptBeforeRenderAsync().ConfigureAwait(true);
             await Task.Delay(1500).ConfigureAwait(true);
 
             _industrialBatchPhase = IndustrialBatchPhase.Render;
             Log("[Batch Pipeline] 4/5 — Render batch → JobQueue…");
-            btnRenderAiVideo_Click(this, EventArgs.Empty);
+            await ((IAiVideoGenControlsHost)this).ProcessSlideshowVideoAsync().ConfigureAwait(true);
 
             _industrialBatchPhase = IndustrialBatchPhase.None;
             Log("[Batch Pipeline] 5/5 — Kết quả sẽ vào Approval Queue sau render.");

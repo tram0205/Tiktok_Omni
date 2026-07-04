@@ -54,6 +54,80 @@ namespace tiktok_Omni
             };
         }
 
+        private static Label CreatePhilosophyVoiceIdLabel(string propertyName)
+        {
+            string caption;
+            switch (propertyName)
+            {
+                case "VoiceId_Melancholic":
+                    caption = "Melancholic / Sad:";
+                    break;
+                case "VoiceId_Intense":
+                    caption = "Intense / Hopeful:";
+                    break;
+                default:
+                    caption = "Calm (mặc định):";
+                    break;
+            }
+
+            return new Label
+            {
+                Text = caption,
+                AutoSize = true,
+                ForeColor = Color.Gainsboro,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 6, 8, 4)
+            };
+        }
+
+        private GroupBox BuildPhilosophyVoiceIdsGroupBox()
+        {
+            txtVoiceIdMelancholic = CreateSettingField("txtVoiceIdMelancholic", false);
+            txtVoiceIdIntense = CreateSettingField("txtVoiceIdIntense", false);
+            txtVoiceIdCalm = CreateSettingField("txtVoiceIdCalm", false);
+            foreach (var field in new[] { txtVoiceIdMelancholic, txtVoiceIdIntense, txtVoiceIdCalm })
+            {
+                field.Height = 26;
+                field.MinimumSize = new Size(180, 26);
+                field.Dock = DockStyle.Fill;
+                field.Margin = new Padding(0, 2, 0, 4);
+            }
+
+            var tblPhilosophyVoiceIds = new TableLayoutPanel
+            {
+                Name = "tblPhilosophyVoiceIds",
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 3,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                MinimumSize = new Size(420, 96)
+            };
+            tblPhilosophyVoiceIds.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148F));
+            tblPhilosophyVoiceIds.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            tblPhilosophyVoiceIds.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+            tblPhilosophyVoiceIds.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+            tblPhilosophyVoiceIds.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+
+            tblPhilosophyVoiceIds.Controls.Add(CreatePhilosophyVoiceIdLabel("VoiceId_Melancholic"), 0, 0);
+            tblPhilosophyVoiceIds.Controls.Add(txtVoiceIdMelancholic, 1, 0);
+            tblPhilosophyVoiceIds.Controls.Add(CreatePhilosophyVoiceIdLabel("VoiceId_Intense"), 0, 1);
+            tblPhilosophyVoiceIds.Controls.Add(txtVoiceIdIntense, 1, 1);
+            tblPhilosophyVoiceIds.Controls.Add(CreatePhilosophyVoiceIdLabel("VoiceId_Calm"), 0, 2);
+            tblPhilosophyVoiceIds.Controls.Add(txtVoiceIdCalm, 1, 2);
+
+            var grpPhilosophyVoiceIds = CreateSettingsGroupBox("Cấu hình Voice ID Triết lý");
+            grpPhilosophyVoiceIds.Name = "grpPhilosophyVoiceIds";
+            grpPhilosophyVoiceIds.Padding = new Padding(8, 12, 8, 8);
+            grpPhilosophyVoiceIds.Margin = new Padding(0, 8, 0, 0);
+            grpPhilosophyVoiceIds.Dock = DockStyle.Fill;
+            grpPhilosophyVoiceIds.MinimumSize = new Size(440, 120);
+            grpPhilosophyVoiceIds.Controls.Add(tblPhilosophyVoiceIds);
+            return grpPhilosophyVoiceIds;
+        }
+
         private TextBox CreateSettingField(string name, bool isSecret)
         {
             var field = new TextBox
@@ -1057,7 +1131,7 @@ namespace tiktok_Omni
         private void BuildSettingUi()
         {
             tabSetting.SuspendLayout();
-            tabSetting.AutoScroll = false;
+            tabSetting.AutoScroll = true;
             tabSetting.Controls.Clear();
 
             var grpPlatformLogin = CreateSettingsGroupBox("Đăng nhập nền tảng (Chrome profile)");
@@ -1120,12 +1194,14 @@ namespace tiktok_Omni
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
-                RowCount = 2,
+                RowCount = 4,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
             tblGatewayRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             tblGatewayRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
+            tblGatewayRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tblGatewayRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var tblGatewayMain = new TableLayoutPanel
             {
@@ -1158,10 +1234,10 @@ namespace tiktok_Omni
                 0);
             tblGatewayMain.Controls.Add(
                 CreateSettingsGatewayPairColumn(
-                    "Veo · URL",
+                    "Video AI · URL (RapidAPI Veo)",
                     "txtVeoEndpoint",
                     out txtVeoEndpoint,
-                    "Khóa Veo",
+                    "Khóa RapidAPI Veo",
                     "txtVeoApiKey",
                     out txtVeoApiKey,
                     out btnToggleVeoApiKey,
@@ -1189,8 +1265,20 @@ namespace tiktok_Omni
                 btnSaveSettings_Click);
             btnSaveSettings = saveBtn;
 
+            var pnlTikTokRapidApi = CreateSettingsCompactSecretKeyInlineCell(
+                "TikTok RapidAPI (tiktok-api23)",
+                "txtTikTokRapidApiKey",
+                out txtTikTokRapidApiKey,
+                out btnToggleTikTokRapidApiKey,
+                out btnTestTikTokRapidApi,
+                btnTestTikTokRapidApi_Click);
+            pnlTikTokRapidApi.Dock = DockStyle.Top;
+            pnlTikTokRapidApi.Margin = new Padding(0, 4, 0, 2);
+
             tblGatewayRoot.Controls.Add(tblGatewayMain, 0, 0);
             tblGatewayRoot.Controls.Add(pnlGatewaySecond, 0, 1);
+            tblGatewayRoot.Controls.Add(pnlTikTokRapidApi, 0, 2);
+            tblGatewayRoot.Controls.Add(BuildPhilosophyVoiceIdsGroupBox(), 0, 3);
             grpGatewayTtsVeo.Controls.Add(tblGatewayRoot);
 
             var grpProfiles = CreateSettingsGroupBox("Tài khoản Chrome profile");
@@ -1328,9 +1416,22 @@ namespace tiktok_Omni
             dgvProxyProfiles.Columns.Add(CreateProxyProfileStatusColumn("colProfileIsFBLoggedIn", "FB OK", 52));
             dgvProxyProfiles.Columns.Add(CreateProxyProfileStatusColumn("colProfileIsYTLoggedIn", "YT OK", 52));
 
+            dgvProxyProfiles.Columns.Add(new DataGridViewButtonColumn
+            {
+                Name = "colProfileMascotImage",
+                HeaderText = "Ảnh profile",
+                Text = "📷 Chọn",
+                UseColumnTextForButtonValue = true,
+                Width = 88,
+                MinimumWidth = 72,
+                FlatStyle = FlatStyle.Flat,
+                ToolTipText = "Chọn ảnh nhân vật / linh vật — lưu vào AvatarVault để dùng khi tạo video hook"
+            });
+
             dgvProxyProfiles.DataSource = _proxyProfileBindingList;
             dgvProxyProfiles.SelectionChanged += dgvProxyProfiles_SelectionChanged;
             dgvProxyProfiles.CellFormatting += dgvProxyProfiles_CellFormatting;
+            dgvProxyProfiles.CellContentClick += dgvProxyProfiles_CellContentClick;
             dgvProxyProfiles.DataError += dgvProxyProfiles_DataError;
 
             pnlProfilesRoot.Controls.Add(dgvProxyProfiles);
@@ -1447,15 +1548,35 @@ namespace tiktok_Omni
                 "Khóa bí mật (Key) cho Text-to-Speech — cùng cột với URL gateway TTS bên trên.");
             tip.SetToolTip(
                 txtVeoApiKey,
-                "Khóa bí mật (Key) cho video AI Veo — cùng cột với URL gateway Veo bên trên.");
+                "RapidAPI key (x-rapidapi-key) cho Google Veo 3.1 Text-to-Video — có thể trùng key TikTok RapidAPI nếu cùng tài khoản.");
             tip.SetToolTip(
                 txtTtsEndpoint,
                 "URL API gateway TTS (POST JSON → audioUrl).\r\n" +
                 "Cặp với «Khóa API TTS» ngay bên dưới trong cùng cột.");
             tip.SetToolTip(
                 txtVeoEndpoint,
-                "URL API gateway Veo.\r\n" +
-                "Cặp với «Khóa API Veo» ngay bên dưới trong cùng cột.");
+                "Base URL RapidAPI Google Veo 3.1 (mặc định " + RapidApiGoogleVeoHelper.DefaultBaseUrl + ").\r\n" +
+                "Cặp với «Khóa RapidAPI Veo» ngay bên dưới trong cùng cột.");
+            if (txtVoiceIdMelancholic != null)
+            {
+                tip.SetToolTip(
+                    txtVoiceIdMelancholic,
+                    "ElevenLabs voice_id cho mood melancholic / sad — tab Video Triết lý chọn tự động theo cột Mood.");
+            }
+
+            if (txtVoiceIdIntense != null)
+            {
+                tip.SetToolTip(
+                    txtVoiceIdIntense,
+                    "ElevenLabs voice_id cho mood intense / hopeful.");
+            }
+
+            if (txtVoiceIdCalm != null)
+            {
+                tip.SetToolTip(
+                    txtVoiceIdCalm,
+                    "ElevenLabs voice_id cho calm / reflective và mood khác — fallback về VoiceId profile nếu trống.");
+            }
         }
 
     }

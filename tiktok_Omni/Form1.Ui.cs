@@ -168,6 +168,40 @@ namespace tiktok_Omni
             };
             chkAffiliateRankByEngagement.CheckedChanged += chkAffiliateRankByEngagement_CheckedChanged;
 
+            var lblAffiliateTikTokHuntMode = new Label
+            {
+                Text = "Săn TikTok",
+                AutoSize = true,
+                ForeColor = Color.Gainsboro,
+                Margin = new Padding(0, 2, 6, 0)
+            };
+
+            cbAffiliateTikTokHuntMode = new ComboBox
+            {
+                Name = "cbAffiliateTikTokHuntMode",
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Size = new Size(118, 28),
+                Margin = new Padding(0, 0, 12, 0),
+                BackColor = Color.FromArgb(45, 49, 60),
+                ForeColor = Color.Gainsboro,
+                FlatStyle = FlatStyle.Flat,
+                Font = AppInputFont
+            };
+            cbAffiliateTikTokHuntMode.Items.AddRange(new object[] { "Browser", "RapidAPI" });
+            cbAffiliateTikTokHuntMode.SelectedIndex = 0;
+            cbAffiliateTikTokHuntMode.SelectedIndexChanged += cbAffiliateTikTokHuntMode_SelectedIndexChanged;
+
+            chkAffiliateTikTokApiFallbackBrowser = new CheckBox
+            {
+                Name = "chkAffiliateTikTokApiFallbackBrowser",
+                Text = "API lỗi → Browser",
+                AutoSize = true,
+                ForeColor = Color.Gainsboro,
+                Checked = true,
+                Margin = new Padding(0, 2, 12, 0)
+            };
+            chkAffiliateTikTokApiFallbackBrowser.CheckedChanged += (s, e) => ScheduleAffiliateHuntPrefsSave();
+
             var lblAffiliateBufferMult = new Label
             {
                 Text = "Hệ số buffer ×",
@@ -209,6 +243,9 @@ namespace tiktok_Omni
             flpAffiliateCompactFilters.Controls.Add(numAffiliateMinSafety);
             flpAffiliateCompactFilters.Controls.Add(chkAffiliateOnlyHighQuality);
             flpAffiliateCompactFilters.Controls.Add(chkAffiliateRankByEngagement);
+            flpAffiliateCompactFilters.Controls.Add(lblAffiliateTikTokHuntMode);
+            flpAffiliateCompactFilters.Controls.Add(cbAffiliateTikTokHuntMode);
+            flpAffiliateCompactFilters.Controls.Add(chkAffiliateTikTokApiFallbackBrowser);
             flpAffiliateCompactFilters.Controls.Add(lblAffiliateBufferMult);
             flpAffiliateCompactFilters.Controls.Add(numAffiliateBufferMultiplier);
 
@@ -250,7 +287,7 @@ namespace tiktok_Omni
             var affiliateActionTip = new ToolTip { AutoPopDelay = 12000, InitialDelay = 300, ShowAlways = true };
             affiliateActionTip.SetToolTip(btnStopHunt, "Dừng quét đang chạy.");
             affiliateActionTip.SetToolTip(btnExportAffiliateCsv, "Xuất kết quả khi đã có dữ liệu trên lưới.");
-            affiliateActionTip.SetToolTip(btnPushToAiVideoGen, "Đẩy dòng đang hiển thị sang Slideshow, Affiliate chuyên sâu hoặc Video Reup.");
+            affiliateActionTip.SetToolTip(btnPushToAiVideoGen, "Tô nhiều dòng (Ctrl/Shift+click) rồi đẩy sang Slideshow, Affiliate chuyên sâu hoặc Video Reup. Không tô = đẩy toàn bộ lưới.");
             affiliateActionTip.SetToolTip(btnAffiliateDeepDive,
                 "Chọn dòng trên lưới — tải video, gửi Gemini phân tích voiceover/kịch bản (cần AI API Key).");
             affiliateActionTip.SetToolTip(btnDownloadSelectedAffiliate, "Cần FFmpeg + lưu trữ OK và có dòng được chọn.");
@@ -306,7 +343,7 @@ namespace tiktok_Omni
                 AutoGenerateColumns = true,
                 ShowCellToolTips = true,
                 AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
+                AllowUserToDeleteRows = true,
                 ReadOnly = true,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = true,
@@ -318,6 +355,7 @@ namespace tiktok_Omni
                 ColumnHeadersHeight = AppGridHeaderHeight,
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing
             };
+            dgvAffiliateResults.KeyDown += dgvAffiliateResults_KeyDown;
             dgvAffiliateResults.DefaultCellStyle = new DataGridViewCellStyle
             {
                 BackColor = Color.FromArgb(31, 34, 42),
@@ -412,6 +450,8 @@ namespace tiktok_Omni
                 ShowAlways = true
             };
             affiliateGridTip.SetToolTip(dgvAffiliateResults,
+                "Kết quả săn được lưu tự động (%LocalAppData%\\tiktok_Omni\\hunt_results.json) — build lại app không mất. " +
+                "Quét thêm sẽ gộp video mới, không xóa dòng cũ (Delete để xóa). " +
                 "Bấm đúp dòng để xem video MP4 native. Bấm ô Caption / Từ khoá / Hashtag / Link aff / Lời thoại để xem đầy đủ và sao chép. " +
                 "Bấm đơn ô «Link video» để copy URL. " +
                 "Điểm an toàn: 100 = sạch, càng thấp càng nhiều rủi ro. «Hướng dẫn chấm điểm» xem tiêu chí.");
@@ -447,6 +487,11 @@ namespace tiktok_Omni
                 "Tắt: giữ đúng thứ tự feed TikTok (có thể view thấp).");
             affiliateGridTip.SetToolTip(numAffiliateBufferMultiplier,
                 "Số video tối đa săn mỗi từ khoá ≈ Max Results × hệ số (tối đa 120). Ví dụ Max 20 × 2,5 → ~50 ứng viên trước khi cắt top 20.");
+            affiliateGridTip.SetToolTip(cbAffiliateTikTokHuntMode,
+                "Browser: mở Chrome quét tiktok.com/search/video.\r\n" +
+                "RapidAPI: gọi tiktok-api23 (cần key tab Cài đặt) — nhanh hơn, có view ngay.");
+            affiliateGridTip.SetToolTip(chkAffiliateTikTokApiFallbackBrowser,
+                "Khi chọn RapidAPI: nếu API lỗi (key/rate limit) tự chuyển sang săn bằng browser.");
 
             btnAffiliateKeywordsCaption.Dock = DockStyle.Fill;
             btnAffiliateKeywordsCaption.Margin = Padding.Empty;
@@ -1018,187 +1063,7 @@ namespace tiktok_Omni
                 Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point)
             };
 
-            flpSlideshowData = CreateAiVideoGenActionFlowPanel();
-            flpSlideshowExecute = CreateAiVideoGenActionFlowPanel();
-
-            btnGenerateGeminiPrompt = CreateToolbarButton("Tạo kịch bản AI", executeStyle: false, minWidth: 140);
-            btnGenerateGeminiPrompt.Name = "btnGenerateGeminiPrompt";
-            btnGenerateGeminiPrompt.BackColor = Color.FromArgb(76, 110, 245);
-            btnGenerateGeminiPrompt.Click += btnGenerateGeminiPrompt_Click;
-
-            btnReviewScriptBeforeRender = CreateToolbarButton("Duyệt kịch bản trước render", executeStyle: false, minWidth: 180);
-            btnReviewScriptBeforeRender.Name = "btnReviewScriptBeforeRender";
-            btnReviewScriptBeforeRender.BackColor = Color.FromArgb(88, 101, 242);
-            btnReviewScriptBeforeRender.Click += btnReviewScriptBeforeRender_Click;
-
-            btnAffiliateGenerateScript = CreateToolbarButton("Sinh Script", executeStyle: false, minWidth: 110);
-            btnAffiliateGenerateScript.Name = "btnAffiliateGenerateScript";
-            btnAffiliateGenerateScript.BackColor = Color.FromArgb(78, 120, 166);
-            btnAffiliateGenerateScript.Click += btnAffiliateGenerateScript_Click;
-
-            btnAffiliateEditScript = CreateToolbarButton("Sửa Script", executeStyle: false, minWidth: 100);
-            btnAffiliateEditScript.Name = "btnAffiliateEditScript";
-            btnAffiliateEditScript.BackColor = Color.FromArgb(60, 64, 77);
-            btnAffiliateEditScript.Click += btnAffiliateEditScript_Click;
-
-            btnAffiliateBatchPipeline = CreateToolbarButton("Pipeline hàng loạt", executeStyle: false, minWidth: 150);
-            btnAffiliateBatchPipeline.Name = "btnAffiliateBatchPipeline";
-            btnAffiliateBatchPipeline.BackColor = Color.FromArgb(100, 70, 160);
-            btnAffiliateBatchPipeline.Click += btnAffiliateBatchPipeline_Click;
-
-            var slideshowActionTip = new ToolTip { AutoPopDelay = 12000, InitialDelay = 300, ShowAlways = true };
-            slideshowActionTip.SetToolTip(btnAffiliateGenerateScript,
-                "Chọn dòng trên lưới sản phẩm — sinh lời thoại preview bằng Gemini (cần AI API Key).");
-            slideshowActionTip.SetToolTip(btnAffiliateEditScript,
-                "Chọn đúng một dòng sản phẩm — mở hộp thoại sửa script.");
-            slideshowActionTip.SetToolTip(btnAffiliateBatchPipeline,
-                "Hunt (tab Săn Video) → lọc HQ → đẩy Slideshow → sinh script → render. Cần từ khóa + AI API Key.");
-
-            btnCopyAiVideoPrompt = CreateToolbarButton("Sao chép", executeStyle: false, minWidth: 90);
-            btnCopyAiVideoPrompt.Name = "btnCopyAiVideoPrompt";
-            btnCopyAiVideoPrompt.Click += btnCopyAiVideoPrompt_Click;
-
-            btnSaveAiVideoPrompt = CreateToolbarButton("Lưu .txt", executeStyle: false, minWidth: 90);
-            btnSaveAiVideoPrompt.Name = "btnSaveAiVideoPrompt";
-            btnSaveAiVideoPrompt.Click += btnSaveAiVideoPrompt_Click;
-
-            var lblGeminiStyle = new Label
-            {
-                Text = "Mẫu Gemini:",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(200, 204, 214),
-                Margin = new Padding(0, 8, 4, 0)
-            };
-            cbGeminiStyleTemplate = new ComboBox
-            {
-                Name = "cbGeminiStyleTemplate",
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 4, 8, 0),
-                MinimumSize = new Size(160, 28)
-            };
-            foreach (GeminiStyleTemplate t in Enum.GetValues(typeof(GeminiStyleTemplate)))
-            {
-                cbGeminiStyleTemplate.Items.Add(t);
-            }
-
-            cbGeminiStyleTemplate.SelectedItem = GeminiStyleTemplate.Storytelling;
-            cbGeminiStyleTemplate.SelectedIndexChanged += async (_, __) =>
-            {
-                try
-                {
-                    var s = await _configManager.LoadAsync().ConfigureAwait(true);
-                    s.GeminiStyleTemplate = GetSelectedGeminiStyleTemplate().ToString();
-                    await _configManager.SaveAsync(s).ConfigureAwait(true);
-                }
-                catch
-                {
-                }
-            };
-
-            flpSlideshowData.Controls.Add(lblGeminiStyle);
-            flpSlideshowData.Controls.Add(cbGeminiStyleTemplate);
-            flpSlideshowData.Controls.Add(btnGenerateGeminiPrompt);
-            flpSlideshowData.Controls.Add(btnAffiliateGenerateScript);
-            flpSlideshowData.Controls.Add(btnAffiliateEditScript);
-            flpSlideshowData.Controls.Add(btnReviewScriptBeforeRender);
-            flpSlideshowData.Controls.Add(btnCopyAiVideoPrompt);
-            flpSlideshowData.Controls.Add(btnSaveAiVideoPrompt);
-            btnClearAiGenGrid = CreateClearGridButton();
-            flpSlideshowData.Controls.Add(btnClearAiGenGrid);
-
-            btnRenderAiVideo = CreateToolbarButton("Render video sản phẩm", executeStyle: true, minWidth: 160);
-            btnRenderAiVideo.Name = "btnRenderAiVideo";
-            btnRenderAiVideo.Click += btnRenderAiVideo_Click;
-            btnOpenOutputFolder = CreateOpenOutputFolderButton();
-            btnSlideshowOpenApproval = CreateSecondaryNavButton("btnSlideshowOpenApproval", "Mở Hàng duyệt");
-            btnSlideshowOpenApproval.Click += btnOpenApprovalQueue_Click;
-            flpSlideshowExecute.Controls.Add(btnAffiliateBatchPipeline);
-            flpSlideshowExecute.Controls.Add(btnRenderAiVideo);
-            flpSlideshowExecute.Controls.Add(btnOpenOutputFolder);
-            flpSlideshowExecute.Controls.Add(btnSlideshowOpenApproval);
-
-            if (chkUseMultiVoiceNarration == null)
-            {
-                chkUseMultiVoiceNarration = new CheckBox
-                {
-                    Name = "chkUseMultiVoiceNarration",
-                    Text = "Đa giọng đọc (Multi-voice)",
-                    AutoSize = true,
-                    ForeColor = Color.FromArgb(200, 204, 214),
-                    Margin = new Padding(8, 8, 0, 0)
-                };
-            }
-
-            chkUseMultiVoiceNarration.Visible = true;
-            flpSlideshowData.Controls.Add(chkUseMultiVoiceNarration);
-
-            numAiTextSize = new NumericUpDown
-            {
-                Name = "numAiTextSize",
-                Minimum = 24,
-                Maximum = 96,
-                Value = 50,
-                Width = 56,
-                Height = 24,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 6, 8, 0)
-            };
-            numAiMusicVolume = new NumericUpDown
-            {
-                Name = "numAiMusicVolume",
-                Minimum = 0,
-                Maximum = 100,
-                Value = 14,
-                Width = 56,
-                Height = 24,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 6, 0, 0)
-            };
-            flpSlideshowExecute.Controls.Add(new Label
-            {
-                Text = "Cỡ chữ",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(200, 204, 214),
-                Margin = new Padding(0, 8, 4, 0)
-            });
-            flpSlideshowExecute.Controls.Add(numAiTextSize);
-            flpSlideshowExecute.Controls.Add(new Label
-            {
-                Text = "Âm lượng nhạc",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(200, 204, 214),
-                Margin = new Padding(8, 8, 4, 0)
-            });
-            flpSlideshowExecute.Controls.Add(numAiMusicVolume);
-
-            numAiTransitionDuration = new NumericUpDown
-            {
-                Name = "numAiTransitionDuration",
-                DecimalPlaces = 1,
-                Increment = 0.1M,
-                Minimum = 0.2M,
-                Maximum = 2.0M,
-                Value = 0.6M,
-                Width = 56,
-                Height = 24,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 6, 0, 0)
-            };
-            flpSlideshowExecute.Controls.Add(new Label
-            {
-                Text = "Chuyển cảnh (s)",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(200, 204, 214),
-                Margin = new Padding(8, 8, 4, 0)
-            });
-            flpSlideshowExecute.Controls.Add(numAiTransitionDuration);
-
-            pnlSlideshowActionBar = BuildAiVideoGenModeActionPanel(flpSlideshowData, flpSlideshowExecute);
+            InitializeAiVideoGenToolbarControls();
 
             BuildAiModeToolbarOnlyLayout(pnlModeAffiliateDeep, out _);
 
@@ -1214,234 +1079,26 @@ namespace tiktok_Omni
                 Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point)
             };
 
-            btnRunAffiliateDeepVideo = CreateToolbarButton("Render Affiliate chuyên sâu", executeStyle: true, minWidth: 200);
-            btnRunAffiliateDeepVideo.Name = "btnRunAffiliateDeepVideo";
-            btnRunAffiliateDeepVideo.Click += btnRunAffiliateDeepVideo_Click;
-            BuildAiModeToolbarOnlyLayout(pnlModeAffiliateDeep, out _);
             var pnlPhilosophyProgress = CreateAiModeProgressBand("pnlPhilosophyProgress");
-            BuildAiModeFillLayoutPercent(pnlModePhilosophy, out var pnlPhilosophyInput, out var pnlPhilosophyLog, 42F, pnlPhilosophyProgress);
-
-            var lblPhilosophyTitle = new Label
-            {
-                Text = "Video Triết lý / Quote",
-                AutoSize = true,
-                Location = new Point(0, 0),
-                ForeColor = Color.WhiteSmoke,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold, GraphicsUnit.Point)
-            };
-            lblPhilosophyPrereq = new Label
-            {
-                Name = "lblPhilosophyPrereq",
-                Text = "Đang kiểm tra cấu hình…",
-                Location = new Point(0, 26),
-                Size = new Size(900, 44),
-                AutoSize = false,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                ForeColor = Color.FromArgb(255, 180, 120),
-                Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point)
-            };
-            var lblPhilosophyProfile = new Label
-            {
-                Text = "Bước 1 — Profile kênh:",
-                Location = new Point(0, 76),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(200, 205, 218),
-                Font = new Font("Segoe UI", 9.25F, FontStyle.Bold, GraphicsUnit.Point)
-            };
-            cbPhilosophyProfile = new ComboBox
-            {
-                Name = "cbPhilosophyProfile",
-                Location = new Point(148, 72),
-                Size = new Size(200, 32),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Font = new Font("Segoe UI", 9.25F, FontStyle.Regular, GraphicsUnit.Point),
-                IntegralHeight = false
-            };
-            cbPhilosophyProfile.Items.Add("default");
-            cbPhilosophyProfile.SelectedIndex = 0;
-            cbPhilosophyProfile.SelectedIndexChanged += (_, __) => RefreshPhilosophyPrereqLabel(null);
-
-            btnPhilosophyOpenAssets = new Button
-            {
-                Name = "btnPhilosophyOpenAssets",
-                Text = "Mở thư mục Assets",
-                Location = new Point(358, 70),
-                Size = new Size(160, 30),
-                BackColor = Color.FromArgb(55, 60, 72),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.WhiteSmoke
-            };
-            btnPhilosophyOpenAssets.FlatAppearance.BorderSize = 0;
-            btnPhilosophyOpenAssets.Click += btnPhilosophyOpenAssets_Click;
-
-            lblPhilosophyQuoteLabel = new Label
-            {
-                Name = "lblPhilosophyQuoteLabel",
-                Text = "Bước 2 — Nội dung (1 quote, hoặc link bài để AI trích quote):",
-                Location = new Point(0, 108),
-                Size = new Size(900, 20),
-                AutoSize = false,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                ForeColor = Color.FromArgb(200, 205, 218),
-                Font = new Font("Segoe UI", 9.25F, FontStyle.Bold, GraphicsUnit.Point)
-            };
-
-            txtPhilosophyInput = new TextBox
-            {
-                Name = "txtPhilosophyInput",
-                Location = new Point(0, 132),
-                Size = new Size(900, 64),
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Multiline = true,
-                ScrollBars = ScrollBars.Vertical,
-                Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point)
-            };
-
-            btnPhilosophyImportFromFile = new Button
-            {
-                Name = "btnPhilosophyImportFromFile",
-                Text = "Nạp nhiều quote (.txt)",
-                AutoSize = true,
-                MinimumSize = new Size(180, 36),
-                Margin = new Padding(0, 0, 8, 6),
-                BackColor = Color.FromArgb(60, 64, 77),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.WhiteSmoke,
-                Font = new Font("Segoe UI", 9.25F, FontStyle.Regular, GraphicsUnit.Point)
-            };
-            btnPhilosophyImportFromFile.FlatAppearance.BorderSize = 0;
-            btnPhilosophyImportFromFile.Click += btnPhilosophyImportFromFile_Click;
-
-            btnRunPhilosophyVideo = new Button
-            {
-                Name = "btnRunPhilosophyVideo",
-                Text = "Tạo video (1 quote)",
-                AutoSize = true,
-                MinimumSize = new Size(180, 36),
-                Margin = new Padding(0, 0, 8, 6),
-                BackColor = Color.FromArgb(56, 142, 96),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point)
-            };
-            btnRunPhilosophyVideo.FlatAppearance.BorderSize = 0;
-            btnRunPhilosophyVideo.Click += btnRunPhilosophyVideo_Click;
-
-            btnPhilosophyOpenApproval = CreateSecondaryNavButton("btnPhilosophyOpenApproval", "Mở Hàng duyệt");
-            btnPhilosophyOpenApproval.AutoSize = true;
-            btnPhilosophyOpenApproval.MinimumSize = new Size(140, 36);
-            btnPhilosophyOpenApproval.Margin = new Padding(0, 0, 8, 6);
-            btnPhilosophyOpenApproval.Click += btnOpenApprovalQueue_Click;
-
-            var flpPhilosophyActions = new FlowLayoutPanel
-            {
-                Name = "flpPhilosophyActions",
-                Location = new Point(0, 206),
-                AutoSize = true,
-                WrapContents = true,
-                FlowDirection = FlowDirection.LeftToRight,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-                BackColor = pnlPhilosophyInput.BackColor,
-                Margin = new Padding(0),
-                Padding = new Padding(0)
-            };
-            flpPhilosophyActions.Controls.Add(btnPhilosophyImportFromFile);
-            flpPhilosophyActions.Controls.Add(btnRunPhilosophyVideo);
-            flpPhilosophyActions.Controls.Add(btnPhilosophyOpenApproval);
-
-            var lblPhilosophyFlowHint = new Label
-            {
-                Name = "lblPhilosophyFlowHint",
-                Text = "Sau khi tạo: xem tiến trình bên dưới → video vào Hàng duyệt (Pending) → duyệt rồi Đăng tự động.",
-                Location = new Point(0, 248),
-                Size = new Size(900, 32),
-                AutoSize = false,
-                AutoEllipsis = true,
-                ForeColor = Color.FromArgb(140, 148, 165),
-                Font = new Font("Segoe UI", 8.5F, FontStyle.Italic, GraphicsUnit.Point)
-            };
-
-            pnlPhilosophyInput.Controls.Add(lblPhilosophyTitle);
-            pnlPhilosophyInput.Controls.Add(lblPhilosophyPrereq);
-            pnlPhilosophyInput.Controls.Add(lblPhilosophyProfile);
-            pnlPhilosophyInput.Controls.Add(cbPhilosophyProfile);
-            pnlPhilosophyInput.Controls.Add(btnPhilosophyOpenAssets);
-            pnlPhilosophyInput.Controls.Add(lblPhilosophyQuoteLabel);
-            pnlPhilosophyInput.Controls.Add(txtPhilosophyInput);
-            pnlPhilosophyInput.Controls.Add(flpPhilosophyActions);
-            pnlPhilosophyInput.Controls.Add(lblPhilosophyFlowHint);
-            pnlPhilosophyInput.Resize += (_, __) =>
-            {
-                var w = Math.Max(320, pnlPhilosophyInput.ClientSize.Width - pnlPhilosophyInput.Padding.Horizontal);
-                if (lblPhilosophyPrereq != null)
-                {
-                    lblPhilosophyPrereq.Width = w;
-                }
-
-                if (lblPhilosophyQuoteLabel != null)
-                {
-                    lblPhilosophyQuoteLabel.Width = w;
-                }
-
-                if (txtPhilosophyInput != null)
-                {
-                    txtPhilosophyInput.Width = w;
-                }
-
-                LayoutPhilosophyStep2Row(pnlPhilosophyInput, flpPhilosophyActions, lblPhilosophyFlowHint);
-            };
-
-            var tblPhilosophyLog = new TableLayoutPanel
-            {
-                Name = "tblPhilosophyLog",
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 3,
-                BackColor = pnlPhilosophyLog.BackColor,
-                Margin = new Padding(0)
-            };
-            tblPhilosophyLog.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
-            tblPhilosophyLog.RowStyles.Add(new RowStyle(SizeType.Absolute, 152F));
-            tblPhilosophyLog.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-
-            var lblPhilosophyQueueHeader = new Label
-            {
-                Text = "Bước 3 — Hàng đợi render & kết quả",
-                Dock = DockStyle.Fill,
-                ForeColor = Color.FromArgb(200, 205, 218),
-                Font = new Font("Segoe UI", 9.25F, FontStyle.Bold, GraphicsUnit.Point),
-                Padding = new Padding(0, 4, 0, 0)
-            };
 
             _philosophyQueueBindingList = new BindingList<ProductionQueueRowItem>();
             dgvPhilosophyQueue = new DataGridView
             {
                 Name = "dgvPhilosophyQueue",
-                Dock = DockStyle.Fill,
-                DataSource = _philosophyQueueBindingList,
-                ReadOnly = true,
-                AllowUserToAddRows = false,
-                RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                BackgroundColor = Color.FromArgb(20, 22, 28),
-                BorderStyle = BorderStyle.FixedSingle,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+                Visible = false,
+                DataSource = _philosophyQueueBindingList
             };
             ConfigureProductionQueueGrid(dgvPhilosophyQueue);
             dgvPhilosophyQueue.SelectionChanged += DgvPhilosophyQueue_SelectionChanged;
 
-            rtbPhilosophyLog = CreateAiModeLogTextBox("rtbPhilosophyLog");
-            tblPhilosophyLog.Controls.Add(lblPhilosophyQueueHeader, 0, 0);
-            tblPhilosophyLog.Controls.Add(dgvPhilosophyQueue, 0, 1);
-            tblPhilosophyLog.Controls.Add(rtbPhilosophyLog, 0, 2);
-            pnlPhilosophyLog.Controls.Add(tblPhilosophyLog);
-            ApplyAiModeLogLineSpacing(rtbPhilosophyLog);
-            LayoutPhilosophyStep2Row(pnlPhilosophyInput, flpPhilosophyActions, lblPhilosophyFlowHint);
+            _mascotQueueBindingList = new BindingList<ProductionQueueRowItem>();
+            dgvMascotQueue = new DataGridView
+            {
+                Name = "dgvMascotQueue",
+                Visible = false,
+                DataSource = _mascotQueueBindingList
+            };
+            ConfigureProductionQueueGrid(dgvMascotQueue);
 
             lblPhilosophyProgress = new Label
             {
@@ -1451,21 +1108,10 @@ namespace tiktok_Omni
             ConfigureAiModeProgressLabel(lblPhilosophyProgress);
             pbPhilosophyProgress = new ProgressBar { Name = "pbPhilosophyProgress" };
             ConfigureAiModeProgressBar(pbPhilosophyProgress);
-            btnPhilosophyClearLog = new Button
-            {
-                Name = "btnPhilosophyClearLog",
-                Text = "Xóa log",
-                Size = new Size(72, 24),
-                BackColor = Color.FromArgb(60, 64, 77),
-                FlatStyle = FlatStyle.Flat,
-                ForeColor = Color.WhiteSmoke
-            };
-            btnPhilosophyClearLog.FlatAppearance.BorderSize = 0;
-            btnPhilosophyClearLog.Click += btnPhilosophyClearLog_Click;
             pnlPhilosophyProgress.Controls.Add(pbPhilosophyProgress);
             pnlPhilosophyProgress.Controls.Add(lblPhilosophyProgress);
-            pnlPhilosophyProgress.Controls.Add(btnPhilosophyClearLog);
-            LayoutAiModeClearLogButton(btnPhilosophyClearLog, pnlPhilosophyProgress);
+
+            InitializePhilosophyControls(pnlModePhilosophy, pnlPhilosophyProgress);
 
             lblVideoReupReadiness = new Label
             {
@@ -1488,7 +1134,7 @@ namespace tiktok_Omni
             pnlVideoReupStatus = new Panel
             {
                 Name = "pnlVideoReupStatus",
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Bottom,
                 MinimumSize = new Size(0, 148),
                 BackColor = Color.FromArgb(24, 26, 32),
                 BorderStyle = BorderStyle.FixedSingle,
@@ -1506,13 +1152,22 @@ namespace tiktok_Omni
             pbVideoReupProgress = new ProgressBar
             {
                 Name = "pbVideoReupProgress",
-                Dock = DockStyle.Top,
-                Height = 12,
+                Dock = DockStyle.Fill,
                 Minimum = 0,
                 Maximum = 100,
                 Value = 0,
                 Style = ProgressBarStyle.Continuous
             };
+            pnlVideoReupProgress = new Panel
+            {
+                Name = "pnlVideoReupProgress",
+                Dock = DockStyle.Fill,
+                Height = 16,
+                MinimumSize = new Size(0, 14),
+                Padding = new Padding(0, 2, 0, 0),
+                Margin = new Padding(0)
+            };
+            pnlVideoReupProgress.Controls.Add(pbVideoReupProgress);
             btnVideoReupClearLog = new Button
             {
                 Name = "btnVideoReupClearLog",
@@ -1544,8 +1199,8 @@ namespace tiktok_Omni
                 Margin = new Padding(0)
             };
             tblReupStatus.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
-            tblReupStatus.RowStyles.Add(new RowStyle(SizeType.Absolute, 18F));
             tblReupStatus.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            tblReupStatus.RowStyles.Add(new RowStyle(SizeType.Absolute, 22F));
             var pnlReupStatusHeader = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -1560,8 +1215,8 @@ namespace tiktok_Omni
             pnlReupStatusHeader.Controls.Add(lblVideoReupProgress);
             pnlReupStatusHeader.Controls.Add(btnVideoReupClearLog);
             tblReupStatus.Controls.Add(pnlReupStatusHeader, 0, 0);
-            tblReupStatus.Controls.Add(pbVideoReupProgress, 0, 1);
-            tblReupStatus.Controls.Add(rtbVideoReupLog, 0, 2);
+            tblReupStatus.Controls.Add(rtbVideoReupLog, 0, 1);
+            tblReupStatus.Controls.Add(pnlVideoReupProgress, 0, 2);
             pnlVideoReupStatus.Controls.Add(tblReupStatus);
             btnPushSelectionToVideoReup = CreateReupJellyButton(
                 "btnPushSelectionToVideoReup",
@@ -1583,28 +1238,15 @@ namespace tiktok_Omni
             flpReupToolbar.Dock = DockStyle.Fill;
             flpReupToolbar.Controls.Add(CreateClearGridButton());
 
-            btnVideoReupRenderVideo = CreateReupJellyButton(
-                "btnVideoReupRenderVideo",
-                "Tạo video thành phẩm",
-                ReupTintRender,
-                188);
-            btnVideoReupRenderVideo.Click += btnVideoReupRenderVideo_Click;
-            btnVideoReupRenderBatch = CreateReupJellyButton(
-                "btnVideoReupRenderBatch",
-                "Tạo video thành phẩm (lô)",
-                ReupTintRenderBatch,
-                208);
-            btnVideoReupRenderBatch.Click += btnVideoReupRenderBatch_Click;
-
             _videoReupBindingList = new BindingList<VideoReupRowItem>();
             dgvVideoReupInput = new DataGridView
             {
                 Name = "dgvVideoReupInput",
                 Dock = DockStyle.Fill,
                 MinimumSize = new Size(180, 100),
-                AutoGenerateColumns = true,
+                AutoGenerateColumns = false,
                 AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
+                AllowUserToDeleteRows = true,
                 ReadOnly = false,
                 EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2,
                 RowHeadersVisible = false,
@@ -1615,9 +1257,11 @@ namespace tiktok_Omni
                 GridColor = Color.FromArgb(60, 64, 77),
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
-                ScrollBars = ScrollBars.Both,
-                DataSource = _videoReupBindingList
+                ScrollBars = ScrollBars.Both
             };
+            ConfigureVideoReupInputGrid();
+            RefreshAllProfileSelectors();
+            dgvVideoReupInput.DataSource = _videoReupBindingList;
 
             pnlReupEditor = new Panel
             {
@@ -1642,8 +1286,13 @@ namespace tiktok_Omni
             dgvVideoReupInput.RowTemplate.Height = 28;
             dgvVideoReupInput.EnableHeadersVisualStyles = false;
             dgvVideoReupInput.DataBindingComplete += DgvVideoReupInput_DataBindingComplete;
+            dgvVideoReupInput.CurrentCellDirtyStateChanged += VideoReupInputGrid_CurrentCellDirtyStateChanged;
+            dgvVideoReupInput.DataError += VideoReupInputGrid_DataError;
+            dgvVideoReupInput.CellFormatting += DgvVideoReupInput_CellFormatting;
             dgvVideoReupInput.CellBeginEdit += DgvVideoReupInput_CellBeginEdit;
             dgvVideoReupInput.CellEndEdit += DgvVideoReupInput_CellEndEdit;
+            dgvVideoReupInput.RowPrePaint += DgvVideoReupInput_RowPrePaint;
+            dgvVideoReupInput.CellClick += DgvVideoReupInput_EditorCellClick;
             dgvVideoReupInput.KeyDown += dgvVideoReupInput_KeyDown;
             dgvVideoReupInput.SelectionChanged += dgvVideoReupInput_SelectionChanged;
 
@@ -1793,6 +1442,16 @@ namespace tiktok_Omni
             btnVideoReupLyriaHook.BackColor = Color.FromArgb(120, 70, 160);
             btnVideoReupLyriaHook.Height = 28;
             btnVideoReupLyriaHook.Click += btnVideoReupLyriaHook_Click;
+            btnVideoReupNarrationScriptGemini = CreateToolbarButton("Tạo script", executeStyle: false, minWidth: 108);
+            btnVideoReupNarrationScriptGemini.Name = "btnVideoReupNarrationScriptGemini";
+            btnVideoReupNarrationScriptGemini.BackColor = Color.FromArgb(72, 130, 185);
+            btnVideoReupNarrationScriptGemini.Height = 28;
+            btnVideoReupNarrationScriptGemini.Click += btnVideoReupNarrationScriptGemini_Click;
+            btnVideoReupNarrationScriptRegen = CreateToolbarButton("Tạo lại script", executeStyle: false, minWidth: 108);
+            btnVideoReupNarrationScriptRegen.Name = "btnVideoReupNarrationScriptRegen";
+            btnVideoReupNarrationScriptRegen.BackColor = Color.FromArgb(58, 108, 168);
+            btnVideoReupNarrationScriptRegen.Height = 28;
+            btnVideoReupNarrationScriptRegen.Click += btnVideoReupNarrationScriptRegen_Click;
             var lblReupHookPrefix = new Label
             {
                 Text = "Hook:",
@@ -1806,6 +1465,16 @@ namespace tiktok_Omni
             flpReupHookActions.Controls.Add(btnVideoReupHookGemini);
             flpReupHookActions.Controls.Add(btnVideoReupHookRegen);
             flpReupHookActions.Controls.Add(btnVideoReupLyriaHook);
+            var lblReupScriptPrefix = new Label
+            {
+                Text = "Script:",
+                AutoSize = true,
+                ForeColor = Color.FromArgb(160, 168, 182),
+                Margin = new Padding(12, 6, 6, 0)
+            };
+            flpReupHookActions.Controls.Add(lblReupScriptPrefix);
+            flpReupHookActions.Controls.Add(btnVideoReupNarrationScriptGemini);
+            flpReupHookActions.Controls.Add(btnVideoReupNarrationScriptRegen);
 
             grpVideoReupAudioMode = new GroupBox
             {
@@ -1943,17 +1612,19 @@ namespace tiktok_Omni
             pnlReupEditor.AutoScroll = false;
             pnlReupEditor.AutoScrollMinSize = Size.Empty;
 
-            InitializeReupPreviewUi();
-
             pnlModeVideoReup.AutoScroll = false;
             pnlModeVideoReup.Padding = new Padding(4);
             WireVideoReupTabLayout();
+            BuildReupSubtitleToolbar();
+            if (pnlReupSubtitleToolbar != null)
+            {
+                pnlReupSubtitleToolbar.Visible = false;
+            }
             RefreshVideoReupReadinessLabel(null);
             InitializeVideoReupDraftAutoSave();
 
             tabMascotStory = pnlModeMascot;
             BuildMascotStoryTabUi();
-            WireMascotLipSyncEvents();
             LoadMascotIdentityPackForSelectedProfile();
 
             _aiVideoScriptBindingList = new BindingList<AiVideoScriptReviewItem>();
@@ -2235,7 +1906,7 @@ namespace tiktok_Omni
                     Name = "tblAiVideoGenRoot",
                     Dock = DockStyle.Fill,
                     ColumnCount = 1,
-                    RowCount = 4,
+                    RowCount = 3,
                     BackColor = tabAiVideoGen.BackColor,
                     Margin = new Padding(0),
                     Padding = new Padding(0)
@@ -2244,13 +1915,11 @@ namespace tiktok_Omni
                 tblAiVideoGenRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 7F));
                 tblAiVideoGenRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 42F));
                 tblAiVideoGenRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 51F));
-                tblAiVideoGenRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
                 flpAiVideoGenHeader.Dock = DockStyle.Fill;
                 pnlAiVideoGenProductArea.Dock = DockStyle.Fill;
                 pnlAiVideoGenScriptHost.Dock = DockStyle.Fill;
                 pnlAiVideoGenStickyHost.Dock = DockStyle.Fill;
-                pnlAiVideoGenActionBar.Dock = DockStyle.Fill;
                 if (pnlAiVideoGenTopHeader != null)
                 {
                     pnlAiVideoGenTopHeader.Dock = DockStyle.Fill;
@@ -2260,9 +1929,8 @@ namespace tiktok_Omni
                 tblAiVideoGenRoot.Controls.Add(headerHost, 0, 0);
                 tblAiVideoGenRoot.Controls.Add(pnlAiVideoGenProductArea, 0, 1);
                 tblAiVideoGenRoot.Controls.Add(pnlAiVideoGenScriptHost, 0, 2);
-                tblAiVideoGenRoot.Controls.Add(pnlAiVideoGenActionBar, 0, 3);
 
-                WireAiVideoGenTabShell();
+                WireAiVideoGenLayout(tabAiVideoGen);
 
                 tabAiVideoGen.AutoScroll = false;
                 tabAiVideoGen.AutoScrollMinSize = Size.Empty;
@@ -2276,45 +1944,12 @@ namespace tiktok_Omni
 
         private void WireAiVideoGenTabShell()
         {
-            if (tabAiVideoGen == null || tblAiVideoGenRoot == null)
-            {
-                return;
-            }
-
-            tblAiVideoGenRoot.Dock = DockStyle.Fill;
-
-            if (pnlAiVideoGenRenderStatusHost != null)
-            {
-                if (tabAiVideoGen.Controls.Contains(pnlAiVideoGenRenderStatusHost))
-                {
-                    tabAiVideoGen.Controls.Remove(pnlAiVideoGenRenderStatusHost);
-                }
-
-                pnlAiVideoGenRenderStatusHost.Visible = false;
-            }
-
-            if (grpAiRenderProgress != null)
-            {
-                grpAiRenderProgress.Visible = false;
-            }
-
-            foreach (var c in tabAiVideoGen.Controls.Cast<Control>().ToArray())
-            {
-                if (c != tblAiVideoGenRoot)
-                {
-                    tabAiVideoGen.Controls.Remove(c);
-                }
-            }
-
-            if (!tabAiVideoGen.Controls.Contains(tblAiVideoGenRoot))
-            {
-                tabAiVideoGen.Controls.Add(tblAiVideoGenRoot);
-            }
+            WireAiVideoGenLayout(tabAiVideoGen);
         }
 
         private void ApplyAiVideoGenTableRowHeights(bool showProductGrid, int modeTabIndex)
         {
-            if (tblAiVideoGenRoot == null || tblAiVideoGenRoot.RowStyles.Count < 4)
+            if (tblAiVideoGenRoot == null || tblAiVideoGenRoot.RowStyles.Count < 3)
             {
                 return;
             }
@@ -2332,14 +1967,12 @@ namespace tiktok_Omni
                     SetRow(0, SizeType.AutoSize, 0F);
                     SetRow(1, SizeType.Percent, 100F);
                     SetRow(2, SizeType.Absolute, 0F);
-                    SetRow(3, SizeType.Absolute, 0F);
                 }
                 else
                 {
                     SetRow(0, SizeType.Percent, 7F);
                     SetRow(1, SizeType.Percent, 42F);
                     SetRow(2, SizeType.Percent, 51F);
-                    SetRow(3, SizeType.AutoSize, 0F);
                 }
 
                 if (flpAiVideoGenHeader != null)
@@ -2406,7 +2039,6 @@ namespace tiktok_Omni
                 SetRow(0, SizeType.Absolute, 0F);
                 SetRow(1, SizeType.Percent, 100F);
                 SetRow(2, SizeType.Absolute, 0F);
-                SetRow(3, SizeType.AutoSize, 0F);
 
                 if (flpAiVideoGenHeader != null)
                 {
@@ -2469,31 +2101,17 @@ namespace tiktok_Omni
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point)
             };
 
-            flpAffiliateDeepHeaderActions = CreateAiVideoGenActionFlowPanel();
-            flpAffiliateDeepHeaderActions.Controls.Add(lblAffiliateDeepSectionTitle);
-
-            btnDeepGenerateScript = CreateToolbarButton("Sinh Script", executeStyle: false, minWidth: 110);
-            btnDeepGenerateScript.Name = "btnDeepGenerateScript";
-            btnDeepGenerateScript.BackColor = Color.FromArgb(78, 120, 166);
-            btnDeepGenerateScript.Click += btnAffiliateGenerateScript_Click;
-
-            btnDeepEditScript = CreateToolbarButton("Sửa Script", executeStyle: false, minWidth: 100);
-            btnDeepEditScript.Name = "btnDeepEditScript";
-            btnDeepEditScript.BackColor = Color.FromArgb(60, 64, 77);
-            btnDeepEditScript.Click += btnAffiliateEditScript_Click;
-
-            flpAffiliateDeepHeaderActions.Controls.Add(btnDeepGenerateScript);
-            flpAffiliateDeepHeaderActions.Controls.Add(btnDeepEditScript);
-
-            if (btnRunAffiliateDeepVideo != null)
+            if (_aiVideoGenControls == null)
             {
-                flpAffiliateDeepHeaderActions.Controls.Add(btnRunAffiliateDeepVideo);
+                InitializeAiVideoGenToolbarControls();
             }
 
-            btnAffiliateDeepOpenOutput = CreateOpenOutputFolderButton();
-            btnAffiliateDeepOpenOutput.Name = "btnAffiliateDeepOpenOutput";
-            flpAffiliateDeepHeaderActions.Controls.Add(btnAffiliateDeepOpenOutput);
-            flpAffiliateDeepHeaderActions.Controls.Add(CreateClearGridButton());
+            flpAffiliateDeepHeaderActions = _aiVideoGenControls.AffiliateDeepHeaderActions;
+            if (!flpAffiliateDeepHeaderActions.Controls.Contains(lblAffiliateDeepSectionTitle))
+            {
+                flpAffiliateDeepHeaderActions.Controls.Add(lblAffiliateDeepSectionTitle);
+                flpAffiliateDeepHeaderActions.Controls.SetChildIndex(lblAffiliateDeepSectionTitle, 0);
+            }
 
             pnlAffiliateDeepReadinessHost = new Panel
             {
