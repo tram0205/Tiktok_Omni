@@ -402,6 +402,12 @@ namespace tiktok_Omni
             miRescanAnchor.Click += async (s, e) => await RescanSelectedAffiliateAnchorAsync().ConfigureAwait(true);
             affiliateContextMenu.Items.Add(miRescanAnchor);
 
+            affiliateContextMenu.Items.Add(new ToolStripSeparator());
+
+            var miDeleteAffiliate = new ToolStripMenuItem("❌ Xóa dòng đang chọn");
+            miDeleteAffiliate.Click += miDeleteAffiliate_Click;
+            affiliateContextMenu.Items.Add(miDeleteAffiliate);
+
             dgvAffiliateResults.ContextMenuStrip = affiliateContextMenu;
 
             var affiliateGridTip = new ToolTip

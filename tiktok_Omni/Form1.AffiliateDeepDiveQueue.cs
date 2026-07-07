@@ -357,5 +357,51 @@ namespace tiktok_Omni
         {
             // Deep Dive luôn bấm được — handler tự báo khi thiếu chọn dòng.
         }
+
+        private void miDeleteAffiliate_Click(object sender, EventArgs e)
+        {
+            if (dgvAffiliateResults?.SelectedRows == null || dgvAffiliateResults.SelectedRows.Count == 0)
+            {
+                MessageBox.Show(this, "Hãy chọn ít nhất một dòng để xóa.", "Xóa dòng", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var selected = new List<AffiliateCandidate>();
+            foreach (DataGridViewRow row in dgvAffiliateResults.SelectedRows)
+            {
+                if (row?.DataBoundItem is AffiliateCandidate c)
+                {
+                    selected.Add(c);
+                }
+            }
+
+            if (selected.Count == 0)
+            {
+                return;
+            }
+
+            var label = selected.Count == 1 ? "dòng đang chọn" : $"{selected.Count} dòng đang chọn";
+            var confirm = MessageBox.Show(this,
+                $"Bạn có chắc chắn muốn xóa {label} khỏi lưới kết quả không?",
+                "Xác nhận xóa",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
+
+            foreach (var item in selected)
+            {
+                _affiliateBindingList?.Remove(item);
+                _affiliateAllResults?.Remove(item);
+            }
+
+            RefreshAffiliateGridByQualityFilter();
+            _affiliateBindingList?.ResetBindings();
+            dgvAffiliateResults?.Invalidate();
+            Log($"[Affiliate] Đã xóa {selected.Count} dòng khỏi kết quả săn.");
+        }
     }
 }

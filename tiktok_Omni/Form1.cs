@@ -940,8 +940,8 @@ namespace tiktok_Omni
             btnHuntAffiliates.Enabled = false;
             btnExportAffiliateCsv.Enabled = false;
             btnStopHunt.Enabled = true;
-            _affiliateBindingList.Clear();
-            _affiliateAllResults = new List<AffiliateCandidate>();
+            // _affiliateBindingList.Clear();
+            // _affiliateAllResults = new List<AffiliateCandidate>();
             _huntCancellation?.Dispose();
             _huntCancellation = RegisterActiveJobCancellation();
             _lastHuntKeywordEntries = new List<HuntKeywordEntry>(keywordEntries);
