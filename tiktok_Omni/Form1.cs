@@ -371,6 +371,8 @@ namespace tiktok_Omni
             new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         private CancellationTokenSource _affiliateCategorizeCts;
         private readonly VideoReupDraftStore _videoReupDraftStore = new VideoReupDraftStore();
+        private readonly AffiliateDraftStore _affiliateDraftStore = new AffiliateDraftStore();
+        private readonly HuntProductDraftStore _huntProductDraftStore = new HuntProductDraftStore();
         private System.Windows.Forms.Timer _videoReupDraftTimer;
         private bool _videoReupDraftDirty;
         private Dictionary<string, bool> _systemHealth = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
@@ -451,6 +453,8 @@ namespace tiktok_Omni
             {
                 FlushVideoReupDraftToDisk();
                 FlushSlideshowDraftToDisk();
+                FlushAffiliateDraftToDisk();
+                FlushHuntProductDraftToDisk();
             }
             catch
             {
@@ -7102,6 +7106,79 @@ namespace tiktok_Omni
             _videoReupDraftDirty = false;
         }
 
+        private void FlushAffiliateDraftToDisk()
+        {
+            if (_affiliateAllResults == null)
+            {
+                return;
+            }
+
+            _affiliateDraftStore.Save(_affiliateAllResults);
+        }
+
+        private void FlushHuntProductDraftToDisk()
+        {
+            if (_huntProductBindingList == null)
+            {
+                return;
+            }
+
+            _huntProductDraftStore.Save(_huntProductBindingList.ToList());
+        }
+
+        private void LoadAffiliateDraftIntoGrid()
+        {
+            if (_affiliateAllResults == null || _affiliateBindingList == null)
+            {
+                return;
+            }
+
+            var rows = _affiliateDraftStore.Load();
+            if (rows.Count == 0)
+            {
+                return;
+            }
+
+            _affiliateAllResults.Clear();
+            _affiliateAllResults.AddRange(rows);
+            RefreshAffiliateGridByQualityFilter();
+            Log($"[Affiliate] Đã khôi phục {rows.Count} dòng kết quả từ draft_affiliate.json.");
+        }
+
+        private void LoadHuntProductDraftIntoGrid()
+        {
+            if (_huntProductBindingList == null)
+            {
+                return;
+            }
+
+            var rows = _huntProductDraftStore.Load();
+            if (rows.Count == 0)
+            {
+                return;
+            }
+
+            _huntProductBindingList.RaiseListChangedEvents = false;
+            try
+            {
+                _huntProductBindingList.Clear();
+                foreach (var row in rows)
+                {
+                    if (row != null)
+                    {
+                        _huntProductBindingList.Add(row);
+                    }
+                }
+            }
+            finally
+            {
+                _huntProductBindingList.RaiseListChangedEvents = true;
+                _huntProductBindingList.ResetBindings();
+            }
+
+            Log($"[Săn SP] Đã khôi phục {rows.Count} dòng sản phẩm từ draft_hunt_product.json.");
+        }
+
         private void LoadVideoReupDraftIntoGrid()
         {
             if (_videoReupBindingList == null)
@@ -7757,6 +7834,8 @@ namespace tiktok_Omni
             await RunStartupSystemHealthCheckAsync().ConfigureAwait(true);
             LoadVideoReupDraftIntoGrid();
             LoadSlideshowDraftIntoBuffer();
+            LoadAffiliateDraftIntoGrid();
+            LoadHuntProductDraftIntoGrid();
             _jobWorkerService?.RefreshConcurrencyLimit();
             await RefreshResumeStateAsync();
             await LoadWarmupQueueAsync();

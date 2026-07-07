@@ -231,6 +231,7 @@ namespace tiktok_Omni
             }
 
             MergeAffiliateHuntResultsIntoAll(_affiliateAllResults, batch ?? new List<AffiliateCandidate>(), keyword);
+            FlushAffiliateDraftToDisk();
             RefreshAffiliateGridByQualityFilter();
             _affiliateBindingList?.ResetBindings();
             dgvAffiliateResults?.Invalidate();

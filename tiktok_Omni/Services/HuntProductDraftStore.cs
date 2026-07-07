@@ -6,36 +6,36 @@ using Newtonsoft.Json;
 
 namespace tiktok_Omni.Services
 {
-    public sealed class VideoReupDraftStore
+    public sealed class HuntProductDraftStore
     {
         private static readonly string DraftPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "tiktok_Omni",
-            "draft_reup.json");
+            "draft_hunt_product.json");
 
-        public List<VideoReupRowItem> Load()
+        public List<HuntProductCandidate> Load()
         {
             var path = GetPersistentPath();
             if (!File.Exists(path))
             {
-                return new List<VideoReupRowItem>();
+                return new List<HuntProductCandidate>();
             }
 
             try
             {
                 var json = File.ReadAllText(path, TextFileEncoding.Utf8);
-                var rows = JsonConvert.DeserializeObject<List<VideoReupRowItem>>(json);
-                return rows?.Where(r => r != null).ToList() ?? new List<VideoReupRowItem>();
+                var rows = JsonConvert.DeserializeObject<List<HuntProductCandidate>>(json);
+                return rows?.Where(r => r != null).ToList() ?? new List<HuntProductCandidate>();
             }
             catch
             {
-                return new List<VideoReupRowItem>();
+                return new List<HuntProductCandidate>();
             }
         }
 
-        public void Save(IEnumerable<VideoReupRowItem> rows)
+        public void Save(IEnumerable<HuntProductCandidate> rows)
         {
-            var list = (rows ?? Enumerable.Empty<VideoReupRowItem>())
+            var list = (rows ?? Enumerable.Empty<HuntProductCandidate>())
                 .Where(r => r != null)
                 .ToList();
             try
@@ -57,7 +57,7 @@ namespace tiktok_Omni.Services
         private static string GetPersistentPath()
         {
             // Tự động migrate từ thư mục cũ cạnh exe nếu có
-            var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "draft_reup.json");
+            var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "draft_hunt_product.json");
             if (!File.Exists(DraftPath) && File.Exists(legacyPath))
             {
                 try

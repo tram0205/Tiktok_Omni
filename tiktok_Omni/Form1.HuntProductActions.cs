@@ -262,6 +262,7 @@ namespace tiktok_Omni
 
                 _huntProductBindingList.RaiseListChangedEvents = true;
                 _huntProductBindingList.ResetBindings();
+                FlushHuntProductDraftToDisk();
                 RefreshHuntProductDownloadFolderHint();
                 Log("Săn sản phẩm xong: " + rows.Count + " dòng (ưu tiên bán chạy trước).");
                 SetHuntProductScanStatus(

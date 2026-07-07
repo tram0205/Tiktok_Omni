@@ -398,6 +398,7 @@ namespace tiktok_Omni
                 _affiliateAllResults?.Remove(item);
             }
 
+            FlushAffiliateDraftToDisk();
             RefreshAffiliateGridByQualityFilter();
             _affiliateBindingList?.ResetBindings();
             dgvAffiliateResults?.Invalidate();

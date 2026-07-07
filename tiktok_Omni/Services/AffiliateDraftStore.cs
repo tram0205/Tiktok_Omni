@@ -6,36 +6,36 @@ using Newtonsoft.Json;
 
 namespace tiktok_Omni.Services
 {
-    public sealed class VideoReupDraftStore
+    public sealed class AffiliateDraftStore
     {
         private static readonly string DraftPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "tiktok_Omni",
-            "draft_reup.json");
+            "draft_affiliate.json");
 
-        public List<VideoReupRowItem> Load()
+        public List<AffiliateCandidate> Load()
         {
             var path = GetPersistentPath();
             if (!File.Exists(path))
             {
-                return new List<VideoReupRowItem>();
+                return new List<AffiliateCandidate>();
             }
 
             try
             {
                 var json = File.ReadAllText(path, TextFileEncoding.Utf8);
-                var rows = JsonConvert.DeserializeObject<List<VideoReupRowItem>>(json);
-                return rows?.Where(r => r != null).ToList() ?? new List<VideoReupRowItem>();
+                var rows = JsonConvert.DeserializeObject<List<AffiliateCandidate>>(json);
+                return rows?.Where(r => r != null).ToList() ?? new List<AffiliateCandidate>();
             }
             catch
             {
-                return new List<VideoReupRowItem>();
+                return new List<AffiliateCandidate>();
             }
         }
 
-        public void Save(IEnumerable<VideoReupRowItem> rows)
+        public void Save(IEnumerable<AffiliateCandidate> rows)
         {
-            var list = (rows ?? Enumerable.Empty<VideoReupRowItem>())
+            var list = (rows ?? Enumerable.Empty<AffiliateCandidate>())
                 .Where(r => r != null)
                 .ToList();
             try
@@ -57,7 +57,7 @@ namespace tiktok_Omni.Services
         private static string GetPersistentPath()
         {
             // Tự động migrate từ thư mục cũ cạnh exe nếu có
-            var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "draft_reup.json");
+            var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "draft_affiliate.json");
             if (!File.Exists(DraftPath) && File.Exists(legacyPath))
             {
                 try

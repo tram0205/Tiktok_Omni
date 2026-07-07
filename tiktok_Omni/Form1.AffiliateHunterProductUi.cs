@@ -976,11 +976,24 @@ namespace tiktok_Omni
                 return;
             }
 
+            var label = toRemove.Count == 1 ? "dòng đang chọn" : $"{toRemove.Count} dòng đang chọn";
+            var confirm = MessageBox.Show(this,
+                $"Bạn có chắc chắn muốn xóa {label} khỏi lưới kết quả sản phẩm không?",
+                "Xác nhận xóa",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
+
             foreach (var item in toRemove)
             {
                 _huntProductBindingList.Remove(item);
             }
 
+            FlushHuntProductDraftToDisk();
             Log("Đã xóa " + toRemove.Count + " dòng sản phẩm.");
         }
 
