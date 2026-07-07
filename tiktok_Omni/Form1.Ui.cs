@@ -557,6 +557,61 @@ namespace tiktok_Omni
             flpAffiliatePlatformsRow.Controls.Add(chkAffiliatePlatformFacebook);
             flpAffiliatePlatformsRow.Controls.Add(chkAffiliatePlatformYouTube);
 
+            var lblTikTokHuntMethod = new Label
+            {
+                Text = "Săn TikTok",
+                AutoSize = true,
+                ForeColor = Color.Gainsboro,
+                Margin = new Padding(12, 2, 6, 0)
+            };
+
+            cbTikTokHuntMethod = new ComboBox
+            {
+                Name = "cbTikTokHuntMethod",
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 168,
+                Height = 28,
+                Margin = new Padding(0, 0, 12, 0),
+                BackColor = Color.FromArgb(45, 49, 60),
+                ForeColor = Color.WhiteSmoke,
+                FlatStyle = FlatStyle.Flat
+            };
+            cbTikTokHuntMethod.Items.AddRange(new object[] { "RapidAPI", "Browser (Playwright)" });
+            cbTikTokHuntMethod.SelectedIndex = 0;
+            cbTikTokHuntMethod.SelectedIndexChanged += cbTikTokHuntMethod_SelectedIndexChanged;
+
+            chkTikTokApiFallbackBrowser = new CheckBox
+            {
+                Name = "chkTikTokApiFallbackBrowser",
+                Text = "API lỗi → Browser",
+                AutoSize = true,
+                ForeColor = Color.Gainsboro,
+                Checked = true,
+                Margin = new Padding(0, 2, 0, 0)
+            };
+            chkTikTokApiFallbackBrowser.CheckedChanged += (s, e) => ScheduleAffiliateHuntPrefsSave();
+
+            var flpAffiliateTikTokHuntRow = new FlowLayoutPanel
+            {
+                Name = "flpAffiliateTikTokHuntRow",
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = true,
+                AutoScroll = false,
+                Margin = new Padding(0, 0, 0, 2),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent,
+                Dock = DockStyle.None
+            };
+            flpAffiliateTikTokHuntRow.Controls.Add(lblTikTokHuntMethod);
+            flpAffiliateTikTokHuntRow.Controls.Add(cbTikTokHuntMethod);
+            flpAffiliateTikTokHuntRow.Controls.Add(chkTikTokApiFallbackBrowser);
+            affiliateGridTip.SetToolTip(cbTikTokHuntMethod,
+                "RapidAPI: gọi tiktok-api23, không mở Chrome. Browser: Playwright như trước.");
+            affiliateGridTip.SetToolTip(chkTikTokApiFallbackBrowser,
+                "Khi RapidAPI lỗi (key, quota, mạng), tự chuyển sang săn bằng trình duyệt.");
+
             var tblAffiliateFilters = new FlowLayoutPanel
             {
                 Name = "tblAffiliateFilters",
@@ -571,6 +626,7 @@ namespace tiktok_Omni
                 BackColor = Color.FromArgb(35, 38, 48)
             };
             tblAffiliateFilters.Controls.Add(flpAffiliatePlatformsRow);
+            tblAffiliateFilters.Controls.Add(flpAffiliateTikTokHuntRow);
             tblAffiliateFilters.Controls.Add(flpAffiliateCompactFilters);
             tblAffiliateFilters.Controls.Add(flpAffiliateActions);
 

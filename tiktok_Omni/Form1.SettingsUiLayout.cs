@@ -339,6 +339,7 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnToggleAiApiKey",
                 "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
+                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
                 "txtTtsApiKey" => "btnToggleTtsApiKey",
                 "txtVeoApiKey" => "btnToggleVeoApiKey",
                 _ => "btnToggle" + fieldName.Substring(3)
@@ -348,6 +349,7 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnTestAi",
                 "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
+                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
                 "txtTtsApiKey" => "btnTestTts",
                 "txtVeoApiKey" => "btnTestVeo",
                 _ => "btnTest" + fieldName.Substring(3)
@@ -387,6 +389,7 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnToggleAiApiKey",
                 "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
+                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
                 "txtTtsApiKey" => "btnToggleTtsApiKey",
                 "txtVeoApiKey" => "btnToggleVeoApiKey",
                 _ => "btnToggle" + fieldName.Substring(3)
@@ -396,6 +399,7 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnTestAi",
                 "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
+                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
                 "txtTtsApiKey" => "btnTestTts",
                 "txtVeoApiKey" => "btnTestVeo",
                 _ => "btnTest" + fieldName.Substring(3)
@@ -453,6 +457,7 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnToggleAiApiKey",
                 "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
+                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
                 "txtTtsApiKey" => "btnToggleTtsApiKey",
                 "txtVeoApiKey" => "btnToggleVeoApiKey",
                 _ => "btnToggle" + fieldName.Substring(3)
@@ -462,6 +467,7 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnTestAi",
                 "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
+                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
                 "txtTtsApiKey" => "btnTestTts",
                 "txtVeoApiKey" => "btnTestVeo",
                 _ => "btnTest" + fieldName.Substring(3)
@@ -525,12 +531,14 @@ namespace tiktok_Omni
             var toggleName = fieldName switch
             {
                 "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
+                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
                 _ => "btnToggle" + fieldName.Substring(3)
             };
 
             var testName = fieldName switch
             {
                 "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
+                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
                 _ => "btnTest" + fieldName.Substring(3)
             };
 
@@ -571,6 +579,10 @@ namespace tiktok_Omni
             out Button captchaToggle,
             out Button captchaTest,
             EventHandler captchaTestClick,
+            out TextBox tikTokRapidField,
+            out Button tikTokRapidToggle,
+            out Button tikTokRapidTest,
+            EventHandler tikTokRapidTestClick,
             out JellyButton saveButton,
             EventHandler saveClick)
         {
@@ -581,6 +593,14 @@ namespace tiktok_Omni
                 out captchaToggle,
                 out captchaTest,
                 captchaTestClick);
+
+            var rapidCell = CreateSettingsCompactSecretKeyInlineCell(
+                "TikTok RapidAPI (tiktok-api23)",
+                "txtTikTokRapidApiKey",
+                out tikTokRapidField,
+                out tikTokRapidToggle,
+                out tikTokRapidTest,
+                tikTokRapidTestClick);
 
             saveButton = CreateSettingsSaveButton("btnSaveSettings", "L\u01b0u c\u00e0i \u0111\u1eb7t");
             saveButton.Click += saveClick;
@@ -596,18 +616,29 @@ namespace tiktok_Omni
                 MinimumSize = new Size(0, 60)
             };
 
-            captchaCell.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            captchaCell.Margin = new Padding(0, 0, 0, 2);
-            saveBtnLocal.Anchor = AnchorStyles.None;
+            var keysFlow = new FlowLayoutPanel
+            {
+                Name = "flpGatewaySecondKeys",
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = true,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
+            };
+            captchaCell.Margin = new Padding(0, 0, 12, 2);
+            rapidCell.Margin = new Padding(0, 0, 0, 2);
+            keysFlow.Controls.Add(captchaCell);
+            keysFlow.Controls.Add(rapidCell);
 
+            saveBtnLocal.Anchor = AnchorStyles.None;
+            row.Controls.Add(keysFlow);
             row.Controls.Add(saveBtnLocal);
-            row.Controls.Add(captchaCell);
 
             void LayoutSecondRow()
             {
                 var contentHeight = row.ClientSize.Height;
                 var contentWidth = row.ClientSize.Width;
-                captchaCell.Location = new Point(0, Math.Max(0, (contentHeight - captchaCell.Height) / 2));
+                keysFlow.Location = new Point(0, Math.Max(0, (contentHeight - keysFlow.Height) / 2));
                 saveBtnLocal.Location = new Point(
                     Math.Max(0, (contentWidth - saveBtnLocal.Width) / 2),
                     Math.Max(0, (contentHeight - saveBtnLocal.Height) / 2));
@@ -1185,6 +1216,10 @@ namespace tiktok_Omni
                 out btnToggleTwoCaptchaApiKey,
                 out btnTestTwoCaptcha,
                 btnTestTwoCaptcha_Click,
+                out txtTikTokRapidApiKey,
+                out btnToggleTikTokRapidApiKey,
+                out btnTestTikTokRapidApi,
+                btnTestTikTokRapidApi_Click,
                 out var saveBtn,
                 btnSaveSettings_Click);
             btnSaveSettings = saveBtn;

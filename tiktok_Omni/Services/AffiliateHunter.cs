@@ -686,6 +686,35 @@ namespace tiktok_Omni.Services
                     runningProfileName).ConfigureAwait(false);
             }
 
+            if (configManager != null)
+            {
+                var settings = await configManager.LoadAsync().ConfigureAwait(false);
+                if (TikTokHuntMethods.IsRapidApi(settings.TikTokHuntMethod))
+                {
+                    try
+                    {
+                        logAction?.Invoke("[Affiliate] Săn Video qua RapidAPI (tiktok-api23) — không mở Chrome.");
+                        var rapid = new TikTokRapidApiService();
+                        return await rapid.SearchVideosAsync(
+                            keywords,
+                            maxResults,
+                            settings.TikTokRapidApiKey,
+                            logAction,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        logAction?.Invoke("[RapidAPI] Lỗi: " + ex.Message);
+                        if (!settings.TikTokRapidApiFallbackToBrowser)
+                        {
+                            throw;
+                        }
+
+                        logAction?.Invoke("[RapidAPI] API lỗi → chuyển sang Browser (Playwright) theo cài đặt.");
+                    }
+                }
+            }
+
             var browser = new BrowserAutomation();
             var results = new List<AffiliateCandidate>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

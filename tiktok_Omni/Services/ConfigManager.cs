@@ -185,6 +185,7 @@ namespace tiktok_Omni.Services
             settings.TwoCaptchaApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.TwoCaptchaApiKey ?? string.Empty);
             settings.VeoApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.VeoApiKey ?? string.Empty);
             settings.TtsApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.TtsApiKey ?? string.Empty);
+            settings.TikTokRapidApiKey = DpapiSecretProtector.UnprotectAfterLoad(settings.TikTokRapidApiKey ?? string.Empty);
             settings.NotificationSmtpPassword = DpapiSecretProtector.UnprotectAfterLoad(settings.NotificationSmtpPassword ?? string.Empty);
             if (settings.Profiles != null)
             {
@@ -211,6 +212,7 @@ namespace tiktok_Omni.Services
             settings.TwoCaptchaApiKey = DpapiSecretProtector.ProtectForStorage(settings.TwoCaptchaApiKey ?? string.Empty);
             settings.VeoApiKey = DpapiSecretProtector.ProtectForStorage(settings.VeoApiKey ?? string.Empty);
             settings.TtsApiKey = DpapiSecretProtector.ProtectForStorage(settings.TtsApiKey ?? string.Empty);
+            settings.TikTokRapidApiKey = DpapiSecretProtector.ProtectForStorage(settings.TikTokRapidApiKey ?? string.Empty);
             settings.NotificationSmtpPassword = DpapiSecretProtector.ProtectForStorage(settings.NotificationSmtpPassword ?? string.Empty);
             if (settings.Profiles != null)
             {
@@ -263,9 +265,32 @@ namespace tiktok_Omni.Services
             return profile;
         }
 
+        /// <summary>
+        /// Lưu cấu hình ngoài thư mục bin\Debug (tránh mất key khi Rebuild/Clean).
+        /// Tự migrate từ appsettings.json cạnh .exe nếu có.
+        /// </summary>
         private static string GetConfigPath()
         {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ConfigFileName);
+            var appDataDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "tiktok_Omni");
+            Directory.CreateDirectory(appDataDir);
+            var persistentPath = Path.Combine(appDataDir, ConfigFileName);
+
+            var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", ConfigFileName);
+            if (!File.Exists(persistentPath) && File.Exists(legacyPath))
+            {
+                try
+                {
+                    File.Copy(legacyPath, persistentPath, overwrite: false);
+                }
+                catch
+                {
+                    // ignored — user can re-enter keys if copy fails
+                }
+            }
+
+            return persistentPath;
         }
 
         /// <summary>Đường dẫn cũ trỏ OneDrive → thư mục cài exe hiện tại (sau khi chuyển sang C:\Dev).</summary>
@@ -364,6 +389,8 @@ namespace tiktok_Omni.Services
             settings.VeoApiKey = (settings.VeoApiKey ?? string.Empty).Trim();
             settings.TtsApiKey = (settings.TtsApiKey ?? string.Empty).Trim();
             settings.TtsEndpoint = (settings.TtsEndpoint ?? string.Empty).Trim();
+            settings.TikTokRapidApiKey = (settings.TikTokRapidApiKey ?? string.Empty).Trim();
+            settings.TikTokHuntMethod = NormalizeTikTokHuntMethod(settings.TikTokHuntMethod);
             settings.NotificationSmtpHost = (settings.NotificationSmtpHost ?? string.Empty).Trim();
             settings.NotificationSmtpUser = (settings.NotificationSmtpUser ?? string.Empty).Trim();
             settings.NotificationSmtpPassword = (settings.NotificationSmtpPassword ?? string.Empty).Trim();
@@ -512,6 +539,16 @@ namespace tiktok_Omni.Services
             return settings;
         }
 
+        private static string NormalizeTikTokHuntMethod(string method)
+        {
+            if (TikTokHuntMethods.IsRapidApi(method))
+            {
+                return TikTokHuntMethods.RapidApi;
+            }
+
+            return TikTokHuntMethods.Browser;
+        }
+
         private static AutomationProfile ResolveProfile(AppSettings settings, string runningProfileName)
         {
             var profiles = settings?.Profiles;
@@ -649,7 +686,25 @@ namespace tiktok_Omni.Services
         /// <summary>Hệ số nhân buffer so với Max Results (ví dụ 2.5 × 20 → săn tối đa ~50 rồi cắt còn 20).</summary>
         public double AffiliateHuntBufferMultiplier { get; set; } = 2.5d;
 
+        /// <summary>RapidAPI key cho tiktok-api23 (săn video TikTok).</summary>
+        public string TikTokRapidApiKey { get; set; } = string.Empty;
+
+        /// <summary>Phương thức săn TikTok Video: RapidApi hoặc Browser.</summary>
+        public string TikTokHuntMethod { get; set; } = TikTokHuntMethods.RapidApi;
+
+        /// <summary>Khi RapidAPI lỗi, tự chuyển sang Playwright/Chrome.</summary>
+        public bool TikTokRapidApiFallbackToBrowser { get; set; } = true;
+
         public List<AutomationProfile> Profiles { get; set; } = new List<AutomationProfile>();
+    }
+
+    public static class TikTokHuntMethods
+    {
+        public const string RapidApi = "RapidApi";
+        public const string Browser = "Browser";
+
+        public static bool IsRapidApi(string method) =>
+            string.Equals(method, RapidApi, StringComparison.OrdinalIgnoreCase);
     }
 
     public class AutomationProfile
