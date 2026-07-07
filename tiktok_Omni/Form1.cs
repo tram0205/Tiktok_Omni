@@ -1483,12 +1483,21 @@ namespace tiktok_Omni
                         col.MinimumWidth = 90;
                         col.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
                         break;
+                    case "OrderNumber":
+                        col.HeaderText = "STT";
+                        col.ToolTipText = "Số thứ tự dòng";
+                        col.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                        col.Visible = true;
+                        col.FillWeight = 4;
+                        col.MinimumWidth = 36;
+                        col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                        break;
                 }
             }
 
             var displayOrder = new[]
             {
-                "ProductName", "Category", "SourceKeyword", "Hashtags", "LinkedProduct",
+                "OrderNumber", "ProductName", "Category", "SourceKeyword", "Hashtags", "LinkedProduct",
                 "PlayCount", "LikeCount", "CommentCount", "ShareCount", "CollectCount", "DurationSeconds", "CreateTimeUtc",
                 "VoiceoverTranscript", "VideoUrl", "LastDeepDiveError",
                 "ImageUrl", "ProfileUrl", "Price", "CommissionRate", "VideoScript", "Creator", "SafetyRiskSummary",
@@ -4299,6 +4308,14 @@ namespace tiktok_Omni
             }
 
             SortAffiliateCandidatesByViewsDescending(rows);
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                if (rows[i] != null)
+                {
+                    rows[i].OrderNumber = i + 1;
+                }
+            }
 
             foreach (var item in rows)
             {

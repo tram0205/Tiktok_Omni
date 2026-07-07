@@ -54,6 +54,10 @@ namespace tiktok_Omni.Services
         public string LastRenderOutputPath { get; set; } = string.Empty;
         public string LastRenderError { get; set; } = string.Empty;
 
+        // ===== Thứ tự hiển thị trên lưới (STT) =====
+        [JsonIgnore]
+        public int OrderNumber { get; set; }
+
         // ===== Engagement metrics (lấy từ TikWM API qua nút "Lấy số liệu") =====
         /// <summary>Tổng view của video (TikWM data.play_count).</summary>
         public long PlayCount { get; set; }
