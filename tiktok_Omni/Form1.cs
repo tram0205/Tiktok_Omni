@@ -1352,8 +1352,6 @@ namespace tiktok_Omni
                     case "SourcePlatform":
                     case "CustomerReviews":
                     case "Category":
-                    case "LinkedProduct":
-                    case "VoiceoverTranscript":
                         col.Visible = false;
                         break;
                     case "ProfileName":
