@@ -184,7 +184,7 @@ namespace tiktok_Omni.Services.Jobs
                 if (batch.Count == 0 && skipped > 0 && (results?.Count ?? 0) > 0)
                 {
                     batch = results;
-                    ui.Log($"[Hunt] Hiển thị lại {batch.Count} video đã có trong lịch sử lên lưới.");
+                    ui.Log($"[Hunt] Toàn bộ kết quả mới trùng lịch sử 7 ngày. Tự động hiển thị lại {batch.Count} video đã có trong lịch sử lên lưới để bạn sử dụng.");
                 }
 
                 if (rankTikTokVideo && batch.Count > 0 && _rankAffiliateBatch != null)

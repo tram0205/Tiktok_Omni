@@ -4275,14 +4275,15 @@ return bestScore >= 20 ? best : null;") as IWebElement;
             const string js = @"() => {
                 const results = [];
                 try {
-                    const items = document.querySelectorAll('div[data-e2e=""search_video-item""]');
+                    // Thử nhiều selector khác nhau đề phòng TikTok thay đổi cấu trúc DOM
+                    const items = document.querySelectorAll('div[data-e2e=""search_video-item""], div[class*=""DivVideoCardContainer""], div[class*=""search-item""], div[class*=""VideoCard""]');
                     for (const item of items) {
                         const videoLinkEl = item.querySelector('a[href*=""/video/""]');
                         if (!videoLinkEl) continue;
-                        const authorEl = item.querySelector('a[data-e2e=""search-video-user-link""], p[data-e2e=""search-user-unique-id""]');
+                        const authorEl = item.querySelector('a[data-e2e=""search-video-user-link""], p[data-e2e=""search-user-unique-id""], a[class*=""UniqueId""], a[href*=""/@""]');
 
                         // Lấy nội dung Caption (raw), sau đó tách hashtag và làm sạch làm ProductName
-                        const descEl = item.querySelector('div[data-e2e=""search-video-desc""]');
+                        const descEl = item.querySelector('div[data-e2e=""search-video-desc""], div[class*=""DivDesContainer""], div[class*=""desc""], h1, h2');
                         let desc = '';
                         if (descEl) {
                             desc = (descEl.innerText || '').trim() || (descEl.textContent || '').trim();
