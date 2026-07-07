@@ -2228,7 +2228,7 @@ namespace tiktok_Omni.Services
 
     internal static class WarmupBuildInfo
     {
-        public const string BuildId = "warmup-shop-fix-v7";
+        public const string BuildId = "affiliate-grid-rapidapi-v8";
 
         public static bool IsRunningStaleBuild(out string message)
         {
