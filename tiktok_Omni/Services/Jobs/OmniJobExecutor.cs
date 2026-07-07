@@ -135,7 +135,9 @@ namespace tiktok_Omni.Services.Jobs
                     cancellationToken,
                     ui.Log,
                     _configManager,
-                    profile).ConfigureAwait(false);
+                    profile,
+                    payload.TikTokHuntMethod,
+                    payload.TikTokRapidApiFallbackToBrowser).ConfigureAwait(false);
 
                 var batch = results ?? new List<AffiliateCandidate>();
                 foreach (var c in batch)
@@ -162,7 +164,10 @@ namespace tiktok_Omni.Services.Jobs
                     }
 
                     var url = (c.VideoUrl ?? string.Empty).Trim();
-                    if (!string.IsNullOrWhiteSpace(url) && _huntHistoryStore.ContainsRecent(url, huntWindow))
+                    
+                    // Chỉ lọc trùng lịch sử nếu KHÔNG dùng RapidAPI (vì RapidAPI luôn cần ra đúng số lượng yêu cầu)
+                    var isRapid = string.Equals(payload.TikTokHuntMethod, "RapidApi", StringComparison.OrdinalIgnoreCase);
+                    if (!isRapid && !string.IsNullOrWhiteSpace(url) && _huntHistoryStore.ContainsRecent(url, huntWindow))
                     {
                         skipped++;
                         continue;

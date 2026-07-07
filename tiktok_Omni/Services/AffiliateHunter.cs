@@ -188,7 +188,9 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction,
             ConfigManager configManager = null,
-            string runningProfileName = null)
+            string runningProfileName = null,
+            string overrideHuntMethod = null,
+            bool? overrideFallbackToBrowser = null)
         {
             if (string.IsNullOrWhiteSpace(keywords))
             {
@@ -208,7 +210,9 @@ namespace tiktok_Omni.Services
                 cancellationToken,
                 logAction,
                 configManager,
-                runningProfileName);
+                runningProfileName,
+                overrideHuntMethod,
+                overrideFallbackToBrowser);
         }
 
         internal Task<List<AffiliateCandidate>> HuntTikTokPlatformAsync(
@@ -218,12 +222,15 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction,
             ConfigManager configManager,
-            string runningProfileName)
+            string runningProfileName,
+            string overrideHuntMethod = null,
+            bool? overrideFallbackToBrowser = null)
         {
             return Task.Run(
                 () => HuntCoreAsync(
                     keywords, maxResults, searchMode,
-                    cancellationToken, logAction, configManager, runningProfileName),
+                    cancellationToken, logAction, configManager, runningProfileName,
+                    overrideHuntMethod, overrideFallbackToBrowser),
                 cancellationToken);
         }
 
@@ -516,7 +523,9 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction,
             ConfigManager configManager,
-            string runningProfileName)
+            string runningProfileName,
+            string overrideHuntMethod = null,
+            bool? overrideFallbackToBrowser = null)
         {
             var wanted = NormalizePlatformIds(platformIds);
             if (wanted.Count == 0)
@@ -556,7 +565,9 @@ namespace tiktok_Omni.Services
                 ConfigManager = configManager,
                 RunningProfileName = runningProfileName,
                 Log = logAction,
-                YtDlpPath = ytDlpPath
+                YtDlpPath = ytDlpPath,
+                TikTokHuntMethod = overrideHuntMethod ?? string.Empty,
+                TikTokRapidApiFallbackToBrowser = overrideFallbackToBrowser ?? true
             };
 
             var merged = new List<AffiliateCandidate>();
@@ -677,7 +688,9 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction,
             ConfigManager configManager,
-            string runningProfileName)
+            string runningProfileName,
+            string overrideHuntMethod = null,
+            bool? overrideFallbackToBrowser = null)
         {
             if (searchMode == AffiliateSearchMode.Shop)
             {
@@ -693,7 +706,10 @@ namespace tiktok_Omni.Services
             if (configManager != null)
             {
                 var settings = await configManager.LoadAsync().ConfigureAwait(false);
-                if (TikTokHuntMethods.IsRapidApi(settings.TikTokHuntMethod))
+                var huntMethod = !string.IsNullOrWhiteSpace(overrideHuntMethod) ? overrideHuntMethod : settings.TikTokHuntMethod;
+                var fallbackToBrowser = overrideFallbackToBrowser.HasValue ? overrideFallbackToBrowser.Value : settings.TikTokRapidApiFallbackToBrowser;
+
+                if (TikTokHuntMethods.IsRapidApi(huntMethod))
                 {
                     try
                     {
@@ -709,7 +725,7 @@ namespace tiktok_Omni.Services
                     catch (Exception ex)
                     {
                         logAction?.Invoke("[RapidAPI] Lỗi: " + ex.Message);
-                        if (!settings.TikTokRapidApiFallbackToBrowser)
+                        if (!fallbackToBrowser)
                         {
                             throw;
                         }

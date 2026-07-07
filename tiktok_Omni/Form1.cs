@@ -992,7 +992,13 @@ namespace tiktok_Omni
                     BufferMultiplier = numAffiliateBufferMultiplier != null
                         ? (double)numAffiliateBufferMultiplier.Value
                         : huntSettings.AffiliateHuntBufferMultiplier,
-                    StorageRootPath = huntSettings.StorageRootPath ?? string.Empty
+                    StorageRootPath = huntSettings.StorageRootPath ?? string.Empty,
+                    TikTokHuntMethod = cbTikTokHuntMethod != null && cbTikTokHuntMethod.SelectedIndex >= 0
+                        ? (cbTikTokHuntMethod.SelectedIndex == 0 ? TikTokHuntMethods.RapidApi : TikTokHuntMethods.Browser)
+                        : huntSettings.TikTokHuntMethod,
+                    TikTokRapidApiFallbackToBrowser = chkTikTokApiFallbackBrowser != null
+                        ? chkTikTokApiFallbackBrowser.Checked
+                        : huntSettings.TikTokRapidApiFallbackToBrowser
                 };
 
                 var job = new OmniJob
