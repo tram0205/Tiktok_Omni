@@ -1352,6 +1352,8 @@ namespace tiktok_Omni
                     case "SourcePlatform":
                     case "CustomerReviews":
                     case "Category":
+                    case "LinkedProduct":
+                    case "VoiceoverTranscript":
                         col.Visible = false;
                         break;
                     case "ProfileName":
@@ -1392,24 +1394,8 @@ namespace tiktok_Omni
                         col.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
                         break;
                     case "LinkedProduct":
-                        col.HeaderText = "Link aff";
-                        col.ToolTipText = "Link / sản phẩm affiliate — bấm ô để xem đầy đủ / sao chép";
-                        col.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleLeft;
-                        col.Visible = true;
-                        col.FillWeight = 14;
-                        col.MinimumWidth = 90;
-                        col.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
-                        break;
                     case "VoiceoverTranscript":
-                        col.HeaderText = "Lời thoại";
-                        col.ToolTipText = "Voiceover / script — «Sửa Script» hoặc Deep Dive";
-                        col.Visible = true;
-                        col.FillWeight = 16;
-                        col.MinimumWidth = 100;
-                        col.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
-                        col.DefaultCellStyle.ForeColor = Color.LightGray;
-                        col.ReadOnly = false;
-                        col.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleLeft;
+                        col.Visible = false;
                         break;
                     case "VideoUrl":
                         col.HeaderText = "Link video";
