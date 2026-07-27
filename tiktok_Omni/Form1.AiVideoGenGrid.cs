@@ -4,6 +4,8 @@ using System.Collections.Generic;
 
 using System.Drawing;
 
+using System.IO;
+
 using System.Linq;
 
 using System.Threading;
@@ -13,6 +15,8 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using tiktok_Omni.Services;
+
+using tiktok_Omni.Services.Showcase;
 
 
 
@@ -31,6 +35,309 @@ namespace tiktok_Omni
         private List<ProfileComboEntry> _aiVideoGenProfileComboSource = new List<ProfileComboEntry>();
 
         private const string AiVideoGenDragDropFormat = "tiktok_Omni.AiVideoGenInputItem";
+
+        private static readonly string[] ShowcaseHiddenGridColumns =
+        {
+            "colAiProfile", "colAiUrl", "colAiHook", "colAiHashtag", "colAiThumb", "colAiKeyword",
+            "colAiPrice", "colAiSafety"
+        };
+
+        /// <summary>Cột hiển thị trên lưới Showcase — mỗi dòng = 1 video; chi tiết cảnh nằm trên storyboard.</summary>
+        private static readonly string[] ShowcaseVisibleGridColumns =
+        {
+            "colAiProduct", "colAiShowcaseImages", "colAiShowcaseProductType", "colAiShowcaseClipMode", "colAiShowcaseOutputAspect",
+            "colAiShowcaseScript", "colAiShowcaseSceneSummary",
+            "colAiShowcaseTextSize", "colAiShowcaseMusicVolume", "colAiStatus"
+        };
+
+        private static readonly string[] ShowcaseLegacyOnlyGridColumns =
+        {
+            "colAiShowcaseProductType", "colAiShowcaseClipMode", "colAiShowcaseOutputAspect", "colAiShowcaseTheme", "colAiShowcaseUserTheme", "colAiShowcaseSceneSummary", "colAiShowcaseScript", "colAiShowcaseScenePrompt",
+            "colAiSceneTitle", "colAiSceneRole", "colAiSceneVoice", "colAiVeoPrompt", "colAiClip",
+            "colAiShowcaseMultiVoice", "colAiShowcaseTextSize", "colAiShowcaseMusicVolume", "colAiShowcaseTransition"
+        };
+
+        private const int ShowcaseGridVoicePreviewChars = 42;
+        private const int ShowcaseGridVeoPromptPreviewChars = 52;
+
+        private const int ShowcaseImagesGridRowHeight = AppDefaultRowHeight;
+
+        private void ApplyShowcaseDeepDiveRowHeights()
+        {
+            if (dgvDeepDiveInput == null || dgvDeepDiveInput.IsDisposed)
+            {
+                return;
+            }
+
+            dgvDeepDiveInput.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+            dgvDeepDiveInput.RowTemplate.Height = ShowcaseImagesGridRowHeight;
+            dgvDeepDiveInput.RowTemplate.MinimumHeight = ShowcaseImagesGridRowHeight;
+
+            foreach (DataGridViewRow row in dgvDeepDiveInput.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                row.Height = ShowcaseImagesGridRowHeight;
+                row.MinimumHeight = ShowcaseImagesGridRowHeight;
+            }
+        }
+
+        /// <summary>dgvDeepDiveInput chỉ dùng cho Showcase — ẩn cột Slideshow/Affiliate thừa;
+        /// STT dùng cột chuẩn colAppGridStt (ApplyAppGridChrome), không vẽ row header riêng.</summary>
+        private void ApplyDeepDiveGridColumnVisibility(bool showcaseMode)
+        {
+            if (dgvDeepDiveInput == null)
+            {
+                return;
+            }
+
+            dgvDeepDiveInput.RowHeadersVisible = false;
+
+            foreach (var columnName in ShowcaseHiddenGridColumns)
+            {
+                var column = dgvDeepDiveInput.Columns[columnName];
+                if (column != null)
+                {
+                    column.Visible = !showcaseMode;
+                }
+            }
+
+            foreach (var columnName in ShowcaseLegacyOnlyGridColumns)
+            {
+                var column = dgvDeepDiveInput.Columns[columnName];
+                if (column != null)
+                {
+                    column.Visible = !showcaseMode;
+                }
+            }
+
+            if (showcaseMode)
+            {
+                foreach (DataGridViewColumn column in dgvDeepDiveInput.Columns)
+                {
+                    if (column == null)
+                    {
+                        continue;
+                    }
+
+                    var isStt = string.Equals(column.Name, AppGridSttColumn.ColumnName, StringComparison.Ordinal);
+                    column.Visible = isStt || ShowcaseVisibleGridColumns.Contains(column.Name);
+                }
+            }
+
+            var imageColumn = dgvDeepDiveInput.Columns["colAiImage"];
+            if (imageColumn != null && !showcaseMode)
+            {
+                imageColumn.HeaderText = "Ảnh URL";
+            }
+
+            if (showcaseMode)
+            {
+                AppGridSttColumn.EnsureFirstColumn(dgvDeepDiveInput);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, AppGridSttColumn.ColumnName, 0);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiProduct", 1);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseImages", 2);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseProductType", 3);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseClipMode", 4);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseOutputAspect", 5);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseScript", 6);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseSceneSummary", 7);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseTextSize", 8);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseMusicVolume", 9);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiStatus", 10);
+
+                var multiVoiceCol = dgvDeepDiveInput.Columns["colAiShowcaseMultiVoice"];
+                if (multiVoiceCol != null)
+                {
+                    multiVoiceCol.Visible = false;
+                }
+
+                var transitionCol = dgvDeepDiveInput.Columns["colAiShowcaseTransition"];
+                if (transitionCol != null)
+                {
+                    transitionCol.Visible = false;
+                }
+                dgvDeepDiveInput.ShowCellToolTips = true;
+
+                var productCol = dgvDeepDiveInput.Columns["colAiProduct"];
+                if (productCol != null)
+                {
+                    productCol.HeaderText = "Tên SP";
+                    productCol.ReadOnly = true;
+                    productCol.FillWeight = 52;
+                    productCol.MinimumWidth = 220;
+                    productCol.ToolTipText = "Bấm để sửa tên sản phẩm.";
+                    productCol.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+                    productCol.DefaultCellStyle.ForeColor = Color.FromArgb(130, 175, 255);
+                    productCol.DefaultCellStyle.SelectionForeColor = Color.White;
+                }
+
+                var imagesCol = dgvDeepDiveInput.Columns["colAiShowcaseImages"];
+                if (imagesCol != null)
+                {
+                    imagesCol.HeaderText = "Ảnh";
+                    imagesCol.ReadOnly = true;
+                    imagesCol.FillWeight = 22;
+                    imagesCol.MinimumWidth = 108;
+                    imagesCol.ToolTipText = "Trái: thêm ảnh · Phải: mở thư mục · Di chuột vào ô xem số ảnh.";
+                }
+
+                ApplyShowcaseDeepDiveRowHeights();
+
+                var productTypeCol = dgvDeepDiveInput.Columns["colAiShowcaseProductType"];
+                if (productTypeCol is DataGridViewComboBoxColumn productTypeCombo)
+                {
+                    ApplyShowcaseProductTypeComboColumn(productTypeCombo);
+                    productTypeCombo.ReadOnly = true;
+                    productTypeCombo.DisplayStyle = DataGridViewComboBoxDisplayStyle.Nothing;
+                    productTypeCombo.FlatStyle = FlatStyle.Flat;
+                    productTypeCombo.HeaderText = "Loại SP · Chủ đề";
+                    productTypeCombo.FillWeight = 24;
+                    productTypeCombo.MinimumWidth = 180;
+                    productTypeCombo.ToolTipText =
+                        "Loại trang phục + góc quảng cáo cho Gemini — bấm ô để chọn loại SP hoặc chủ đề.";
+                }
+
+                var clipModeCol = dgvDeepDiveInput.Columns["colAiShowcaseClipMode"];
+                if (clipModeCol is DataGridViewComboBoxColumn clipModeCombo)
+                {
+                    ApplyShowcaseClipModeComboColumn(clipModeCombo);
+                    clipModeCombo.ReadOnly = false;
+                    clipModeCombo.HeaderText = "Công cụ Video";
+                    clipModeCombo.ToolTipText =
+                        "Công cụ clip: Veo + Zoom, Veo + Kling, Zoom + Kling, Chỉ Veo/Kling/Zoom, Gemini gợi ý. Chọn trước «Tạo kịch bản».";
+                }
+
+                var aspectCol = dgvDeepDiveInput.Columns["colAiShowcaseOutputAspect"];
+                if (aspectCol is DataGridViewComboBoxColumn aspectCombo)
+                {
+                    ApplyShowcaseOutputAspectComboColumn(aspectCombo);
+                    aspectCombo.ReadOnly = false;
+                    aspectCombo.HeaderText = "Khung video";
+                    aspectCombo.ToolTipText =
+                        "Tỉ lệ file xuất (9:16 / 16:9 / 1:1). Chọn trước «Tạo kịch bản» và «Tạo clip Zoom» — đổi sau khi có clip nên tạo clip lại.";
+                }
+
+                var themeCol = dgvDeepDiveInput.Columns["colAiShowcaseTheme"];
+                if (themeCol != null)
+                {
+                    themeCol.Visible = false;
+                    themeCol.ReadOnly = true;
+                }
+
+                var userThemeCol = dgvDeepDiveInput.Columns["colAiShowcaseUserTheme"];
+                if (userThemeCol != null)
+                {
+                    userThemeCol.Visible = false;
+                    userThemeCol.ReadOnly = true;
+                }
+
+                var sceneSummaryCol = dgvDeepDiveInput.Columns["colAiShowcaseSceneSummary"];
+                if (sceneSummaryCol != null)
+                {
+                    sceneSummaryCol.ReadOnly = true;
+                    sceneSummaryCol.FillWeight = 22;
+                    sceneSummaryCol.MinimumWidth = 108;
+                    sceneSummaryCol.ToolTipText =
+                        "Trái: thêm clip · Phải: mở veo_clips · Di chuột vào ô xem số cảnh.";
+                }
+
+                var scriptCol = dgvDeepDiveInput.Columns["colAiShowcaseScript"];
+                if (scriptCol != null)
+                {
+                    scriptCol.HeaderText = "Kịch bản · Prompt";
+                    scriptCol.ReadOnly = true;
+                    scriptCol.FillWeight = 28;
+                    scriptCol.MinimumWidth = 200;
+                    scriptCol.ToolTipText =
+                        "Thoại (nháp theo ảnh hoặc đã «Tạo lời thoại») + prompt clip — bấm ô mở hub «Kịch bản · Prompt».";
+                }
+
+                var promptCol = dgvDeepDiveInput.Columns["colAiShowcaseScenePrompt"];
+                if (promptCol != null)
+                {
+                    promptCol.Visible = false;
+                }
+
+                var statusCol = dgvDeepDiveInput.Columns["colAiStatus"];
+                if (statusCol != null)
+                {
+                    statusCol.HeaderText = "Trạng thái";
+                    statusCol.ReadOnly = true;
+                    statusCol.FillWeight = 22;
+                    statusCol.MinimumWidth = 140;
+                    statusCol.ToolTipText = "Trạng thái render và file output — bấm ô để mở thư mục output.";
+                }
+
+                var outputCol = dgvDeepDiveInput.Columns["colAiShowcaseOutput"];
+                if (outputCol != null)
+                {
+                    outputCol.Visible = false;
+                }
+
+                var subtitleCol = dgvDeepDiveInput.Columns["colAiShowcaseTextSize"];
+                if (subtitleCol != null)
+                {
+                    subtitleCol.HeaderText = "Phụ đề";
+                    subtitleCol.ReadOnly = true;
+                    subtitleCol.ToolTipText = "Bấm để mở bảng phụ đề — cài hook và thân riêng.";
+                }
+
+                var musicCol = dgvDeepDiveInput.Columns["colAiShowcaseMusicVolume"];
+                if (musicCol != null)
+                {
+                    musicCol.HeaderText = "Âm thanh";
+                    musicCol.ReadOnly = true;
+                    musicCol.ToolTipText = "Bấm để chọn nhạc nền, âm lượng, tốc độ thoại và nghe audio.";
+                }
+            }
+        }
+
+        private void DgvDeepDiveInput_ShowcaseRowHeightsAfterBind(object sender, DataGridViewBindingCompleteEventArgs e)
+        {
+            if (IsDeepDiveModeTab())
+            {
+                ApplyShowcaseDeepDiveRowHeights();
+            }
+        }
+
+        private static string TruncateShowcaseGridText(string text, int maxChars)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = text.Trim();
+            if (trimmed.Length <= maxChars)
+            {
+                return trimmed;
+            }
+
+            return trimmed.Substring(0, maxChars) + "…";
+        }
+
+        private static void ApplyShowcaseGridCellToolTip(DataGridViewRow row, int columnIndex, string fullText)
+        {
+            if (row == null || columnIndex < 0 || columnIndex >= row.Cells.Count)
+            {
+                return;
+            }
+
+            row.Cells[columnIndex].ToolTipText = string.IsNullOrWhiteSpace(fullText) ? string.Empty : fullText.Trim();
+        }
+
+        private static void SetGridColumnDisplayIndex(DataGridView grid, string columnName, int displayIndex)
+        {
+            var column = grid?.Columns[columnName];
+            if (column != null)
+            {
+                column.DisplayIndex = displayIndex;
+            }
+        }
 
         private void ConfigureProductInputGrid(DataGridView grid)
 
@@ -188,6 +495,32 @@ namespace tiktok_Omni
 
             {
 
+                Name = "colAiShowcaseOutput",
+
+                HeaderText = "Output",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseOutputGridLabel),
+
+                FillWeight = 18,
+
+                MinimumWidth = 120,
+
+                ReadOnly = true,
+
+                Visible = false,
+
+                DefaultCellStyle =
+                {
+                    ForeColor = Color.FromArgb(130, 175, 255),
+                    SelectionForeColor = Color.White
+                }
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
                 Name = "colAiSafety",
 
                 HeaderText = "SafetyScore",
@@ -256,6 +589,424 @@ namespace tiktok_Omni
 
             });
 
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiSceneTitle",
+
+                HeaderText = "Tên cảnh",
+
+                DataPropertyName = nameof(AiVideoGenInputItem.SceneTitle),
+
+                FillWeight = 24,
+
+                MinimumWidth = 100,
+
+                ReadOnly = true,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiSceneRole",
+
+                HeaderText = "Vai trò",
+
+                DataPropertyName = nameof(AiVideoGenInputItem.SceneRole),
+
+                FillWeight = 12,
+
+                MinimumWidth = 72,
+
+                ReadOnly = true,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiClip",
+
+                HeaderText = "Clip",
+
+                DataPropertyName = nameof(AiVideoGenInputItem.ClipPath),
+
+                FillWeight = 14,
+
+                MinimumWidth = 88,
+
+                ReadOnly = true,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiSceneVoice",
+
+                HeaderText = "Voice",
+
+                DataPropertyName = nameof(AiVideoGenInputItem.SceneVoiceover),
+
+                FillWeight = 22,
+
+                MinimumWidth = 100,
+
+                ReadOnly = true,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiVeoPrompt",
+
+                HeaderText = "Prompt Veo",
+
+                DataPropertyName = nameof(AiVideoGenInputItem.VeoPrompt),
+
+                FillWeight = 26,
+
+                MinimumWidth = 120,
+
+                ReadOnly = true,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewComboBoxColumn
+
+            {
+
+                Name = "colAiShowcaseProductType",
+
+                HeaderText = "Loại SP",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseProductTypePrompt),
+
+                DisplayMember = nameof(ShowcaseProductTypePreset.DisplayLabel),
+
+                ValueMember = nameof(ShowcaseProductTypePreset.PromptHint),
+
+                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
+
+                FlatStyle = FlatStyle.Flat,
+
+                FillWeight = 20,
+
+                MinimumWidth = 148,
+
+                ReadOnly = false,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewComboBoxColumn
+
+            {
+
+                Name = "colAiShowcaseClipMode",
+
+                HeaderText = "Công cụ Video",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseClipModeId),
+
+                DisplayMember = nameof(ShowcaseClipModePreset.DisplayLabel),
+
+                ValueMember = nameof(ShowcaseClipModePreset.Id),
+
+                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
+
+                FlatStyle = FlatStyle.Flat,
+
+                FillWeight = 22,
+
+                MinimumWidth = 168,
+
+                ReadOnly = false,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewComboBoxColumn
+
+            {
+
+                Name = "colAiShowcaseOutputAspect",
+
+                HeaderText = "Khung video",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseOutputAspectId),
+
+                DisplayMember = nameof(ShowcaseOutputAspectPreset.DisplayLabel),
+
+                ValueMember = nameof(ShowcaseOutputAspectPreset.Id),
+
+                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
+
+                FlatStyle = FlatStyle.Flat,
+
+                FillWeight = 20,
+
+                MinimumWidth = 156,
+
+                ReadOnly = false,
+
+                Visible = false,
+
+                ToolTipText = "Tỉ lệ video xuất: 9:16 TikTok, 16:9 ngang, 1:1 vuông — chọn trước khi tạo clip/render."
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseTheme",
+
+                HeaderText = "Chủ đề",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseThemeGridLabel),
+
+                FillWeight = 26,
+
+                MinimumWidth = 180,
+
+                ReadOnly = true,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseUserTheme",
+
+                HeaderText = "Chủ đề tùy chỉnh",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseUserTheme),
+
+                FillWeight = 24,
+
+                MinimumWidth = 160,
+
+                ReadOnly = false,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseImages",
+
+                HeaderText = "Ảnh",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseImagesGridLabel),
+
+                FillWeight = 28,
+
+                MinimumWidth = 200,
+
+                ReadOnly = true,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseSceneSummary",
+
+                HeaderText = "Cảnh",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.SceneCountDisplay),
+
+                FillWeight = 22,
+
+                MinimumWidth = 108,
+
+                ReadOnly = true,
+
+                Visible = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseScript",
+
+                HeaderText = "Kịch bản",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseScriptLabel),
+
+                FillWeight = 16,
+
+                MinimumWidth = 120,
+
+                ReadOnly = true,
+
+                Visible = false,
+
+                DefaultCellStyle =
+                {
+                    ForeColor = Color.FromArgb(130, 175, 255),
+                    SelectionForeColor = Color.White
+                }
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseScenePrompt",
+
+                HeaderText = "Prompt",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseScenePromptLabel),
+
+                FillWeight = 18,
+
+                MinimumWidth = 140,
+
+                ReadOnly = true,
+
+                Visible = false,
+
+                DefaultCellStyle =
+                {
+                    ForeColor = Color.FromArgb(130, 175, 255),
+                    SelectionForeColor = Color.White
+                }
+
+            });
+
+            grid.Columns.Add(new DataGridViewCheckBoxColumn
+
+            {
+
+                Name = "colAiShowcaseMultiVoice",
+
+                HeaderText = "Đa giọng",
+
+                DataPropertyName = nameof(AiVideoGenInputItem.ShowcaseMultiVoice),
+
+                FillWeight = 10,
+
+                MinimumWidth = 64,
+
+                ReadOnly = false,
+
+                Visible = false,
+
+                ThreeState = false
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseTextSize",
+
+                HeaderText = "Phụ đề",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseSubtitleStyleLabel),
+
+                FillWeight = 14,
+
+                MinimumWidth = 120,
+
+                ReadOnly = true,
+
+                Visible = false,
+
+                DefaultCellStyle =
+                {
+                    ForeColor = Color.FromArgb(130, 175, 255),
+                    SelectionForeColor = Color.White
+                }
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseMusicVolume",
+
+                HeaderText = "Âm thanh",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseMusicLabel),
+
+                FillWeight = 12,
+
+                MinimumWidth = 100,
+
+                ReadOnly = true,
+
+                Visible = false,
+
+                DefaultCellStyle =
+                {
+                    ForeColor = Color.FromArgb(130, 175, 255),
+                    SelectionForeColor = Color.White
+                }
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseTransition",
+
+                HeaderText = "Chuyển cảnh",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseTransitionLabel),
+
+                FillWeight = 10,
+
+                MinimumWidth = 96,
+
+                ReadOnly = true,
+
+                Visible = false,
+
+                DefaultCellStyle =
+                {
+                    ForeColor = Color.FromArgb(130, 175, 255),
+                    SelectionForeColor = Color.White
+                }
+
+            });
+
 
 
             ApplyAiVideoGenProfileComboColumn(grid);
@@ -275,6 +1026,26 @@ namespace tiktok_Omni
             grid.DataError -= ProductInputGrid_DataError;
 
             grid.DataError += ProductInputGrid_DataError;
+
+            grid.CellValueChanged -= ProductInputGrid_CellValueChanged;
+
+            grid.CellValueChanged += ProductInputGrid_CellValueChanged;
+
+            grid.CellEndEdit -= ProductInputGrid_CellEndEdit;
+
+            grid.CellEndEdit += ProductInputGrid_CellEndEdit;
+
+            if (string.Equals(grid.Name, "dgvDeepDive", StringComparison.OrdinalIgnoreCase))
+            {
+                grid.CellMouseClick -= DgvDeepDiveInput_ShowcaseEditorCellMouseClick;
+                grid.CellMouseClick += DgvDeepDiveInput_ShowcaseEditorCellMouseClick;
+                grid.CellMouseClick -= DgvDeepDiveInput_ShowcaseImagesCellMouseClick;
+                grid.CellMouseClick += DgvDeepDiveInput_ShowcaseImagesCellMouseClick;
+                grid.CellPainting -= DgvDeepDiveInput_ShowcaseImagesCellPainting;
+                grid.CellPainting += DgvDeepDiveInput_ShowcaseImagesCellPainting;
+                grid.DataBindingComplete -= DgvDeepDiveInput_ShowcaseRowHeightsAfterBind;
+                grid.DataBindingComplete += DgvDeepDiveInput_ShowcaseRowHeightsAfterBind;
+            }
 
             if (IsSlideshowProductInputGrid(grid))
             {
@@ -532,6 +1303,66 @@ namespace tiktok_Omni
 
 
 
+        private static readonly List<ShowcaseThemePreset> ShowcaseThemePresetComboSource =
+            ShowcaseThemePresets.All.ToList();
+
+        private static readonly List<ShowcaseProductTypePreset> ShowcaseProductTypePresetComboSource =
+            ShowcaseProductTypePresets.All.ToList();
+
+        private static readonly List<ShowcaseClipModePreset> ShowcaseClipModePresetComboSource =
+            ShowcaseClipModePresets.All.ToList();
+
+        private static readonly List<ShowcaseOutputAspectPreset> ShowcaseOutputAspectPresetComboSource =
+            ShowcaseOutputAspectPresets.All.ToList();
+
+        private static void ApplyShowcaseThemeComboColumn(DataGridViewComboBoxColumn column)
+        {
+            if (column == null)
+            {
+                return;
+            }
+
+            column.DisplayMember = nameof(ShowcaseThemePreset.DisplayLabel);
+            column.ValueMember = nameof(ShowcaseThemePreset.PromptHint);
+            column.DataSource = ShowcaseThemePresetComboSource;
+        }
+
+        private static void ApplyShowcaseProductTypeComboColumn(DataGridViewComboBoxColumn column)
+        {
+            if (column == null)
+            {
+                return;
+            }
+
+            column.DisplayMember = nameof(ShowcaseProductTypePreset.DisplayLabel);
+            column.ValueMember = nameof(ShowcaseProductTypePreset.PromptHint);
+            column.DataSource = ShowcaseProductTypePresetComboSource;
+        }
+
+        private static void ApplyShowcaseClipModeComboColumn(DataGridViewComboBoxColumn column)
+        {
+            if (column == null)
+            {
+                return;
+            }
+
+            column.DisplayMember = nameof(ShowcaseClipModePreset.DisplayLabel);
+            column.ValueMember = nameof(ShowcaseClipModePreset.Id);
+            column.DataSource = ShowcaseClipModePresetComboSource;
+        }
+
+        private static void ApplyShowcaseOutputAspectComboColumn(DataGridViewComboBoxColumn column)
+        {
+            if (column == null)
+            {
+                return;
+            }
+
+            column.DisplayMember = nameof(ShowcaseOutputAspectPreset.DisplayLabel);
+            column.ValueMember = nameof(ShowcaseOutputAspectPreset.Id);
+            column.DataSource = ShowcaseOutputAspectPresetComboSource;
+        }
+
         private void ApplyGridProfileComboColumn(DataGridView grid, string columnName)
 
         {
@@ -574,6 +1405,40 @@ namespace tiktok_Omni
 
         }
 
+        private void RefreshGridProfileComboSource(AppSettings settings)
+        {
+            _aiVideoGenProfileComboSource = ConfigManager.BuildProfileComboEntries(settings ?? new AppSettings());
+        }
+
+        private void ApplyVideoReupProfileComboColumn()
+        {
+            ApplyGridProfileComboColumn(dgvVideoReupInput, "colReupProfile");
+        }
+
+        private void EnsureProfileComboIncludes(string profileName)
+        {
+            var n = (profileName ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(n))
+            {
+                return;
+            }
+
+            if (_aiVideoGenProfileComboSource == null)
+            {
+                _aiVideoGenProfileComboSource = new List<ProfileComboEntry>();
+            }
+
+            foreach (var entry in _aiVideoGenProfileComboSource)
+            {
+                if (entry != null && string.Equals(entry.Name, n, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            _aiVideoGenProfileComboSource.Add(new ProfileComboEntry { Name = n });
+        }
+
 
 
 
@@ -599,6 +1464,132 @@ namespace tiktok_Omni
 
                 grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
 
+            }
+
+            else if (grid.CurrentCell is DataGridViewCheckBoxCell)
+
+            {
+
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+
+            }
+
+        }
+
+
+
+        private void ProductInputGrid_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+
+        {
+
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || !(sender is DataGridView grid) || grid != dgvDeepDiveInput)
+
+            {
+
+                return;
+
+            }
+
+
+
+            var columnName = grid.Columns[e.ColumnIndex]?.Name;
+
+            if (!IsShowcaseSettingsGridColumn(columnName))
+
+            {
+
+                return;
+
+            }
+
+
+
+            if (grid.Rows[e.RowIndex].DataBoundItem is ShowcaseVideoItem video)
+
+            {
+
+                if (string.Equals(columnName, "colAiProduct", StringComparison.Ordinal))
+                {
+                    video.ProductName = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value) ?? string.Empty;
+                }
+                else if (string.Equals(columnName, "colAiShowcaseProductType", StringComparison.Ordinal))
+                {
+                    video.ShowcaseProductTypePrompt = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value) ?? string.Empty;
+                    NotifyShowcaseDraftDirty();
+                }
+                else if (string.Equals(columnName, "colAiShowcaseClipMode", StringComparison.Ordinal))
+                {
+                    video.ShowcaseClipModeId = ShowcaseClipModePresets.ResolveIdForGemini(
+                        Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value));
+                    NotifyShowcaseDraftDirty();
+                }
+                else if (string.Equals(columnName, "colAiShowcaseOutputAspect", StringComparison.Ordinal))
+                {
+                    video.ShowcaseOutputAspectId = ShowcaseOutputAspectPresets.ResolveId(
+                        Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value),
+                        null);
+                    NotifyShowcaseDraftDirty();
+                }
+
+                SyncShowcaseVideoSettingsToScenes(video);
+
+                return;
+
+            }
+
+
+
+            if (grid.Rows[e.RowIndex].DataBoundItem is AiVideoGenInputItem item)
+
+            {
+
+                SyncShowcaseSessionSettingsAcrossScenes(item);
+
+            }
+
+        }
+
+
+
+        private void ProductInputGrid_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+
+        {
+
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || !(sender is DataGridView grid) || grid != dgvDeepDiveInput)
+
+            {
+
+                return;
+
+            }
+
+
+
+            var rowItem = grid.Rows[e.RowIndex].DataBoundItem;
+            AiVideoGenInputItem item = rowItem as AiVideoGenInputItem;
+            var video = rowItem as ShowcaseVideoItem;
+            if (item == null && video == null)
+            {
+                return;
+            }
+
+            var columnName = grid.Columns[e.ColumnIndex]?.Name;
+
+            if (string.Equals(columnName, "colAiProduct", StringComparison.Ordinal) && video != null)
+            {
+                video.ProductName = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value) ?? string.Empty;
+            }
+
+            if (IsShowcaseSettingsGridColumn(columnName) || (video != null && string.Equals(columnName, "colAiProduct", StringComparison.Ordinal)))
+            {
+                if (video != null)
+                {
+                    SyncShowcaseVideoSettingsToScenes(video);
+                }
+                else
+                {
+                    SyncShowcaseSessionSettingsAcrossScenes(item);
+                }
             }
 
         }
@@ -631,6 +1622,14 @@ namespace tiktok_Omni
 
             }
 
+            else if (IsShowcaseSettingsGridColumn(col?.Name))
+
+            {
+
+                e.ThrowException = false;
+
+            }
+
         }
 
 
@@ -653,7 +1652,7 @@ namespace tiktok_Omni
 
             var col = grid.Columns[e.ColumnIndex];
 
-            if (col?.Name != "colAiStatus")
+            if (col == null)
 
             {
 
@@ -665,7 +1664,104 @@ namespace tiktok_Omni
 
             var row = grid.Rows[e.RowIndex];
 
-            if (row?.DataBoundItem is AiVideoGenInputItem item)
+            if (grid == dgvDeepDiveInput &&
+                col.Name == "colAiProduct" &&
+                row?.DataBoundItem is ShowcaseVideoItem)
+            {
+                e.CellStyle.ForeColor = Color.FromArgb(130, 175, 255);
+                e.CellStyle.SelectionForeColor = Color.White;
+                e.CellStyle.WrapMode = DataGridViewTriState.True;
+                return;
+            }
+
+            if (grid == dgvDeepDiveInput && row?.DataBoundItem is ShowcaseVideoItem showcaseVideo)
+            {
+                if (col.Name == "colAiStatus")
+                {
+                    var status = string.IsNullOrWhiteSpace(showcaseVideo.PipelineStatus)
+                        ? "Chờ"
+                        : showcaseVideo.PipelineStatus.Trim();
+                    e.Value = showcaseVideo.ShowcaseOutputGridLabel
+                              ?? ShowcaseContentDisplayHelper.FormatPipelineGridLabel(showcaseVideo);
+                    if (string.Equals(status, "Xong", StringComparison.OrdinalIgnoreCase))
+                    {
+                        e.CellStyle.ForeColor = Color.FromArgb(120, 220, 160);
+                    }
+                    else if (string.Equals(status, "Lỗi", StringComparison.OrdinalIgnoreCase))
+                    {
+                        e.CellStyle.ForeColor = Color.FromArgb(230, 140, 120);
+                    }
+                    else if (string.Equals(status, "Đang render", StringComparison.OrdinalIgnoreCase))
+                    {
+                        e.CellStyle.ForeColor = Color.FromArgb(255, 200, 120);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(showcaseVideo.OutputVideoPath)
+                             && File.Exists(showcaseVideo.OutputVideoPath))
+                    {
+                        e.CellStyle.ForeColor = Color.FromArgb(130, 175, 255);
+                        e.CellStyle.SelectionForeColor = Color.White;
+                    }
+
+                    row.Cells[e.ColumnIndex].ToolTipText =
+                        ShowcaseContentDisplayHelper.FormatPipelineGridToolTip(showcaseVideo);
+                    e.FormattingApplied = true;
+                    return;
+                }
+
+                if (col.Name == "colAiShowcaseScript")
+                {
+                    e.Value = showcaseVideo.ShowcaseScriptLabel
+                              ?? ShowcaseContentDisplayHelper.FormatScriptPromptGridLabel(showcaseVideo);
+                    e.CellStyle.WrapMode = DataGridViewTriState.True;
+                    row.Cells[e.ColumnIndex].ToolTipText =
+                        ShowcaseContentDisplayHelper.FormatScriptPromptGridToolTip(showcaseVideo);
+                    e.FormattingApplied = true;
+                    return;
+                }
+
+                if (col.Name == "colAiShowcaseProductType")
+                {
+                    e.Value = showcaseVideo.ShowcaseGeminiSetupGridLabel
+                              ?? ShowcaseContentDisplayHelper.FormatProductTypeThemeGridLabel(showcaseVideo);
+                    e.CellStyle.ForeColor = Color.FromArgb(130, 175, 255);
+                    e.CellStyle.SelectionForeColor = Color.White;
+                    e.CellStyle.WrapMode = DataGridViewTriState.True;
+                    row.Cells[e.ColumnIndex].ToolTipText =
+                        ShowcaseContentDisplayHelper.FormatProductTypeThemeGridToolTip(showcaseVideo);
+                    e.FormattingApplied = true;
+                    return;
+                }
+
+                if (col.Name == "colAiShowcaseImages")
+                {
+                    e.Value = string.Empty;
+                    row.Cells[e.ColumnIndex].ToolTipText =
+                        (showcaseVideo.ShowcaseImagesGridLabel ?? "0 ảnh") + " — trái: thêm · phải: thư mục";
+                    e.FormattingApplied = true;
+                    return;
+                }
+
+                if (col.Name == "colAiShowcaseSceneSummary")
+                {
+                    e.Value = string.Empty;
+                    row.Cells[e.ColumnIndex].ToolTipText =
+                        (showcaseVideo.SceneCountDisplay ?? "0 cảnh") + " — trái: thêm clip · phải: veo_clips";
+                    e.FormattingApplied = true;
+                    return;
+                }
+            }
+
+            if (!(row?.DataBoundItem is AiVideoGenInputItem item))
+
+            {
+
+                return;
+
+            }
+
+
+
+            if (col.Name == "colAiStatus")
 
             {
 
@@ -682,6 +1778,98 @@ namespace tiktok_Omni
                 {
 
                     e.Value = item.IsProcessed ? "Xong" : "Chờ";
+
+                }
+
+
+
+                e.FormattingApplied = true;
+
+                return;
+
+            }
+
+
+
+            if (col.Name == "colAiClip")
+
+            {
+
+                var hasClip = !string.IsNullOrWhiteSpace(item.ClipPath) && File.Exists(item.ClipPath);
+
+                e.Value = hasClip ? "✓ Có clip" : "✗ Chưa có";
+
+                e.CellStyle.ForeColor = hasClip ? Color.FromArgb(120, 220, 160) : Color.FromArgb(230, 140, 120);
+
+                e.FormattingApplied = true;
+
+                return;
+
+            }
+
+            if (grid == dgvDeepDiveInput && col.Name == "colAiSceneVoice")
+
+            {
+
+                var full = item.SceneVoiceover ?? string.Empty;
+
+                ApplyShowcaseGridCellToolTip(row, e.ColumnIndex, full);
+
+                e.Value = TruncateShowcaseGridText(full, ShowcaseGridVoicePreviewChars);
+
+                e.FormattingApplied = true;
+
+                return;
+
+            }
+
+            if (grid == dgvDeepDiveInput && col.Name == "colAiVeoPrompt")
+
+            {
+
+                var full = item.VeoPrompt ?? string.Empty;
+
+                ApplyShowcaseGridCellToolTip(row, e.ColumnIndex, full);
+
+                e.Value = TruncateShowcaseGridText(full, ShowcaseGridVeoPromptPreviewChars);
+
+                e.FormattingApplied = true;
+
+                return;
+
+            }
+
+
+
+            if (col.Name == "colAiImage" && grid == dgvDeepDiveInput)
+
+            {
+
+                var imageRef = item.ImageUrl ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(imageRef))
+
+                {
+
+                    return;
+
+                }
+
+
+
+                if (imageRef.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+
+                {
+
+                    e.Value = imageRef.Length > 48 ? imageRef.Substring(0, 45) + "…" : imageRef;
+
+                }
+
+                else
+
+                {
+
+                    e.Value = Path.GetFileName(imageRef);
 
                 }
 
@@ -714,6 +1902,22 @@ namespace tiktok_Omni
             var row = grid.Rows[e.RowIndex];
 
             if (row?.DataBoundItem is AiVideoGenInputItem item && item.IsProcessed)
+
+            {
+
+                row.DefaultCellStyle.BackColor = AiVideoGenProcessedRowBack;
+
+                row.DefaultCellStyle.ForeColor = AiVideoGenProcessedRowFore;
+
+                row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(120, 180, 140);
+
+                row.DefaultCellStyle.SelectionForeColor = Color.White;
+
+            }
+
+            else if (grid == dgvDeepDiveInput &&
+                     row?.DataBoundItem is ShowcaseVideoItem showcaseRow &&
+                     string.Equals(showcaseRow.PipelineStatus, "Xong", StringComparison.OrdinalIgnoreCase))
 
             {
 
@@ -770,6 +1974,13 @@ namespace tiktok_Omni
         {
 
             MarkBufferItemsProcessed(GetDeepDiveBuffer(), renderedItems, SyncBuffersToGrids, null);
+
+            var video = GetActiveShowcaseVideo();
+            if (video != null)
+            {
+                video.PipelineStatus = "Xong";
+                video.RefreshDisplayFields();
+            }
 
         }
 

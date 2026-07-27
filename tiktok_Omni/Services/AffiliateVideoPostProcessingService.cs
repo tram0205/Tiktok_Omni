@@ -215,6 +215,75 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>Showcase: CTA mũi tên (3s cuối) + chữ CTA tuỳ chỉnh (vd. "Link giỏ hàng ở bio — số lượng có hạn!").</summary>
+        public async Task<string> ApplyCtaTailWithTextOverlayAsync(
+            string inputVideoPath,
+            string ctaText,
+            AppSettings settings,
+            string workDirectory,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(inputVideoPath) || !File.Exists(inputVideoPath))
+            {
+                return inputVideoPath;
+            }
+
+            try
+            {
+                var ffmpeg = ResolveFfmpeg(settings);
+                var stage = workDirectory ?? Path.GetDirectoryName(inputVideoPath) ?? ".";
+                Directory.CreateDirectory(stage);
+                var ctaPath = AffiliateCtaAssetService.EnsureCartArrowAsset(settings?.StorageRootPath);
+                var duration = await SubtitleTimingHelper.ProbeMediaDurationSecondsAsync(ffmpeg, inputVideoPath, cancellationToken)
+                    .ConfigureAwait(false);
+                if (duration <= CtaTailSeconds + 0.2d)
+                {
+                    return inputVideoPath;
+                }
+
+                var output = Path.Combine(stage, "with_cta_tail.mp4");
+                var start = Math.Max(0d, duration - CtaTailSeconds);
+                var filter = BuildCtaOverlayFilter(ctaPath, start, duration);
+                if (!string.IsNullOrWhiteSpace(ctaText))
+                {
+                    filter += "," + BuildCtaTextFilter(ctaText, start, duration);
+                }
+
+                await BurnVideoFilterAsync(ffmpeg, inputVideoPath, output, filter, log, cancellationToken).ConfigureAwait(false);
+                log?.Invoke("[Showcase] Đã chèn CTA (mũi tên + chữ) 3s cuối.");
+                return output;
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke("[Showcase] CTA bỏ qua: " + ex.Message);
+                return inputVideoPath;
+            }
+        }
+
+        private static string BuildCtaTextFilter(string ctaText, double startSec, double endSec)
+        {
+            var safe = EscapeCtaDrawText(ctaText);
+            var s = startSec.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            var e = endSec.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            return "drawbox=x=0:y=ih-200:w=iw:h=140:color=black@0.45:t=fill:enable='between(t," + s + "," + e + ")'" +
+                   ",drawtext=font='Segoe UI Bold':text='" + safe + "':x=(w-text_w)/2:y=h-160:fontsize=52:fontcolor=white:borderw=3:bordercolor=black:enable='between(t," + s + "," + e + ")'";
+        }
+
+        private static string EscapeCtaDrawText(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            return value.Trim()
+                .Replace("\\", "\\\\")
+                .Replace(":", "\\:")
+                .Replace("'", "\u2019")
+                .Replace("%", "\\%");
+        }
+
         private static string ResolveFfmpeg(AppSettings settings)
         {
             var path = (settings?.FfmpegPath ?? string.Empty).Trim();

@@ -36,9 +36,9 @@ namespace tiktok_Omni
             ShowInTaskbar = false;
             BackColor = Color.FromArgb(31, 34, 42);
             ForeColor = Color.Gainsboro;
-            Font = new Font("Segoe UI", 9F);
-            ClientSize = new Size(420, 248);
-            Padding = new Padding(12);
+            Font = new Font("Segoe UI", 10.5F);
+            ClientSize = new Size(840, 496);
+            Padding = new Padding(20);
 
             BuildUi();
             LoadFromRow();
@@ -53,9 +53,9 @@ namespace tiktok_Omni
                 RowCount = 5,
                 BackColor = BackColor
             };
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72F));
+            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120F));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72F));
+            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120F));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
 
             Label MkLbl(string text) => new Label
@@ -64,7 +64,8 @@ namespace tiktok_Omni
                 AutoSize = true,
                 ForeColor = Color.FromArgb(160, 168, 182),
                 Anchor = AnchorStyles.Left,
-                Margin = new Padding(0, 8, 4, 0)
+                Margin = new Padding(0, 14, 8, 0),
+                Font = new Font("Segoe UI", 10.5F)
             };
 
             _cbPosition = CreateCombo();
@@ -136,7 +137,8 @@ namespace tiktok_Omni
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
                 BackColor = BackColor,
-                Margin = new Padding(0, 8, 0, 0)
+                Margin = new Padding(0, 12, 0, 0),
+                Padding = new Padding(0, 8, 0, 0)
             };
             flpButtons.Controls.Add(btnCancel);
             flpButtons.Controls.Add(btnOk);
@@ -145,11 +147,11 @@ namespace tiktok_Omni
             tbl.Controls.Add(flpButtons, 0, 4);
             tbl.SetColumnSpan(flpButtons, 4);
 
-            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
-            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
-            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
             tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 64F));
 
             Controls.Add(tbl);
 
@@ -224,7 +226,8 @@ namespace tiktok_Omni
                 DropDownStyle = ComboBoxStyle.DropDownList,
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 4, 0, 4)
+                Font = new Font("Segoe UI", 10.5F),
+                Margin = new Padding(0, 8, 0, 8)
             };
         }
 
@@ -233,13 +236,14 @@ namespace tiktok_Omni
             return new NumericUpDown
             {
                 Dock = DockStyle.Left,
-                Width = 64,
+                Width = 96,
                 Minimum = min,
                 Maximum = max,
                 Value = value,
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 4, 0, 4)
+                Font = new Font("Segoe UI", 10.5F),
+                Margin = new Padding(0, 8, 0, 8)
             };
         }
 
@@ -251,7 +255,8 @@ namespace tiktok_Omni
                 AutoSize = true,
                 Checked = check,
                 ForeColor = Color.Gainsboro,
-                Margin = new Padding(0, 6, 12, 0)
+                Font = new Font("Segoe UI", 10.5F),
+                Margin = new Padding(0, 10, 20, 0)
             };
         }
 
@@ -261,11 +266,12 @@ namespace tiktok_Omni
             {
                 Text = text,
                 AutoSize = true,
-                MinimumSize = new Size(88, 30),
+                MinimumSize = new Size(120, 36),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = back,
                 ForeColor = Color.White,
-                Margin = new Padding(6, 0, 0, 0)
+                Font = new Font("Segoe UI", 10.5F),
+                Margin = new Padding(10, 0, 0, 0)
             };
         }
     }

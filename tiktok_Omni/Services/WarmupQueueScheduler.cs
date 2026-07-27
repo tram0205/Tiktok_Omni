@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -8,64 +9,41 @@ namespace tiktok_Omni.Services
     public class WarmupQueueScheduler
     {
         private readonly object _sync = new object();
-        private readonly Queue<WarmupQueueItem> _queue = new Queue<WarmupQueueItem>();
+        // Dùng LinkedList để EnqueueFront và Enqueue đạt tốc độ O(1), không bị giật lag khi danh sách dài
+        private readonly LinkedList<WarmupQueueItem> _queue = new LinkedList<WarmupQueueItem>();
         private static readonly TimeSpan MinimumRetryCooldown = TimeSpan.FromMinutes(5);
 
         public int QueueCount
         {
-            get
-            {
-                lock (_sync)
-                {
-                    return _queue.Count;
-                }
-            }
+            get { lock (_sync) { return _queue.Count; } }
         }
 
         public void Enqueue(WarmupRunState state, int maxRetries = 2)
         {
-            if (state == null)
-            {
-                throw new ArgumentNullException(nameof(state));
-            }
-
+            if (state == null) throw new ArgumentNullException(nameof(state));
             lock (_sync)
             {
-                _queue.Enqueue(new WarmupQueueItem
+                _queue.AddLast(new WarmupQueueItem
                 {
                     State = state,
-                    MaxRetries = Math.Max(0, maxRetries)
+                    MaxRetries = Math.Max(0, maxRetries),
+                    NextRetryAtUtc = null // Chạy ngay
                 });
             }
         }
 
         public void EnqueueFront(WarmupRunState state, int maxRetries = 2)
         {
-            if (state == null)
-            {
-                throw new ArgumentNullException(nameof(state));
-            }
-
+            if (state == null) throw new ArgumentNullException(nameof(state));
             lock (_sync)
             {
-                var temp = new List<WarmupQueueItem>(_queue.Count + 1)
+                // Thêm vào đầu list cực nhanh, không cần copy tạo List tạm như code cũ
+                _queue.AddFirst(new WarmupQueueItem
                 {
-                    new WarmupQueueItem
-                    {
-                        State = state,
-                        MaxRetries = Math.Max(0, maxRetries)
-                    }
-                };
-
-                while (_queue.Count > 0)
-                {
-                    temp.Add(_queue.Dequeue());
-                }
-
-                for (var i = 0; i < temp.Count; i++)
-                {
-                    _queue.Enqueue(temp[i]);
-                }
+                    State = state,
+                    MaxRetries = Math.Max(0, maxRetries),
+                    NextRetryAtUtc = null
+                });
             }
         }
 
@@ -73,16 +51,12 @@ namespace tiktok_Omni.Services
         {
             lock (_sync)
             {
-                var output = new List<WarmupQueueSnapshotItem>();
-                foreach (var item in _queue)
+                return _queue.Select(item => new WarmupQueueSnapshotItem
                 {
-                    output.Add(new WarmupQueueSnapshotItem
-                    {
-                        State = item.State,
-                        MaxRetries = item.MaxRetries
-                    });
-                }
-                return output;
+                    State = item.State,
+                    MaxRetries = item.MaxRetries,
+                    NextRetryAtUtc = item.NextRetryAtUtc
+                }).ToList();
             }
         }
 
@@ -91,70 +65,24 @@ namespace tiktok_Omni.Services
             lock (_sync)
             {
                 _queue.Clear();
-                if (snapshots == null)
-                {
-                    return;
-                }
+                if (snapshots == null) return;
 
                 foreach (var snapshot in snapshots)
                 {
-                    if (snapshot?.State == null)
-                    {
-                        continue;
-                    }
-
-                    _queue.Enqueue(new WarmupQueueItem
+                    if (snapshot?.State == null) continue;
+                    _queue.AddLast(new WarmupQueueItem
                     {
                         State = snapshot.State,
-                        MaxRetries = Math.Max(0, snapshot.MaxRetries)
+                        MaxRetries = Math.Max(0, snapshot.MaxRetries),
+                        NextRetryAtUtc = snapshot.NextRetryAtUtc
                     });
                 }
             }
         }
 
-        public bool RemoveFirstMatching(WarmupRunState state)
-        {
-            if (state == null)
-            {
-                return false;
-            }
-
-            lock (_sync)
-            {
-                if (_queue.Count == 0)
-                {
-                    return false;
-                }
-
-                var temp = new List<WarmupQueueItem>(_queue.Count);
-                var removed = false;
-                while (_queue.Count > 0)
-                {
-                    var item = _queue.Dequeue();
-                    if (!removed && IsSameState(item.State, state))
-                    {
-                        removed = true;
-                        continue;
-                    }
-
-                    temp.Add(item);
-                }
-
-                for (var i = 0; i < temp.Count; i++)
-                {
-                    _queue.Enqueue(temp[i]);
-                }
-
-                return removed;
-            }
-        }
-
         public void ClearPending()
         {
-            lock (_sync)
-            {
-                _queue.Clear();
-            }
+            lock (_sync) { _queue.Clear(); }
         }
 
         public async Task RunAsync(
@@ -162,133 +90,120 @@ namespace tiktok_Omni.Services
             Action<string> logAction,
             CancellationToken cancellationToken,
             Action<WarmupQueueRunEvent> eventAction = null,
-            Func<WarmupQueueRunEvent, Task> terminalEventAsync = null)
+            Func<WarmupQueueRunEvent, Task> terminalEventAsync = null,
+            Func<CancellationToken, Task> waitIfPausedAsync = null)
         {
-            if (executor == null)
-            {
-                throw new ArgumentNullException(nameof(executor));
-            }
+            if (executor == null) throw new ArgumentNullException(nameof(executor));
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                WarmupQueueItem item = null;
+                if (waitIfPausedAsync != null)
+                {
+                    await waitIfPausedAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                WarmupQueueItem itemToRun = null;
+                TimeSpan? shortestWaitTime = null;
+
                 lock (_sync)
                 {
                     if (_queue.Count > 0)
                     {
-                        item = _queue.Dequeue();
-                    }
-                }
-
-                if (item == null)
-                {
-                    logAction?.Invoke("[QUEUE] No pending warm-up jobs.");
-                    return;
-                }
-
-                var profileName = string.IsNullOrWhiteSpace(item.State.RunningProfileName)
-                    ? "default"
-                    : item.State.RunningProfileName.Trim();
-                logAction?.Invoke($"[QUEUE] Running warm-up job for profile '{profileName}'.");
-                eventAction?.Invoke(new WarmupQueueRunEvent
-                {
-                    EventType = WarmupQueueEventType.Started,
-                    State = item.State,
-                    Attempt = 1,
-                    MaxRetries = item.MaxRetries
-                });
-
-                for (var attempt = 0; attempt <= item.MaxRetries; attempt++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    try
-                    {
-                        await executor(item.State, cancellationToken).ConfigureAwait(false);
-                        logAction?.Invoke($"[QUEUE] Job completed for profile '{profileName}'.");
-                        eventAction?.Invoke(new WarmupQueueRunEvent
+                        // Tìm job đầu tiên sẵn sàng chạy (không bị dính thời gian Cooldown)
+                        var node = _queue.First;
+                        while (node != null)
                         {
-                            EventType = WarmupQueueEventType.Completed,
-                            State = item.State,
-                            Attempt = attempt + 1,
-                            MaxRetries = item.MaxRetries
-                        });
-                        if (terminalEventAsync != null)
-                        {
-                            await terminalEventAsync(new WarmupQueueRunEvent
+                            if (!node.Value.NextRetryAtUtc.HasValue || node.Value.NextRetryAtUtc.Value <= DateTime.UtcNow)
                             {
-                                EventType = WarmupQueueEventType.Completed,
-                                State = item.State,
-                                Attempt = attempt + 1,
-                                MaxRetries = item.MaxRetries
-                            }).ConfigureAwait(false);
-                        }
-                        break;
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (WarmupQueueRequeueException)
-                    {
-                        logAction?.Invoke($"[QUEUE] Job re-queued for profile '{profileName}'.");
-                        eventAction?.Invoke(new WarmupQueueRunEvent
-                        {
-                            EventType = WarmupQueueEventType.Requeued,
-                            State = item.State,
-                            Attempt = attempt + 1,
-                            MaxRetries = item.MaxRetries
-                        });
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        var hasRetry = attempt < item.MaxRetries;
-                        if (!hasRetry)
-                        {
-                            logAction?.Invoke($"[QUEUE][WARN] Job skipped after max retries for '{profileName}': {ex.Message}");
-                            eventAction?.Invoke(new WarmupQueueRunEvent
-                            {
-                                EventType = WarmupQueueEventType.Skipped,
-                                State = item.State,
-                                Attempt = attempt + 1,
-                                MaxRetries = item.MaxRetries,
-                                ErrorMessage = ex.Message
-                            });
-                            if (terminalEventAsync != null)
-                            {
-                                await terminalEventAsync(new WarmupQueueRunEvent
-                                {
-                                    EventType = WarmupQueueEventType.Skipped,
-                                    State = item.State,
-                                    Attempt = attempt + 1,
-                                    MaxRetries = item.MaxRetries,
-                                    ErrorMessage = ex.Message
-                                }).ConfigureAwait(false);
+                                itemToRun = node.Value;
+                                _queue.Remove(node);
+                                break;
                             }
-                            break;
+                            else
+                            {
+                                // Tính thời gian chờ của job có cooldown ngắn nhất
+                                var delay = node.Value.NextRetryAtUtc.Value - DateTime.UtcNow;
+                                if (!shortestWaitTime.HasValue || delay < shortestWaitTime.Value)
+                                    shortestWaitTime = delay;
+                            }
+                            node = node.Next;
+                        }
+                    }
+                }
+
+                // Hàng đợi có job nhưng TẤT CẢ đều đang bị Cooldown chờ chạy lại
+                if (itemToRun == null)
+                {
+                    if (QueueCount == 0)
+                    {
+                        logAction?.Invoke("[QUEUE] No pending warm-up jobs.");
+                        return;
+                    }
+
+                    // Có job nhưng chưa tới giờ retry — đợi đúng shortestWaitTime thay vì poll 5s vô ích
+                    var sleepMs = shortestWaitTime.HasValue
+                        ? (int)shortestWaitTime.Value.TotalMilliseconds
+                        : 5000;
+                    sleepMs = Math.Max(1000, Math.Min(30000, sleepMs));
+                    await Task.Delay(sleepMs, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                var profileName = string.IsNullOrWhiteSpace(itemToRun.State.RunningProfileName) ? "default" : itemToRun.State.RunningProfileName.Trim();
+                logAction?.Invoke($"[QUEUE] Running warm-up job for profile '{profileName}'.");
+                eventAction?.Invoke(new WarmupQueueRunEvent { EventType = WarmupQueueEventType.Started, State = itemToRun.State, Attempt = itemToRun.AttemptCount + 1, MaxRetries = itemToRun.MaxRetries });
+
+                try
+                {
+                    // Chạy Job
+                    await executor(itemToRun.State, cancellationToken).ConfigureAwait(false);
+
+                    logAction?.Invoke($"[QUEUE] Job completed for profile '{profileName}'.");
+                    eventAction?.Invoke(new WarmupQueueRunEvent { EventType = WarmupQueueEventType.Completed, State = itemToRun.State, Attempt = itemToRun.AttemptCount + 1, MaxRetries = itemToRun.MaxRetries });
+                    if (terminalEventAsync != null) await terminalEventAsync(new WarmupQueueRunEvent { EventType = WarmupQueueEventType.Completed, State = itemToRun.State, Attempt = itemToRun.AttemptCount + 1, MaxRetries = itemToRun.MaxRetries }).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (WarmupQueueRequeueException)
+                {
+                    logAction?.Invoke($"[QUEUE] Job re-queued for profile '{profileName}'.");
+                    eventAction?.Invoke(new WarmupQueueRunEvent { EventType = WarmupQueueEventType.Requeued, State = itemToRun.State, Attempt = itemToRun.AttemptCount + 1, MaxRetries = itemToRun.MaxRetries });
+                    if (waitIfPausedAsync != null)
+                    {
+                        await waitIfPausedAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                catch (ArgumentException ex)
+                {
+                    logAction?.Invoke($"[QUEUE][WARN] Job skipped (cấu hình lỗi) for '{profileName}': {ex.Message}");
+                    eventAction?.Invoke(new WarmupQueueRunEvent { EventType = WarmupQueueEventType.Skipped, State = itemToRun.State, Attempt = itemToRun.AttemptCount + 1, MaxRetries = itemToRun.MaxRetries, ErrorMessage = ex.Message });
+                }
+                catch (Exception ex)
+                {
+                    var hasRetry = itemToRun.AttemptCount < itemToRun.MaxRetries;
+                    if (!hasRetry)
+                    {
+                        logAction?.Invoke($"[QUEUE][WARN] Job failed permanently after {itemToRun.AttemptCount + 1} attempts for '{profileName}': {ex.Message}");
+                        eventAction?.Invoke(new WarmupQueueRunEvent { EventType = WarmupQueueEventType.FailedPermanent, State = itemToRun.State, Attempt = itemToRun.AttemptCount + 1, MaxRetries = itemToRun.MaxRetries, ErrorMessage = ex.Message });
+                    }
+                    else
+                    {
+                        // SỬA LỖI BLOCKING: Tính toán thời gian Retry
+                        itemToRun.AttemptCount++;
+                        var retryAtUtc = DateTime.UtcNow.AddMinutes(Math.Max(5, itemToRun.AttemptCount * 5));
+                        itemToRun.NextRetryAtUtc = retryAtUtc;
+
+                        logAction?.Invoke(
+                            $"[QUEUE][WARN] Job failed for '{profileName}': {ex.Message}. Cooldown {(retryAtUtc - DateTime.UtcNow).TotalMinutes:0.#}m... Pushing back to queue.");
+                        eventAction?.Invoke(new WarmupQueueRunEvent { EventType = WarmupQueueEventType.Retrying, State = itemToRun.State, Attempt = itemToRun.AttemptCount, MaxRetries = itemToRun.MaxRetries, ErrorMessage = ex.Message, NextRetryAtUtc = retryAtUtc });
+
+                        // ĐẨY VÀO CUỐI HÀNG ĐỢI ĐỂ PROFILE KHÁC ĐƯỢC CHẠY
+                        lock (_sync)
+                        {
+                            _queue.AddLast(itemToRun);
                         }
 
-                        var retryAtUtc = DateTime.UtcNow.Add(TimeSpan.FromMinutes(Math.Max(5, (attempt + 1) * 5)));
-                        var delay = retryAtUtc - DateTime.UtcNow;
-                        if (delay < MinimumRetryCooldown)
-                        {
-                            delay = MinimumRetryCooldown;
-                            retryAtUtc = DateTime.UtcNow.Add(delay);
-                        }
-
-                        var delayMinutes = Math.Max(5, (int)Math.Ceiling(delay.TotalMinutes));
-                        logAction?.Invoke($"[QUEUE][WARN] Job failed for '{profileName}' (attempt {attempt + 1}/{item.MaxRetries + 1}). Cooldown {delayMinutes}m before retry...");
-                        eventAction?.Invoke(new WarmupQueueRunEvent
-                        {
-                            EventType = WarmupQueueEventType.Retrying,
-                            State = item.State,
-                            Attempt = attempt + 1,
-                            MaxRetries = item.MaxRetries,
-                            ErrorMessage = ex.Message,
-                            NextRetryAtUtc = retryAtUtc
-                        });
-                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                        // Nghỉ 3 giây để hệ thống/IP không bị giật cục, sau đó vòng while sẽ tự bốc Job kế tiếp (của profile khác) lên chạy ngay.
+                        await Task.Delay(3000, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -298,22 +213,8 @@ namespace tiktok_Omni.Services
         {
             public WarmupRunState State { get; set; }
             public int MaxRetries { get; set; }
-        }
-
-        private static bool IsSameState(WarmupRunState left, WarmupRunState right)
-        {
-            if (left == null || right == null)
-            {
-                return false;
-            }
-
-            return string.Equals(left.RunningProfileName ?? string.Empty, right.RunningProfileName ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-                   string.Equals(left.Keywords ?? string.Empty, right.Keywords ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-                   left.VideoCount == right.VideoCount &&
-                   left.WatchSecondsMin == right.WatchSecondsMin &&
-                   left.WatchSecondsMax == right.WatchSecondsMax &&
-                   left.AutoComment == right.AutoComment &&
-                   left.DryRun == right.DryRun;
+            public int AttemptCount { get; set; } = 0;
+            public DateTime? NextRetryAtUtc { get; set; }
         }
     }
 
@@ -327,15 +228,7 @@ namespace tiktok_Omni.Services
         public DateTime? NextRetryAtUtc { get; set; }
     }
 
-    public enum WarmupQueueEventType
-    {
-        Started,
-        Retrying,
-        Requeued,
-        Completed,
-        FailedPermanent,
-        Skipped
-    }
+    public enum WarmupQueueEventType { Started, Retrying, Requeued, Completed, FailedPermanent, Skipped }
 
     public class WarmupQueueRunEvent
     {
@@ -347,10 +240,5 @@ namespace tiktok_Omni.Services
         public DateTime? NextRetryAtUtc { get; set; }
     }
 
-    public class WarmupQueueRequeueException : Exception
-    {
-        public WarmupQueueRequeueException(string message) : base(message)
-        {
-        }
-    }
+    public class WarmupQueueRequeueException : Exception { public WarmupQueueRequeueException(string msg) : base(msg) { } }
 }

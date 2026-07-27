@@ -62,6 +62,7 @@ namespace tiktok_Omni
             if (mode == AiVideoGenMode.VideoReup)
             {
                 _ = RefreshVideoReupMusicComboAsync();
+                RefreshVideoReupReadinessLabel(null);
                 BeginInvoke(new Action(() => LayoutVideoReupShell()));
             }
             else if (mode == AiVideoGenMode.Philosophy)
@@ -71,6 +72,11 @@ namespace tiktok_Omni
             else if (mode == AiVideoGenMode.Mascot)
             {
                 BeginInvoke(new Action(() => EnsureProductionQueueGridBandHeight(dgvMascotQueue)));
+            }
+
+            if (!_suppressUiNavigationPersist)
+            {
+                _ = SaveUiNavigationStateAsync();
             }
         }
 
@@ -98,7 +104,7 @@ namespace tiktok_Omni
             pnlAiVideoGenModeHost.Controls.Add(pnlModeVideoReup);
 
             btnModeSlideshow = CreateAiVideoGenModeNavButton("Slideshow", AiVideoGenMode.Slideshow);
-            btnModeAffiliateDeep = CreateAiVideoGenModeNavButton("Affiliate chuyên", AiVideoGenMode.AffiliateDeep);
+            btnModeAffiliateDeep = CreateAiVideoGenModeNavButton("Showcase SP", AiVideoGenMode.AffiliateDeep);
             btnModeMascot = CreateAiVideoGenModeNavButton("Mascot", AiVideoGenMode.Mascot);
             btnModePhilosophy = CreateAiVideoGenModeNavButton("Triết lý", AiVideoGenMode.Philosophy);
             btnModeVideoReup = CreateAiVideoGenModeNavButton("Reup", AiVideoGenMode.VideoReup);
@@ -133,7 +139,7 @@ namespace tiktok_Omni
             {
                 Name = "lblAiVideoGenModeHint",
                 AutoSize = true,
-                Font = new Font("Segoe UI", 9F),
+                Font = AppLabelFont,
                 ForeColor = Color.FromArgb(165, 172, 188),
                 Margin = new Padding(0, 2, 0, 0)
             };
@@ -198,8 +204,8 @@ namespace tiktok_Omni
             switch (mode)
             {
                 case AiVideoGenMode.AffiliateDeep:
-                    title = "Affiliate chuyên sâu";
-                    hint = "4+ ảnh / 1 sản phẩm — storyboard & render";
+                    title = "Showcase sản phẩm";
+                    hint = "Ảnh + clip tùy số cảnh → Gemini kịch bản → Veo thủ công → hook/CTA";
                     accent = Color.FromArgb(56, 142, 88);
                     return;
                 case AiVideoGenMode.Mascot:
@@ -414,7 +420,7 @@ namespace tiktok_Omni
                 case AiVideoGenMode.Slideshow:
                     return "Slideshow";
                 case AiVideoGenMode.AffiliateDeep:
-                    return "Affiliate chuyên";
+                    return "Showcase SP";
                 case AiVideoGenMode.Mascot:
                     return "Mascot";
                 case AiVideoGenMode.Philosophy:

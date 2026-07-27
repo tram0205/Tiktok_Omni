@@ -193,7 +193,7 @@ namespace tiktok_Omni
         }
 
         private const int ProductionQueueHeaderHeight = AppGridHeaderHeight;
-        private const int ProductionQueueRowHeight = 26;
+        private const int ProductionQueueRowHeight = AppDefaultRowHeight;
         private const int ProductionQueueBandMinHeight = 152;
 
         private void ConfigureProductionQueueGrid(DataGridView grid)
@@ -203,20 +203,14 @@ namespace tiktok_Omni
                 return;
             }
 
-            grid.EnableHeadersVisualStyles = false;
-            grid.ColumnHeadersHeight = ProductionQueueHeaderHeight;
-            grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
             grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
             {
                 BackColor = Color.FromArgb(52, 56, 68),
                 ForeColor = Color.WhiteSmoke,
                 SelectionBackColor = Color.FromArgb(52, 56, 68),
-                Font = AppGridHeaderFont,
                 Alignment = DataGridViewContentAlignment.MiddleCenter,
-                Padding = new Padding(6, 8, 6, 8),
                 WrapMode = DataGridViewTriState.False
             };
-            grid.RowTemplate.Height = ProductionQueueRowHeight;
             grid.MinimumSize = new Size(0, ProductionQueueHeaderHeight + ProductionQueueRowHeight + 6);
             grid.ScrollBars = ScrollBars.Both;
             grid.AutoGenerateColumns = false;
@@ -258,6 +252,7 @@ namespace tiktok_Omni
                 FillWeight = 26
             });
 
+            ApplyAppGridChrome(grid);
             EnsureProductionQueueGridBandHeight(grid);
         }
 
@@ -268,13 +263,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            grid.EnableHeadersVisualStyles = false;
-            if (grid.ColumnHeadersHeight < ProductionQueueHeaderHeight)
-            {
-                grid.ColumnHeadersHeight = ProductionQueueHeaderHeight;
-            }
-
-            grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            ApplyAppGridChrome(grid);
             var minGridH = grid.ColumnHeadersHeight + grid.RowTemplate.Height + 6;
             if (grid.MinimumSize.Height < minGridH)
             {

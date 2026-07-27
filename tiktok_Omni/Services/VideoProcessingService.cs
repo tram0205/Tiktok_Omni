@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using tiktok_Omni.Models;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services
 {
@@ -368,6 +369,246 @@ namespace tiktok_Omni.Services
                 FinalVideoPath = polished,
                 SceneVideos = sceneAssets
             };
+        }
+
+        /// <summary>
+        /// Showcase sản phẩm: ghép clip Veo đã tạo TAY (theo Excel prompt) thành 1 video hoàn chỉnh —
+        /// hook đầu + voice-over liên tục + CTA cuối. Không tự gọi Veo (khắc phục hạn chế của Affiliate Deep cũ).
+        /// </summary>
+        public async Task<AffiliateVideoPipelineResult> GenerateShowcaseVideoFromClipsAsync(
+            IList<AiVideoGenInputItem> orderedScenes,
+            string hookText,
+            string ctaText,
+            AppSettings settings,
+            string profileName,
+            Action<string> logAction,
+            CancellationToken cancellationToken,
+            Action<int, string> progressCallback = null,
+            string category = null,
+            string storageRoot = null,
+            ShowcasePerVideoRenderSettings renderSettings = null,
+            AssSubtitleGeneratorOptions subtitleOptions = null)
+        {
+            if (orderedScenes == null || !ShowcaseWorkflowConstants.HasEnoughScenes(orderedScenes.Count))
+            {
+                throw new InvalidOperationException("Showcase render cần ít nhất 1 cảnh (ảnh + clip) cùng sản phẩm.");
+            }
+
+            var missingClips = orderedScenes
+                .Select((s, i) => new { Order = i + 1, Path = s?.ClipPath })
+                .Where(x => string.IsNullOrWhiteSpace(x.Path) || !File.Exists(x.Path))
+                .Select(x => x.Order)
+                .ToList();
+            if (missingClips.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Thiếu clip Veo cho cảnh: " + string.Join(", ", missingClips) +
+                    ". Hãy tạo clip (đúng tên scene_XX) và bỏ vào thư mục veo_clips trước khi Render.");
+            }
+
+            if (string.IsNullOrWhiteSpace(settings?.AiApiKey))
+            {
+                throw new InvalidOperationException("Cần AI API Key để tạo giọng đọc (voice-over).");
+            }
+
+            var resolvedProfile = ProfileScopedPaths.ResolveProfileName(profileName);
+            ProfileScopedPaths.SetConfiguredStorageRoot(storageRoot);
+            ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(storageRoot, resolvedProfile);
+            var cat = string.IsNullOrWhiteSpace(category) ? "Showcase" : category.Trim();
+
+            var sessionBase = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(orderedScenes);
+            if (string.IsNullOrWhiteSpace(sessionBase))
+            {
+                sessionBase = ProfileScopedPaths.CreateGeneratedSessionFolder(resolvedProfile, cat);
+                logAction?.Invoke("[Showcase] Phiên render mới: " + sessionBase);
+            }
+            else
+            {
+                logAction?.Invoke("[Showcase] Render trong phiên làm việc: " + sessionBase);
+            }
+
+            var audioDir = ShowcaseNarrationCacheHelper.GetAudioDirectory(sessionBase);
+            var outputDir = ShowcaseNarrationCacheHelper.GetOutputDirectory(sessionBase);
+            Directory.CreateDirectory(audioDir);
+            Directory.CreateDirectory(outputDir);
+
+            var previousOutput = orderedScenes
+                .Select(s => (s?.OutputVideoPath ?? string.Empty).Trim())
+                .FirstOrDefault(p => !string.IsNullOrEmpty(p));
+            ShowcaseSessionCleanupHelper.PrepareForFreshRender(sessionBase, previousOutput, logAction);
+
+            progressCallback?.Invoke(5, "Tạo giọng đọc");
+            var narrationBuild = await EnsureShowcaseNarrationAsync(
+                orderedScenes,
+                hookText,
+                ctaText,
+                settings,
+                sessionBase,
+                logAction,
+                cancellationToken,
+                ShowcasePerVideoRenderSettings.ToTtsOptions(renderSettings, settings)).ConfigureAwait(false);
+            var narrationFile = narrationBuild.NarrationFilePath;
+            var narrationText = ShowcaseNarrationCacheHelper.BuildNarrationScript(orderedScenes);
+
+            progressCallback?.Invoke(30, "Ghép clip");
+            var veoClipPaths = orderedScenes.Select(s => s.ClipPath).ToList();
+
+            var finalOutput = Path.Combine(outputDir, $"showcase_{DateTime.Now:HHmmss}.mp4");
+            progressCallback?.Invoke(50, "Render");
+            var transitionSeconds = renderSettings?.TransitionSeconds > 0
+                ? ShowcaseTransitionHelper.ClampSeconds(renderSettings.TransitionSeconds)
+                : ResolveTransitionDuration(settings);
+            await RenderVeoVerticalVideoAsync(
+                veoClipPaths,
+                finalOutput,
+                narrationFile,
+                narrationText,
+                settings,
+                logAction,
+                cancellationToken,
+                string.Empty,
+                transitionSeconds,
+                renderSettings,
+                subtitleOptions,
+                orderedScenes,
+                ctaText).ConfigureAwait(false);
+
+            progressCallback?.Invoke(90, "CTA & hoàn tất");
+            var polished = await _affiliatePostProcessing.ApplyCtaTailWithTextOverlayAsync(
+                finalOutput,
+                ctaText,
+                settings,
+                sessionBase,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
+
+            progressCallback?.Invoke(100, "Xong");
+            logAction?.Invoke("Showcase: lưu tại Processed/" + resolvedProfile + "/" + cat + "/ → " + polished);
+
+            return new AffiliateVideoPipelineResult
+            {
+                FinalVideoPath = polished,
+                SceneVideos = orderedScenes.Select((s, i) => new AffiliateSceneAsset
+                {
+                    Index = i + 1,
+                    ProductName = s?.ProductName ?? string.Empty,
+                    SourceImagePath = s?.ThumbnailPath ?? string.Empty,
+                    MotionPrompt = s?.VeoPrompt ?? string.Empty,
+                    SceneVideoPath = s?.ClipPath ?? string.Empty
+                }).ToList()
+            };
+        }
+
+        private static string BuildShowcaseNarrationScript(string hookText, IList<AiVideoGenInputItem> scenes, string ctaText)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(hookText))
+            {
+                parts.Add(hookText.Trim());
+            }
+
+            foreach (var scene in scenes ?? Enumerable.Empty<AiVideoGenInputItem>())
+            {
+                if (!string.IsNullOrWhiteSpace(scene?.SceneVoiceover))
+                {
+                    parts.Add(scene.SceneVoiceover.Trim());
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(ctaText))
+            {
+                parts.Add(ctaText.Trim());
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        /// <summary>Tạo hoặc dùng lại narration.mp3 timeline từng cảnh — dùng cho preview audio và render.</summary>
+        public async Task<ShowcaseNarrationBuildResult> EnsureShowcaseNarrationAsync(
+            IList<AiVideoGenInputItem> orderedScenes,
+            string hookText,
+            string ctaText,
+            AppSettings settings,
+            string sessionBase,
+            Action<string> logAction,
+            CancellationToken cancellationToken,
+            ShowcaseTtsRenderOptions ttsOptions = null)
+        {
+            if (orderedScenes == null || orderedScenes.Count == 0)
+            {
+                throw new InvalidOperationException("Showcase cần danh sách cảnh để tạo audio.");
+            }
+
+            var audioDir = ShowcaseNarrationCacheHelper.GetAudioDirectory(sessionBase);
+            Directory.CreateDirectory(audioDir);
+            var narrationFile = Path.Combine(audioDir, ShowcaseNarrationCacheHelper.NarrationFileName);
+
+            var narrationFingerprint = ShowcaseNarrationCacheHelper.ComputeFingerprint(
+                orderedScenes,
+                settings,
+                ttsOptions);
+
+            var reused = ShowcaseNarrationCacheHelper.TryReuseCachedNarration(audioDir, narrationFingerprint, out narrationFile);
+            if (reused)
+            {
+                logAction?.Invoke("[TTS] Showcase: dùng lại narration.mp3 (kịch bản + giọng không đổi).");
+            }
+            else
+            {
+                if (ttsOptions == null)
+                {
+                    throw new InvalidOperationException(
+                        "Chưa có narration.mp3 hoặc kịch bản/giọng đổi — mở «Âm thanh», chọn giọng rồi bấm «🎙 Tạo audio».");
+                }
+
+                TtsAvailabilityHelper.ValidateEngine(settings, ttsOptions.Engine);
+                await GenerateShowcaseNarrationWithTtsStrictAsync(
+                    orderedScenes,
+                    settings,
+                    narrationFile,
+                    logAction,
+                    cancellationToken,
+                    audioDir,
+                    ttsOptions).ConfigureAwait(false);
+                ShowcaseNarrationCacheHelper.SaveFingerprint(audioDir, narrationFingerprint);
+            }
+
+            FfmpegToolkitService.TryResolve(settings, out var resolvedToolkit, out _);
+            var probe = resolvedToolkit?.FfprobeExe ?? FfmpegToolkitService.GetBundledFfprobePath();
+            var duration = await ShowcaseMediaProbeHelper.ProbeDurationSecondsAsync(probe, narrationFile, cancellationToken)
+                .ConfigureAwait(false);
+
+            return new ShowcaseNarrationBuildResult
+            {
+                NarrationFilePath = narrationFile,
+                AudioDirectory = audioDir,
+                ReusedFromCache = reused,
+                DurationSeconds = duration,
+                HookBrollPath = string.Empty
+            };
+        }
+
+        private async Task GenerateShowcaseNarrationWithTtsStrictAsync(
+            IList<AiVideoGenInputItem> orderedScenes,
+            AppSettings settings,
+            string outputAudioFile,
+            Action<string> logAction,
+            CancellationToken cancellationToken,
+            string workDirectory,
+            ShowcaseTtsRenderOptions showcaseTts)
+        {
+            logAction?.Invoke("[TTS] Showcase: dựng audio hook riêng + thân/CTA đọc liền…");
+            await _affiliateNarrationService.GenerateShowcaseTimelineNarrationAsync(
+                string.Empty,
+                orderedScenes,
+                string.Empty,
+                0d,
+                settings,
+                outputAudioFile,
+                workDirectory ?? Path.GetDirectoryName(outputAudioFile) ?? ".",
+                logAction,
+                cancellationToken,
+                showcaseTts).ConfigureAwait(false);
         }
 
         public async Task<MascotChannelVideoPipelineResult> GenerateMascotChannelVideoAsync(
@@ -1823,57 +2064,46 @@ namespace tiktok_Omni.Services
                 catch (Exception ex)
                 {
                     lastError = ex;
-                    logAction?.Invoke("AI Video Gen: TTS API failed, fallback to Google TTS. Reason: " + ex.Message);
+                    logAction?.Invoke("AI Video Gen: TTS API failed, fallback to Edge TTS. Reason: " + ex.Message);
                 }
             }
 
-            await GenerateGoogleTtsAudioAsync(script, baseDir, outputAudioFile, logAction, cancellationToken).ConfigureAwait(false);
+            await GenerateEdgeTtsAudioAsync(script, settings, baseDir, outputAudioFile, logAction, cancellationToken).ConfigureAwait(false);
             if (!File.Exists(outputAudioFile))
             {
                 throw new InvalidOperationException("Could not generate narration audio.", lastError);
             }
         }
 
-        private async Task GenerateGoogleTtsAudioAsync(
+        private async Task GenerateEdgeTtsAudioAsync(
             string script,
+            AppSettings settings,
             string baseDir,
             string outputAudioFile,
             Action<string> logAction,
             CancellationToken cancellationToken)
         {
-            var segmentDir = Path.Combine(baseDir, "tts_segments");
-            Directory.CreateDirectory(segmentDir);
-            var chunks = SplitText(script, 180);
-            var mp3Segments = new List<string>();
-
-            for (var i = 0; i < chunks.Count; i++)
+            logAction?.Invoke("AI Video Gen: Edge TTS (vi-VN)…");
+            var edge = new EdgeTtsService();
+            var synthesis = ShowcaseEdgeTtsVoiceResolver.ResolveFemaleSouthYoung();
+            var temp = await edge.SynthesizeLongTextToTempMp3Async(
+                script,
+                synthesis,
+                settings,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
+            var targetDir = Path.GetDirectoryName(outputAudioFile);
+            if (!string.IsNullOrWhiteSpace(targetDir))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var chunk = chunks[i];
-                var ttsUrl =
-                    "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=" +
-                    HttpUtility.UrlEncode(chunk);
-                var segmentPath = Path.Combine(segmentDir, $"seg_{i + 1:D3}.mp3");
-                await DownloadFileAsync(ttsUrl, segmentPath, cancellationToken).ConfigureAwait(false);
-                mp3Segments.Add(segmentPath);
+                Directory.CreateDirectory(targetDir);
             }
 
-            if (mp3Segments.Count == 0)
+            if (File.Exists(outputAudioFile))
             {
-                throw new InvalidOperationException("Google TTS fallback returned no audio segments.");
+                File.Delete(outputAudioFile);
             }
 
-            var listPath = Path.Combine(segmentDir, "segments.txt");
-            var sb = new StringBuilder();
-            foreach (var seg in mp3Segments)
-            {
-                sb.AppendLine("file '" + seg.Replace("'", "'\\''") + "'");
-            }
-            File.WriteAllText(listPath, sb.ToString(), TextFileEncoding.Utf8NoBom);
-
-            logAction?.Invoke("AI Video Gen: stitching Google TTS segments...");
-            var args = $"-y -f concat -safe 0 -i \"{listPath}\" -c:a libmp3lame -q:a 2 \"{outputAudioFile}\"";
-            await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+            File.Copy(temp, outputAudioFile, true);
         }
 
         private static List<string> SplitText(string text, int maxChunk)
@@ -1908,20 +2138,16 @@ namespace tiktok_Omni.Services
 
         private static string ResolveBackgroundMusicFile()
         {
-            var candidates = new[]
+            OmniAudioLibrary.EnsureSharedDirectoriesExist();
+            var dir = OmniAudioLibrary.GetSharedMusicDirectory();
+            if (!Directory.Exists(dir))
             {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "music"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "background_music")
-            };
+                return string.Empty;
+            }
 
-            foreach (var dir in candidates)
+            foreach (var pattern in new[] { "*.mp3", "*.wav", "*.m4a" })
             {
-                if (!Directory.Exists(dir))
-                {
-                    continue;
-                }
-
-                var files = Directory.GetFiles(dir, "*.mp3");
+                var files = Directory.GetFiles(dir, pattern, SearchOption.TopDirectoryOnly);
                 if (files.Length > 0)
                 {
                     return files[0];
@@ -2006,9 +2232,9 @@ namespace tiktok_Omni.Services
             return value;
         }
 
-        private static double ResolveMusicVolume(AppSettings settings)
+        private static double ResolveMusicVolume(AppSettings settings, ShowcasePerVideoRenderSettings renderSettings = null)
         {
-            var percent = settings?.VideoMusicVolume ?? 14;
+            var percent = renderSettings?.MusicVolume ?? settings?.VideoMusicVolume ?? 14;
             if (percent < 0) percent = 0;
             if (percent > 100) percent = 100;
             return percent / 100d;
@@ -2270,7 +2496,13 @@ namespace tiktok_Omni.Services
             string narrationScript,
             AppSettings settings,
             Action<string> logAction,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string customHookText = null,
+            double? transitionDurationOverride = null,
+            ShowcasePerVideoRenderSettings renderSettings = null,
+            AssSubtitleGeneratorOptions subtitleOptions = null,
+            IList<AiVideoGenInputItem> showcaseOrderedScenes = null,
+            string showcaseCtaText = null)
         {
             if (clipFiles == null || clipFiles.Count == 0)
             {
@@ -2280,28 +2512,86 @@ namespace tiktok_Omni.Services
             var renderDir = Path.Combine(Path.GetDirectoryName(outputFile) ?? AppDomain.CurrentDomain.BaseDirectory, "render_work");
             Directory.CreateDirectory(renderDir);
             var normalizedClips = new List<string>();
-            var hookText = ResolveOpeningHookText();
+            var hookText = customHookText != null
+                ? (customHookText ?? string.Empty).Trim()
+                : ResolveOpeningHookText();
+            var outputCanvas = ShowcaseOutputAspectPresets.Resolve(
+                renderSettings?.OutputAspectId,
+                settings?.ShowcaseOutputAspectDefault);
+            logAction?.Invoke("[Showcase] Khung video: " + outputCanvas.DisplayLabel + " ("
+                + outputCanvas.Width + "×" + outputCanvas.Height + ").");
             for (var i = 0; i < clipFiles.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var normalized = Path.Combine(renderDir, $"normalized_{i + 1:D2}.mp4");
                 var sourceDuration = await GetVideoDurationSecondsAsync(clipFiles[i], logAction, cancellationToken).ConfigureAwait(false);
-                var kenBurnsVf = BuildKenBurnsFilter(sourceDuration, i, hookText);
+                var kenBurnsVf = BuildKenBurnsFilter(sourceDuration, i, hookText, outputCanvas);
                 var args = $"-y -i \"{clipFiles[i]}\" -vf \"{kenBurnsVf}\" -r 30 -c:v libx264 -preset slow -crf 14 -b:v 18M -maxrate 24M -bufsize 48M -pix_fmt yuv420p -c:a aac -b:a 320k -ar 48000 \"{normalized}\"";
                 await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
                 normalizedClips.Add(normalized);
             }
 
             var stitched = Path.Combine(renderDir, "stitched.mp4");
+            var transitionDuration = transitionDurationOverride ?? ResolveTransitionDuration(settings);
             await BuildSmoothTransitionVideoVariableAsync(
                 normalizedClips,
                 stitched,
-                0.45d,
+                transitionDuration,
                 logAction,
                 cancellationToken).ConfigureAwait(false);
 
-            var stitchedDuration = await GetVideoDurationSecondsAsync(stitched, logAction, cancellationToken).ConfigureAwait(false);
-            var trendMusic = ResolveBackgroundMusicFile(settings, logAction);
+            var ffmpegExe = ResolveFfmpegExecutablePath();
+            FfmpegToolkitService.TryResolve(settings, out var renderToolkit, out _);
+            var ffprobeExe = renderToolkit?.FfprobeExe ?? FfmpegToolkitService.GetBundledFfprobePath();
+            var narrationSpeedPercent = renderSettings?.NarrationSpeedPercent ?? 0;
+            var avSync = await ShowcaseNarrationAvSyncHelper.ApplyAtRenderAsync(
+                    ffmpegExe,
+                    ffprobeExe,
+                    stitched,
+                    narrationTrackPath,
+                    renderDir,
+                    narrationSpeedPercent,
+                    logAction,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            stitched = avSync.VideoPath;
+            var narrationForRender = avSync.NarrationPath;
+            var stitchedDuration = avSync.TargetDurationSeconds > 0.01d
+                ? avSync.TargetDurationSeconds
+                : await GetVideoDurationSecondsAsync(stitched, logAction, cancellationToken).ConfigureAwait(false);
+            var transitionDurationForSfx = transitionDurationOverride ?? ResolveTransitionDuration(settings);
+            narrationForRender = await ShowcaseSfxMixHelper.MixIntoNarrationIfNeededAsync(
+                    ffmpegExe,
+                    ffprobeExe,
+                    narrationForRender,
+                    showcaseOrderedScenes,
+                    clipFiles,
+                    new ShowcaseSfxMixHelper.HookSfxOptions
+                    {
+                        Enabled = renderSettings?.HookSfxEnabled ?? false,
+                        FileName = renderSettings?.HookSfxFile ?? string.Empty,
+                        OffsetSeconds = renderSettings?.HookSfxOffsetSeconds ?? 0d,
+                        VolumePercent = renderSettings?.HookSfxVolumePercent > 0
+                            ? renderSettings.HookSfxVolumePercent
+                            : ShowcaseSfxCatalog.DefaultVolumePercent
+                    },
+                    new ShowcaseSfxMixHelper.CtaSfxOptions
+                    {
+                        Enabled = renderSettings?.CtaSfxEnabled ?? false,
+                        FileName = renderSettings?.CtaSfxFile ?? string.Empty,
+                        OffsetSeconds = renderSettings?.CtaSfxOffsetSeconds ?? 0d,
+                        VolumePercent = renderSettings?.CtaSfxVolumePercent > 0
+                            ? renderSettings.CtaSfxVolumePercent
+                            : ShowcaseSfxCatalog.DefaultVolumePercent
+                    },
+                    renderSettings?.SfxMasterEnabled ?? true,
+                    transitionDurationForSfx,
+                    stitchedDuration,
+                    settings,
+                    renderDir,
+                    logAction,
+                    cancellationToken).ConfigureAwait(false);
+            var trendMusic = ResolveBackgroundMusicFile(settings, renderSettings, logAction);
             var preparedTrendMusic = await PrepareBackgroundMusicForRenderAsync(
                 trendMusic,
                 stitchedDuration,
@@ -2311,25 +2601,46 @@ namespace tiktok_Omni.Services
                 cancellationToken).ConfigureAwait(false);
             var hasAmbientAudio = await HasAudioStreamAsync(stitched, logAction, cancellationToken).ConfigureAwait(false);
             var fingerprintVariant = BuildRenderFingerprintVariant();
+            var showcaseTiming = ShowcaseNarrationTimingManifest.TryLoadFromNarrationPath(narrationTrackPath);
+            var karaokeScript = showcaseTiming != null
+                ? ShowcaseKaraokeTimingHelper.ResolveDisplayScript(showcaseTiming, narrationScript)
+                : narrationScript;
             KaraokeAssSubtitleService.KaraokeAssBurnInResult karaokeBurnIn = null;
             try
             {
-                var ffmpegExe = ResolveFfmpegExecutablePath();
-                karaokeBurnIn = await KaraokeAssSubtitleService.TryCreateBurnInAsync(
-                    ffmpegExe,
-                    narrationScript,
-                    narrationTrackPath,
-                    renderDir,
-                    logAction,
-                    cancellationToken,
-                    settings?.AiApiKey).ConfigureAwait(false);
+                var subtitlePlan = renderSettings != null
+                    ? ShowcaseSubtitleStyleHelper.BuildRenderPlan(renderSettings, settings)
+                    : null;
+                if (subtitlePlan != null && subtitlePlan.HasAnyEnabled)
+                {
+                    karaokeBurnIn = await KaraokeAssSubtitleService.TryCreateShowcaseBurnInAsync(
+                        ffmpegExe,
+                        karaokeScript,
+                        narrationForRender,
+                        renderDir,
+                        logAction,
+                        cancellationToken,
+                        settings?.AiApiKey,
+                        subtitlePlan,
+                        showcaseTiming,
+                        renderSettings?.SubtitleDisplay,
+                        showcaseOrderedScenes,
+                        showcaseCtaText,
+                        renderSettings,
+                        settings).ConfigureAwait(false);
+                }
+                else
+                {
+                    logAction?.Invoke("[Showcase] Phụ đề tắt — không chèn chữ lên video.");
+                }
+
                 var captionVideoFilter = karaokeBurnIn?.VideoFilterFragment ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(preparedTrendMusic))
                 {
                     var noMusicArgs = BuildMetadataRenderArgs(
                         stitched,
                         outputFile,
-                        narrationTrackPath,
+                        narrationForRender,
                         null,
                         null,
                         hasAmbientAudio,
@@ -2339,11 +2650,11 @@ namespace tiktok_Omni.Services
                     return;
                 }
 
-                var musicVolume = (_random.Next(10, 16) / 100d).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                var musicVolume = ResolveMusicVolume(settings, renderSettings).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
                 var withMusicArgs = BuildMetadataRenderArgs(
                     stitched,
                     outputFile,
-                    narrationTrackPath,
+                    narrationForRender,
                     preparedTrendMusic,
                     musicVolume,
                     hasAmbientAudio,
@@ -2422,34 +2733,48 @@ namespace tiktok_Omni.Services
             };
         }
 
-        private string ResolveBackgroundMusicFile(AppSettings settings, Action<string> logAction)
+        private string ResolveBackgroundMusicFile(
+            AppSettings settings,
+            ShowcasePerVideoRenderSettings renderSettings,
+            Action<string> logAction)
         {
-            var dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "assets", "music");
-            if (!Directory.Exists(dir))
+            var selectedName = (renderSettings?.BackgroundMusicFile ?? settings?.VideoBackgroundMusicFileName ?? string.Empty).Trim();
+            if (VideoReupRowItem.IsNoMusicSelection(selectedName))
             {
+                logAction?.Invoke("Showcase: không trộn nhạc nền.");
                 return string.Empty;
             }
 
-            var files = Directory.GetFiles(dir, "*.mp3");
-            if (files.Length == 0)
-            {
-                return string.Empty;
-            }
-
-            var selectedName = (settings?.VideoBackgroundMusicFileName ?? string.Empty).Trim();
             if (!string.IsNullOrWhiteSpace(selectedName))
             {
-                var exact = files.FirstOrDefault(x => string.Equals(Path.GetFileName(x), selectedName, StringComparison.OrdinalIgnoreCase));
+                var exact = VideoReupRemixService.ResolveMusicFilePath(selectedName, settings);
                 if (!string.IsNullOrWhiteSpace(exact))
                 {
-                    logAction?.Invoke("AI Video Gen: selected background music -> " + Path.GetFileName(exact));
+                    logAction?.Invoke("Showcase: nhạc nền -> " + Path.GetFileName(exact));
                     return exact;
                 }
             }
 
-            var picked = files[_random.Next(files.Length)];
-            logAction?.Invoke("AI Video Gen: random background music -> " + Path.GetFileName(picked));
-            return picked;
+            var allNames = VideoReupRemixService.ListMusicFileNames(settings);
+            if (allNames.Count > 0)
+            {
+                var pickName = allNames[_random.Next(allNames.Count)];
+                var picked = VideoReupRemixService.ResolveMusicFilePath(pickName, settings);
+                if (!string.IsNullOrWhiteSpace(picked))
+                {
+                    logAction?.Invoke("Showcase: nhạc nền ngẫu nhiên -> " + Path.GetFileName(picked));
+                    return picked;
+                }
+            }
+
+            logAction?.Invoke("Showcase: không tìm thấy nhạc trong Assets\\Audio\\Music.");
+            return string.Empty;
+        }
+
+
+        private string ResolveBackgroundMusicFile(AppSettings settings, Action<string> logAction)
+        {
+            return ResolveBackgroundMusicFile(settings, null, logAction);
         }
 
         private async Task<string> PrepareBackgroundMusicForRenderAsync(
@@ -2550,33 +2875,49 @@ namespace tiktok_Omni.Services
             return rounded;
         }
 
-        private static string BuildKenBurnsFilter(double clipDurationSeconds, int clipIndex, string openingHookText)
+        private static string BuildKenBurnsFilter(
+            double clipDurationSeconds,
+            int clipIndex,
+            string openingHookText,
+            ShowcaseOutputAspectPreset canvas = null)
         {
+            canvas = canvas ?? ShowcaseOutputAspectPresets.Vertical9x16;
+            var w = canvas.Width;
+            var h = canvas.Height;
+            var wText = w.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+            var hText = h.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+
             var safeDuration = Math.Max(2.0d, clipDurationSeconds);
             var durationText = safeDuration.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            var delta = 0.05d + ((clipIndex % 3) * 0.02d); // 5%, 7%, 9%
+            var delta = 0.05d + ((clipIndex % 3) * 0.02d);
             var deltaText = delta.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
             var zoomIn = clipIndex % 2 == 0;
             var scaleExpr = zoomIn
-                ? $"1080*(1+{deltaText}*min(1\\,max(0\\,t/{durationText})))"
-                : $"1080*(1+{deltaText}*(1-min(1\\,max(0\\,t/{durationText}))))";
+                ? $"{wText}*(1+{deltaText}*min(1\\,max(0\\,t/{durationText})))"
+                : $"{wText}*(1+{deltaText}*(1-min(1\\,max(0\\,t/{durationText}))))";
+            var scaleExprY = zoomIn
+                ? $"{hText}*(1+{deltaText}*min(1\\,max(0\\,t/{durationText})))"
+                : $"{hText}*(1+{deltaText}*(1-min(1\\,max(0\\,t/{durationText}))))";
             var panX = $"(in_w-out_w)/2 + ((in_w-out_w)/8)*sin(2*PI*t/{durationText})";
             var panY = $"(in_h-out_h)/2 + ((in_h-out_h)/10)*cos(2*PI*t/{durationText})";
-            var baseFilter = "scale=1080:1920:force_original_aspect_ratio=increase," +
-                   $"scale='{scaleExpr}':'{scaleExpr.Replace("1080", "1920")}':eval=frame," +
-                   $"crop=1080:1920:x='{panX}':y='{panY}',setsar=1";
+            var baseFilter = ShowcaseOutputAspectPresets.FormatScaleIncrease(w, h) + "," +
+                   $"scale='{scaleExpr}':'{scaleExprY}':eval=frame," +
+                   $"crop={wText}:{hText}:x='{panX}':y='{panY}',setsar=1";
 
             if (clipIndex != 0)
             {
                 return baseFilter;
             }
 
-            var safeHook = EscapeDrawText(string.IsNullOrWhiteSpace(openingHookText)
-                ? "Bi mat ma shop khong muon ban biet..."
-                : openingHookText.Trim());
+            if (string.IsNullOrWhiteSpace(openingHookText))
+            {
+                return baseFilter + ",eq=saturation=1.10";
+            }
+
+            var safeHook = EscapeDrawText(openingHookText.Trim());
             return baseFilter +
                    ",eq=saturation=1.10" +
-                   ",drawbox=x=40:y=(h/2)-130:w=(w-80):h=260:color=black@0.35:t=fill:enable='between(t,0,3)'" +
+                   ",drawbox=x=40:y=(ih/2)-130:w=iw-80:h=260:color=black@0.35:t=fill:enable='between(t,0,3)'" +
                    ",drawtext=font='Segoe UI Bold':text='" + safeHook + "':x=(w-text_w)/2:y=(h-text_h)/2:fontsize=76:fontcolor=white:borderw=5:bordercolor=black:enable='between(t,0,3)'";
         }
 

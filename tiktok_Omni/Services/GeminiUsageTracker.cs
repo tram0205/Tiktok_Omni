@@ -120,6 +120,22 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>True nếu vừa gặp 429 trong vòng <paramref name="hours"/> giờ (UTC).</summary>
+        public bool WasRecentlyRateLimited(double hours)
+        {
+            if (hours <= 0)
+            {
+                hours = 2;
+            }
+
+            lock (_sync)
+            {
+                EnsureLoadedLocked();
+                var last = _disk.LastUtc;
+                return last.HasValue && (DateTime.UtcNow - last.Value).TotalHours < hours;
+            }
+        }
+
         public void LogPrewarnIfNeeded(Action<string> log, string modelHint)
         {
             if (log == null) return;

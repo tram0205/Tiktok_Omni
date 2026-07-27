@@ -9,6 +9,7 @@ using System.Windows.Forms;
 using Newtonsoft.Json;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni
 {
@@ -169,9 +170,18 @@ namespace tiktok_Omni
                 }
                 else if (job.Kind == OmniJobKind.AffiliateDeepRender)
                 {
-                    Log("[JobQueue] Affiliate Deep render thất bại: " + job.LastError);
-                    _activeAffiliateDeepRenderJobId = null;
-                    btnRunAffiliateDeepVideo.Enabled = true;
+                    LogShowcase("[JobQueue] Affiliate Deep render thất bại: " + job.LastError);
+                    if (!HasActiveShowcaseRenderJobs())
+                    {
+                        _activeAffiliateDeepRenderJobId = null;
+                    }
+
+                    TryGetAffiliateDeepRenderContext(job.Id, out _, out var video);
+                    var scenes = video != null
+                        ? GetShowcaseVideoScenes(video)
+                        : new List<AiVideoGenInputItem>();
+                    ApplyShowcaseRenderFailure(scenes, video);
+                    UpdateShowcaseRenderButtonState();
                     RecordProductionError(OneClickPipelineService.PipelineAffiliateDeep);
                     RecordApiFailureFromMessage(job.LastError);
                 }
@@ -209,18 +219,6 @@ namespace tiktok_Omni
             if (jobId != Guid.Empty)
             {
                 _videoReupBatchJobIds.Remove(jobId);
-            }
-
-            if (_videoReupBatchRunExpected > 0)
-            {
-                if (success)
-                {
-                    _videoReupBatchRunSuccess++;
-                }
-                else if (!string.IsNullOrWhiteSpace(error) && !string.Equals(error, "Đã hủy", StringComparison.OrdinalIgnoreCase))
-                {
-                    _videoReupBatchRunFail++;
-                }
             }
 
             var url = (videoUrl ?? string.Empty).Trim();
@@ -262,18 +260,6 @@ namespace tiktok_Omni
 
             if (_videoReupBatchJobIds.Count == 0 && pendingReup == 0)
             {
-                if (_videoReupBatchRunExpected > 0)
-                {
-                    var expected = _videoReupBatchRunExpected;
-                    var ok = _videoReupBatchRunSuccess;
-                    var fail = _videoReupBatchRunFail;
-                    _videoReupBatchRunExpected = 0;
-                    _videoReupBatchRunSuccess = 0;
-                    _videoReupBatchRunFail = 0;
-                    SetVideoReupProgress("Render lô: xong " + ok + "/" + expected, 100);
-                    ShowVideoReupBatchDoneMessage("Render lô (hàng đợi)", ok, fail, expected);
-                }
-
                 if (!_affiliateAutoEnrichRunning && _huntCancellation == null && !_affiliateDownloadingBatch)
                 {
                     btnStopHunt.Enabled = false;
@@ -295,6 +281,11 @@ namespace tiktok_Omni
         void IJobUiBridge.Log(string message)
         {
             Log(message);
+            if (IsShowcaseLogMessage(message))
+            {
+                AppendToShowcaseLogPanel(message);
+            }
+
             // Mirror job-level messages (from TikTokAutomation, SocialAutomation, etc.) to the
             // AutoPost tab log panel whenever a schedule-originated job is actively running.
             if (_scheduleJobMap.Count > 0 || _isAutoPostScheduleQueueRunning)
@@ -969,41 +960,149 @@ namespace tiktok_Omni
                 return;
             }
 
-            _activeAffiliateDeepRenderJobId = null;
-            btnRunAffiliateDeepVideo.Enabled = true;
-            btnProcessVideo.Enabled = true;
-            btnGenerateGeminiPrompt.Enabled = true;
-            btnReviewScriptBeforeRender.Enabled = true;
+            if (!HasActiveShowcaseRenderJobs())
+            {
+                _activeAffiliateDeepRenderJobId = null;
+            }
+
+            UpdateShowcaseRenderButtonState();
+            if (!HasActiveShowcaseRenderJobs())
+            {
+                btnProcessVideo.Enabled = true;
+                btnGenerateGeminiPrompt.Enabled = true;
+                btnReviewScriptBeforeRender.Enabled = true;
+            }
+
+            TryGetAffiliateDeepRenderContext(jobId, out var payload, out var video);
+            var scenes = video != null
+                ? GetShowcaseVideoScenes(video)
+                : payload?.Products ?? new List<AiVideoGenInputItem>();
 
             if (success && !string.IsNullOrWhiteSpace(outputPath) && File.Exists(outputPath))
             {
-                Log("[JobQueue] Affiliate Deep render xong → " + outputPath);
-                var deepItems = GetDeepDiveBuffer().Take(4).ToList();
-                MarkDeepDiveItemsProcessed(deepItems);
-                foreach (var item in deepItems)
+                LogShowcase("[JobQueue] Showcase render xong → " + outputPath);
+                MarkShowcaseRenderComplete(scenes, video, outputPath);
+
+                var script = BuildShowcaseApprovalScriptText(video, scenes);
+                if (string.IsNullOrWhiteSpace(script))
                 {
-                    if (item != null)
-                    {
-                        item.OutputVideoPath = outputPath;
-                        item.ThumbnailPath = ProductionPipeline.ResolveThumbnailPath(outputPath);
-                    }
+                    script = txtAiVideoGenPrompt?.Text?.Trim() ?? string.Empty;
                 }
 
-                var script = txtAiVideoGenPrompt?.Text?.Trim() ?? string.Empty;
-                var products = deepItems;
                 _ = AfterRenderOutputsApprovalAsync(
-                    products,
+                    scenes,
                     new List<string> { outputPath },
                     script,
                     ApprovalJobType.AffiliateDeep);
 
-                LoadProductionVideoPreview(outputPath, ProductionPipeline.ResolveThumbnailPath(outputPath),
-                    products.FirstOrDefault()?.ProductName);
+                var active = GetActiveShowcaseVideo();
+                if (video == null || active == null || active.VideoId == video.VideoId)
+                {
+                    LoadProductionVideoPreview(
+                        outputPath,
+                        ProductionPipeline.ResolveThumbnailPath(outputPath),
+                        video?.ProductName ?? scenes.FirstOrDefault()?.ProductName);
+                }
+
+                SyncBuffersToGrids();
+                NotifyShowcaseDraftDirty();
             }
-            else if (!success)
+            else
             {
-                Log("[JobQueue] Affiliate Deep render lỗi: " + error);
+                if (!success)
+                {
+                    LogShowcase("[JobQueue] Showcase render lỗi: " + error);
+                }
+
+                ApplyShowcaseRenderFailure(scenes, video);
             }
+        }
+
+        private bool TryGetAffiliateDeepRenderContext(
+            Guid jobId,
+            out AffiliateDeepRenderJobPayload payload,
+            out ShowcaseVideoItem video)
+        {
+            payload = null;
+            video = null;
+            if (jobId == Guid.Empty || _globalJobQueue == null || !_globalJobQueue.TryGet(jobId, out var job) || job == null)
+            {
+                return false;
+            }
+
+            payload = JsonConvert.DeserializeObject<AffiliateDeepRenderJobPayload>(job.PayloadJson ?? "{}")
+                      ?? new AffiliateDeepRenderJobPayload();
+            if (payload.ShowcaseVideoId != Guid.Empty)
+            {
+                video = FindShowcaseVideoById(payload.ShowcaseVideoId);
+            }
+
+            if (video == null && !string.IsNullOrWhiteSpace(payload.ProductName))
+            {
+                var name = payload.ProductName.Trim();
+                video = GetShowcaseVideoBuffer()
+                    .FirstOrDefault(v => string.Equals(v?.ProductName?.Trim(), name, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return true;
+        }
+
+        private void MarkShowcaseRenderComplete(
+            IList<AiVideoGenInputItem> scenes,
+            ShowcaseVideoItem video,
+            string outputPath)
+        {
+            var thumb = ProductionPipeline.ResolveThumbnailPath(outputPath);
+            if (scenes != null)
+            {
+                foreach (var scene in scenes)
+                {
+                    if (scene == null)
+                    {
+                        continue;
+                    }
+
+                    scene.IsProcessed = true;
+                    scene.PipelineStatus = "Xong";
+                    scene.OutputVideoPath = outputPath;
+                    scene.ThumbnailPath = thumb;
+                }
+            }
+
+            MarkBufferItemsProcessed(GetDeepDiveBuffer(), scenes, null, null);
+
+            if (video != null)
+            {
+                video.PipelineStatus = "Xong";
+                video.OutputVideoPath = outputPath;
+                video.RefreshDisplayFields();
+            }
+
+            SyncBuffersToGrids();
+        }
+
+        private void ApplyShowcaseRenderFailure(IList<AiVideoGenInputItem> scenes, ShowcaseVideoItem video)
+        {
+            if (scenes != null)
+            {
+                foreach (var scene in scenes)
+                {
+                    if (scene == null)
+                    {
+                        continue;
+                    }
+
+                    scene.PipelineStatus = "Lỗi";
+                }
+            }
+
+            if (video != null)
+            {
+                video.PipelineStatus = "Lỗi";
+                video.RefreshDisplayFields();
+            }
+
+            SyncBuffersToGrids();
         }
     }
 }

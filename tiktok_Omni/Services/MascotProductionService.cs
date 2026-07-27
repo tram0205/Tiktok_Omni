@@ -260,9 +260,8 @@ Trả lời duy nhất 1 chuỗi kịch bản lời thoại.";
                 return string.Empty;
             }
 
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var candidate = Path.Combine(baseDir, "Music", fileName);
-            return File.Exists(candidate) ? candidate : string.Empty;
+            var resolved = VideoReupRemixService.ResolveMusicFilePath(fileName, settings);
+            return string.IsNullOrWhiteSpace(resolved) ? string.Empty : resolved;
         }
 
         private static string ResolveFfmpegExecutable(AppSettings settings)

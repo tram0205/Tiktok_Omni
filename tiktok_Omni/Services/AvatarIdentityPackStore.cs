@@ -12,7 +12,7 @@ namespace tiktok_Omni.Services
 
         public static string GetVaultRoot()
         {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "AvatarVault");
+            return AppDataPaths.ResolveAvatarVaultRoot();
         }
 
         public static string GetProfileDirectory(string profileName)

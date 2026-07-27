@@ -53,7 +53,7 @@ namespace tiktok_Omni
                 Text = "Nh\u1eadt k\u00fd phi\u00ean",
                 AutoSize = false,
                 ForeColor = Color.FromArgb(180, 190, 210),
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                Font = AppCaptionFont,
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Margin = new Padding(0, 0, 8, 0)

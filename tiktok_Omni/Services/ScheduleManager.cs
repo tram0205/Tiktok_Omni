@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Windows.Forms;
 using Newtonsoft.Json;
 
 namespace tiktok_Omni.Services
@@ -150,8 +149,7 @@ namespace tiktok_Omni.Services
     }
 
     /// <summary>
-    /// Saves and loads the three platform schedule lists as a single JSON file
-    /// next to the application executable. Data survives rebuilds.
+    /// Lưu 3 lưới lịch đăng (TikTok / Facebook / YouTube) — vị trí bền, không mất khi rebuild bin.
     /// </summary>
     public sealed class ScheduleManager
     {
@@ -159,33 +157,45 @@ namespace tiktok_Omni.Services
 
         public ScheduleManager(string filePath = null)
         {
-            _filePath = filePath ?? DefaultFilePath;
+            _filePath = filePath ?? ResolveDefaultFilePath();
         }
 
-        public static string DefaultFilePath
+        public static string DefaultFilePath => ResolveDefaultFilePath();
+
+        private static string ResolveDefaultFilePath()
         {
-            get
-            {
-                try
-                {
-                    return Path.Combine(
-                        Path.GetDirectoryName(Application.ExecutablePath) ?? ".",
-                        "autopost_schedule.json");
-                }
-                catch
-                {
-                    return "autopost_schedule.json";
-                }
-            }
+            return AppDataPaths.PersistentFile("autopost_schedule.json");
+        }
+
+        private static string GetPersistentAppDataDirectory()
+        {
+            return AppDataPaths.EnsurePersistentRoot();
+        }
+
+        private static string ResolveReadableFilePath(out bool migrateFromLegacy)
+        {
+            migrateFromLegacy = false;
+            return AppDataPaths.ResolveReadableJsonPath("autopost_schedule.json", out migrateFromLegacy);
         }
 
         public ScheduleData Load()
         {
             try
             {
-                if (!File.Exists(_filePath)) return new ScheduleData();
-                var json = File.ReadAllText(_filePath);
-                return JsonConvert.DeserializeObject<ScheduleData>(json) ?? new ScheduleData();
+                var path = ResolveReadableFilePath(out var migrateFromLegacy);
+                if (!File.Exists(path))
+                {
+                    return new ScheduleData();
+                }
+
+                var json = File.ReadAllText(path, TextFileEncoding.Utf8);
+                var data = JsonConvert.DeserializeObject<ScheduleData>(json) ?? new ScheduleData();
+                if (migrateFromLegacy && HasAnyEntries(data))
+                {
+                    Save(data);
+                }
+
+                return data;
             }
             catch
             {
@@ -197,10 +207,27 @@ namespace tiktok_Omni.Services
         {
             try
             {
+                var target = _filePath ?? ResolveDefaultFilePath();
+                Directory.CreateDirectory(Path.GetDirectoryName(target) ?? GetPersistentAppDataDirectory());
                 var json = JsonConvert.SerializeObject(data ?? new ScheduleData(), Formatting.Indented);
-                File.WriteAllText(_filePath, json);
+                File.WriteAllText(target, json, TextFileEncoding.Utf8NoBom);
             }
-            catch { }
+            catch
+            {
+                // ignored
+            }
+        }
+
+        private static bool HasAnyEntries(ScheduleData data)
+        {
+            if (data == null)
+            {
+                return false;
+            }
+
+            return (data.TikTok?.Count ?? 0) > 0
+                || (data.Facebook?.Count ?? 0) > 0
+                || (data.YouTube?.Count ?? 0) > 0;
         }
     }
 }

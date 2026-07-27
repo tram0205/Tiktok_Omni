@@ -2,25 +2,29 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services
 {
     public class ConfigManager
     {
         private const string ConfigFileName = "appsettings.json";
+        private static readonly object ConfigIoLock = new object();
         private static readonly string[] StableUserAgentPool = new[]
         {
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.6312.122 Safari/537.36 Edg/123.0.2420.81"
+            // Chỉ Chrome/Edge trên Chromium — Firefox UA + Chrome thật khiến TikTok hủy session.
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
         };
 
         public async Task<AppSettings> LoadAsync()
         {
-            var path = GetConfigPath();
+            var path = AppDataPaths.ResolveReadableJsonPath(ConfigFileName, out var migrateFromLegacy);
             if (!File.Exists(path))
             {
                 var defaults = new AppSettings();
@@ -30,7 +34,13 @@ namespace tiktok_Omni.Services
 
             try
             {
-                var json = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
+                var json = await Task.Run(() =>
+                {
+                    lock (ConfigIoLock)
+                    {
+                        return File.ReadAllText(path, TextFileEncoding.Utf8);
+                    }
+                }).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(json))
                 {
                     return new AppSettings();
@@ -39,7 +49,13 @@ namespace tiktok_Omni.Services
                 var settings = JsonConvert.DeserializeObject<AppSettings>(json);
                 settings = settings ?? new AppSettings();
                 MigrateLegacyLyriaTtsSettings(settings, json);
-                return Normalize(DecryptSecretsInPlace(settings));
+                settings = Normalize(DecryptSecretsInPlace(settings));
+                if (migrateFromLegacy)
+                {
+                    await SaveAsync(settings).ConfigureAwait(false);
+                }
+
+                return settings;
             }
             catch (JsonException)
             {
@@ -138,7 +154,84 @@ namespace tiktok_Omni.Services
             var forDisk = CloneSettings(settings);
             EncryptSecretsForStorage(forDisk);
             var json = JsonConvert.SerializeObject(forDisk, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetConfigPath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
+            await Task.Run(() => WriteConfigAtomic(json)).ConfigureAwait(false);
+        }
+
+        /// <summary>Ghi appsettings.json an toàn: khóa IO + file tạm + retry khi bị process khác giữ file.</summary>
+        private static void WriteConfigAtomic(string json)
+        {
+            var path = GetConfigPath();
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            lock (ConfigIoLock)
+            {
+                const int maxAttempts = 6;
+                for (var attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    var tempPath = path + ".tmp";
+                    try
+                    {
+                        File.WriteAllText(tempPath, json, TextFileEncoding.Utf8NoBom);
+                        if (File.Exists(path))
+                        {
+                            var backupPath = path + ".bak";
+                            File.Replace(tempPath, path, backupPath, ignoreMetadataErrors: true);
+                        }
+                        else
+                        {
+                            File.Move(tempPath, path);
+                        }
+
+                        return;
+                    }
+                    catch (IOException) when (attempt < maxAttempts)
+                    {
+                        TryDeleteQuiet(tempPath);
+                        Thread.Sleep(50 * attempt);
+                    }
+                    catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+                    {
+                        TryDeleteQuiet(tempPath);
+                        Thread.Sleep(50 * attempt);
+                    }
+                }
+
+                // Lần cuối — ném lỗi gốc nếu vẫn fail.
+                var finalTemp = path + ".tmp";
+                File.WriteAllText(finalTemp, json, TextFileEncoding.Utf8NoBom);
+                if (File.Exists(path))
+                {
+                    File.Replace(finalTemp, path, path + ".bak", ignoreMetadataErrors: true);
+                }
+                else
+                {
+                    File.Move(finalTemp, path);
+                }
+            }
+        }
+
+        private static void TryDeleteQuiet(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                return;
+            }
+
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+            }
+            catch
+            {
+                // ignored
+            }
         }
 
         /// <summary>
@@ -319,11 +412,24 @@ namespace tiktok_Omni.Services
 
             var changed = false;
             var seed = BuildStableSeed(profile.Name);
-            if (string.IsNullOrWhiteSpace(profile.UserAgent))
+            var ua = profile.UserAgent ?? string.Empty;
+            var needsChromeUa = string.IsNullOrWhiteSpace(ua);
+            if (!needsChromeUa)
+            {
+                var looksFirefox = ua.IndexOf("Firefox", StringComparison.OrdinalIgnoreCase) >= 0;
+                var geckoWithoutChrome = ua.IndexOf("Gecko/", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                    ua.IndexOf("Chrome/", StringComparison.OrdinalIgnoreCase) < 0;
+                needsChromeUa = looksFirefox || geckoWithoutChrome;
+            }
+
+            if (needsChromeUa)
             {
                 profile.UserAgent = StableUserAgentPool[seed % StableUserAgentPool.Length];
                 changed = true;
-                logAction?.Invoke($"[LIVE] Assigned fixed User-Agent for profile '{profile.Name}'.");
+                logAction?.Invoke(
+                    string.IsNullOrWhiteSpace(ua)
+                        ? $"[LIVE] Assigned fixed User-Agent for profile '{profile.Name}'."
+                        : $"[LIVE] Replaced non-Chrome User-Agent for profile '{profile.Name}' (tránh TikTok bắt login lại).");
             }
 
             if (profile.ViewportWidth < 800 || profile.ViewportHeight < 600)
@@ -345,7 +451,7 @@ namespace tiktok_Omni.Services
 
         private static string GetConfigPath()
         {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ConfigFileName);
+            return AppDataPaths.PersistentFile(ConfigFileName);
         }
 
         /// <summary>Đường dẫn cũ trỏ OneDrive → thư mục cài exe hiện tại (sau khi chuyển sang C:\Dev).</summary>
@@ -459,6 +565,13 @@ namespace tiktok_Omni.Services
                 settings.TtsLanguageCode = ElevenLabsTtsHelper.DefaultLanguageCode;
             }
 
+            settings.ShowcaseLastTtsEngine = (settings.ShowcaseLastTtsEngine ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(settings.ShowcaseLastTtsEngine)
+                || string.Equals(settings.ShowcaseLastTtsEngine, "PiperOffline", StringComparison.OrdinalIgnoreCase))
+            {
+                settings.ShowcaseLastTtsEngine = TtsEngineKind.EdgeTts.ToString();
+            }
+
             settings.NotificationSmtpHost = (settings.NotificationSmtpHost ?? string.Empty).Trim();
             settings.NotificationSmtpUser = (settings.NotificationSmtpUser ?? string.Empty).Trim();
             settings.NotificationSmtpPassword = (settings.NotificationSmtpPassword ?? string.Empty).Trim();
@@ -513,6 +626,12 @@ namespace tiktok_Omni.Services
                 settings.VideoTransitionDurationSeconds = 0.6d;
             }
 
+            settings.ShowcaseOutputAspectDefault = ShowcaseOutputAspectPresets.NormalizeId(settings.ShowcaseOutputAspectDefault);
+            if (string.IsNullOrEmpty(settings.ShowcaseOutputAspectDefault))
+            {
+                settings.ShowcaseOutputAspectDefault = ShowcaseOutputAspectPresets.DefaultId;
+            }
+
             if (settings.VideoTextSize < 24 || settings.VideoTextSize > 96)
             {
                 settings.VideoTextSize = 50;
@@ -528,11 +647,8 @@ namespace tiktok_Omni.Services
                 settings.NotificationSmtpPort = 587;
             }
 
-            // default: auto resume paused queue
-            if (!settings.AutoResumeQueueOnStartup.HasValue)
-            {
-                settings.AutoResumeQueueOnStartup = true;
-            }
+            // Không có UI cho tuỳ chọn này — không bao giờ auto-run queue khi mở app.
+            settings.AutoResumeQueueOnStartup = false;
 
             if (!settings.AlwaysRequirePrePostApproval.HasValue)
             {
@@ -707,6 +823,9 @@ namespace tiktok_Omni.Services
         /// <summary>Mã ngôn ngữ ElevenLabs (ISO 639-1), ví dụ vi.</summary>
         public string TtsLanguageCode { get; set; } = "vi";
 
+        /// <summary>Lần cuối chọn engine TTS Showcase: EdgeTts | ElevenLabs.</summary>
+        public string ShowcaseLastTtsEngine { get; set; } = "EdgeTts";
+
         /// <summary>ElevenLabs voice_id cho mood melancholic / sad (tab Triết lý).</summary>
         public string VoiceId_Melancholic { get; set; } = string.Empty;
 
@@ -715,6 +834,12 @@ namespace tiktok_Omni.Services
 
         /// <summary>ElevenLabs voice_id cho mood calm / reflective và mặc định (tab Triết lý).</summary>
         public string VoiceId_Calm { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id riêng cho hook Video reup (nhấn mạnh). Fallback: VoiceId_Intense → Endpoint.</summary>
+        public string VoiceId_ReupHook { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id riêng cho thuyết minh Video reup. Fallback: VoiceId_Calm → Endpoint.</summary>
+        public string VoiceId_ReupNarration { get; set; } = string.Empty;
 
         public bool NotificationEnabled { get; set; } = false;
         public bool NotificationEmailEnabled { get; set; } = false;
@@ -736,8 +861,15 @@ namespace tiktok_Omni.Services
         /// <summary>Số job chạy song song tối đa (render / hunt / đăng bài).</summary>
         public int MaxConcurrentJobs { get; set; } = 2;
 
-        /// <summary>Thư mục chứa .mp3 cho tab Video reup (Affiliate). Để trống = [exe]\VideoReup\Music.</summary>
+        /// <summary>Thư mục chứa nhạc nền (.mp3/.wav/.m4a) cho Video reup &amp; Showcase. Để trống = [exe]\Music.</summary>
         public string VideoReupMusicLibraryPath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Thư mục gốc chứa video stock hook intro (mỗi style là một thư mục con).
+        /// Để trống = [exe]\VideoReup\HookClips.
+        /// Cấu trúc: {HookStockClipsRoot}\noi_dau\*.mp4, boc_phot\*.mp4, …
+        /// </summary>
+        public string HookStockClipsRoot { get; set; } = string.Empty;
 
         /// <summary>File âm thanh Hook SFX 3s (Reup) — mp3/wav trong VideoReup\Hooks.</summary>
         public string ReupVisualHookSfxPath { get; set; } = string.Empty;
@@ -763,11 +895,20 @@ namespace tiktok_Omni.Services
 
         public bool ReupSubtitleItalic { get; set; }
 
+        /// <summary>Preset màu mặc định cho dòng reup mới (default | natural | vivid | …).</summary>
+        public string ReupColorPreset { get; set; } = "default";
+
         /// <summary>Số từ mỗi dòng karaoke hook.</summary>
         public int ReupSubtitleWordsPerLine { get; set; } = 6;
 
         /// <summary>Knowledge | Review | Storytelling — mẫu prompt Gemini khi render.</summary>
         public string GeminiStyleTemplate { get; set; } = "Storytelling";
+
+        /// <summary>Tab chính lần mở cuối (AiVideoGen, AffiliateHunter, …) — khôi phục khi mở app.</summary>
+        public string LastMainTabKey { get; set; } = string.Empty;
+
+        /// <summary>Chế độ con tab «AI tạo video» lần cuối (Slideshow, AffiliateDeep, …).</summary>
+        public string LastAiVideoGenMode { get; set; } = string.Empty;
 
         /// <summary>Ngày (yyyy-MM-dd) đã cào báo cáo Affiliate gần nhất — tránh cào trùng trong ngày.</summary>
         public string LastAffiliateRevenueFetchDate { get; set; } = string.Empty;
@@ -779,11 +920,15 @@ namespace tiktok_Omni.Services
         /// <summary>Total watch seconds (all videos combined) per warm-up session — maximum.</summary>
         public int WatchSecondsMax { get; set; } = 18;
         public double VideoTransitionDurationSeconds { get; set; } = 0.6d;
+
+        /// <summary>9x16 | 16x9 | 1x1 — mặc định khung video Showcase khi dòng video chưa chọn.</summary>
+        public string ShowcaseOutputAspectDefault { get; set; } = ShowcaseOutputAspectPresets.DefaultId;
+
         public int VideoTextSize { get; set; } = 50;
         public int VideoMusicVolume { get; set; } = 14;
         public string VideoBackgroundMusicFileName { get; set; } = string.Empty;
         public bool VideoMusicRandomizeStartTime { get; set; } = true;
-        public bool? AutoResumeQueueOnStartup { get; set; } = true;
+        public bool? AutoResumeQueueOnStartup { get; set; } = false;
         public bool? AlwaysRequirePrePostApproval { get; set; } = true;
         public bool? AlwaysRequirePreRenderApproval { get; set; } = false;
         public int BlockPostingSafetyScoreBelow { get; set; } = 75;

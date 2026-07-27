@@ -221,10 +221,11 @@ namespace tiktok_Omni
             }
 
             combo.Width = 120;
-            combo.Height = 28;
+            combo.Height = AppDefaultInputHeight;
             combo.Margin = new Padding(4, 4, 4, 4);
             combo.BackColor = Color.FromArgb(45, 49, 60);
             combo.ForeColor = Color.WhiteSmoke;
+            ApplyAppInputChrome(combo);
         }
 
         private static void StyleApprovalFilterTextBox(TextBox textBox)
@@ -235,11 +236,12 @@ namespace tiktok_Omni
             }
 
             textBox.Width = 150;
-            textBox.Height = 28;
+            textBox.Height = AppDefaultInputHeight;
             textBox.Margin = new Padding(4, 4, 4, 4);
             textBox.BorderStyle = BorderStyle.FixedSingle;
             textBox.BackColor = Color.FromArgb(45, 49, 60);
             textBox.ForeColor = Color.WhiteSmoke;
+            ApplyAppInputChrome(textBox);
         }
 
         private static void StyleApprovalDatePicker(DateTimePicker picker)

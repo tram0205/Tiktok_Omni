@@ -8,14 +8,12 @@ namespace tiktok_Omni
     internal sealed class VideoReupTextEditorForm : Form
     {
         private readonly TextBox _txt;
-        private readonly string _hint;
 
         public string EditedText => (_txt.Text ?? string.Empty).Trim();
 
         public VideoReupTextEditorForm(string title, string initialText, string hint, int minHeight = 220)
         {
             Text = title ?? "Sửa nội dung";
-            _hint = hint ?? string.Empty;
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = false;
@@ -24,16 +22,38 @@ namespace tiktok_Omni
             BackColor = Color.FromArgb(31, 34, 42);
             ForeColor = Color.Gainsboro;
             Font = new Font("Segoe UI", 10F);
-            MinimumSize = new Size(480, minHeight);
-            ClientSize = new Size(560, minHeight);
+
+            const int footerHeight = 56;
+            const int hintHeight = 40;
+            const int padding = 12;
+            var textAreaHeight = Math.Max(minHeight, 180);
+            var clientHeight = padding * 2 + hintHeight + textAreaHeight + footerHeight;
+
+            ClientSize = new Size(640, clientHeight);
+            MinimumSize = new Size(
+                520,
+                clientHeight + SystemInformation.CaptionHeight + SystemInformation.FixedFrameBorderSize.Height * 2);
+
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                Padding = new Padding(padding)
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, footerHeight));
 
             var lblHint = new Label
             {
-                Text = _hint,
-                Dock = DockStyle.Top,
-                Height = string.IsNullOrWhiteSpace(_hint) ? 0 : 36,
+                Text = hint ?? string.Empty,
+                AutoSize = false,
+                Dock = DockStyle.Fill,
                 ForeColor = Color.FromArgb(150, 158, 172),
-                Padding = new Padding(0, 0, 0, 6)
+                Font = new Font("Segoe UI", 9f),
+                Margin = new Padding(0, 0, 0, 8),
+                Height = string.IsNullOrWhiteSpace(hint) ? 0 : hintHeight
             };
 
             _txt = new TextBox
@@ -52,34 +72,28 @@ namespace tiktok_Omni
 
             var btnOk = CreateButton("OK", Color.FromArgb(56, 120, 82));
             btnOk.DialogResult = DialogResult.OK;
-            AcceptButton = btnOk;
 
             var btnCancel = CreateButton("Hủy", Color.FromArgb(90, 96, 110));
             btnCancel.DialogResult = DialogResult.Cancel;
-            CancelButton = btnCancel;
 
             var flp = new FlowLayoutPanel
             {
-                Dock = DockStyle.Bottom,
-                Height = 40,
+                Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
                 BackColor = BackColor,
-                Padding = new Padding(0, 6, 0, 0)
+                Padding = new Padding(0, 10, 0, 4)
             };
             flp.Controls.Add(btnCancel);
             flp.Controls.Add(btnOk);
 
-            var host = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 4, 0, 4) };
-            host.Controls.Add(_txt);
-            if (!string.IsNullOrWhiteSpace(_hint))
-            {
-                host.Controls.Add(lblHint);
-            }
+            layout.Controls.Add(lblHint, 0, 0);
+            layout.Controls.Add(_txt, 0, 1);
+            layout.Controls.Add(flp, 0, 2);
 
-            Controls.Add(host);
-            Controls.Add(flp);
-
+            Controls.Add(layout);
+            AcceptButton = btnOk;
+            CancelButton = btnCancel;
             Shown += (_, __) => _txt.Focus();
         }
 
@@ -89,11 +103,11 @@ namespace tiktok_Omni
             {
                 Text = text,
                 AutoSize = true,
-                MinimumSize = new Size(88, 30),
+                MinimumSize = new Size(92, 32),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = back,
                 ForeColor = Color.White,
-                Margin = new Padding(6, 0, 0, 0)
+                Margin = new Padding(8, 0, 0, 0)
             };
         }
     }

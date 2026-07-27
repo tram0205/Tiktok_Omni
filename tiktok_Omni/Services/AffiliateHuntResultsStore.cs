@@ -9,27 +9,12 @@ namespace tiktok_Omni.Services
     /// <summary>Lưu kết quả săn video trên lưới Săn Affiliate — vị trí bền vững (không mất khi rebuild bin).</summary>
     public sealed class AffiliateHuntResultsStore
     {
-        private static readonly string LegacyDraftPath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "hunt_results.json");
-
+        private const string FileName = "hunt_results.json";
         private const int MaxRows = 10_000;
-
-        private static string PersistentDraftPath =>
-            Path.Combine(GetPersistentAppDataDirectory(), "hunt_results.json");
-
-        private static string GetPersistentAppDataDirectory()
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "tiktok_Omni");
-            Directory.CreateDirectory(dir);
-            return dir;
-        }
 
         public List<AffiliateCandidate> Load()
         {
-            var path = ResolveReadableDraftPath(out var migratedFromLegacy);
+            var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migratedFromLegacy);
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
                 return new List<AffiliateCandidate>();
@@ -44,7 +29,6 @@ namespace tiktok_Omni.Services
                 if (migratedFromLegacy && list.Count > 0)
                 {
                     Save(list);
-                    TryDeleteLegacyDraft();
                 }
 
                 return list;
@@ -61,15 +45,12 @@ namespace tiktok_Omni.Services
                 .Where(r => r != null)
                 .ToList();
 
-            var targetPath = PersistentDraftPath;
-            Directory.CreateDirectory(Path.GetDirectoryName(targetPath) ?? GetPersistentAppDataDirectory());
-
             if (list.Count == 0)
             {
                 try
                 {
-                    File.WriteAllText(targetPath, "[]", TextFileEncoding.Utf8NoBom);
-                    TryDeleteLegacyDraft();
+                    AppDataPaths.WriteJson(FileName, "[]");
+                    AppDataPaths.TryDeleteLegacyJson(FileName);
                 }
                 catch
                 {
@@ -96,44 +77,8 @@ namespace tiktok_Omni.Services
 
             try
             {
-                File.WriteAllText(
-                    targetPath,
-                    JsonConvert.SerializeObject(deduped, Formatting.Indented),
-                    TextFileEncoding.Utf8NoBom);
-                TryDeleteLegacyDraft();
-            }
-            catch
-            {
-                // ignored
-            }
-        }
-
-        private static string ResolveReadableDraftPath(out bool migratedFromLegacy)
-        {
-            migratedFromLegacy = false;
-            var persistent = PersistentDraftPath;
-            if (File.Exists(persistent))
-            {
-                return persistent;
-            }
-
-            if (File.Exists(LegacyDraftPath))
-            {
-                migratedFromLegacy = true;
-                return LegacyDraftPath;
-            }
-
-            return persistent;
-        }
-
-        private static void TryDeleteLegacyDraft()
-        {
-            try
-            {
-                if (File.Exists(LegacyDraftPath))
-                {
-                    File.Delete(LegacyDraftPath);
-                }
+                AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(deduped, Formatting.Indented));
+                AppDataPaths.TryDeleteLegacyJson(FileName);
             }
             catch
             {

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni
 {
@@ -76,7 +77,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            var minSafety = (int)(numAffiliateMinSafety?.Value ?? 75);
+            const int minSafety = 75;
             var enqueued = 0;
             var skippedScore = 0;
             foreach (var c in selected)
@@ -145,6 +146,15 @@ namespace tiktok_Omni
                 }
             }
 
+            if (list.Count == 0 && IsDeepDiveModeTab() && grid?.CurrentRow?.DataBoundItem is ShowcaseVideoItem video)
+            {
+                var scene = video.Scenes.FirstOrDefault();
+                if (scene != null)
+                {
+                    list.Add(scene);
+                }
+            }
+
             return list.Count > 0;
         }
 
@@ -187,7 +197,7 @@ namespace tiktok_Omni
             }
 
             var settings = _configManager.LoadAsync().GetAwaiter().GetResult();
-            var minSafety = (int)(numAffiliateMinSafety?.Value ?? 75);
+            const int minSafety = 75;
             var url = (candidate.VideoUrl ?? string.Empty).Trim();
             CancelAffiliateDeepDiveJobForUrl(url);
             EnqueueAffiliateDeepDiveJob(candidate, settings, minSafety, highPriority: true);

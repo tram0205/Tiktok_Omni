@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using tiktok_Omni.Models;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services
 {
@@ -11,8 +12,10 @@ namespace tiktok_Omni.Services
     public static class AssSubtitleGenerator
     {
         private const string PopStyleName = "PopStyle";
+        private const string HookStyleName = "HookStyle";
+        private const string BodyStyleName = "BodyStyle";
         // ASS override tags use {…}; double braces so string.Format treats them as literals.
-        private const string PopTagTemplate = @"{{\fscx150\fscy150\t({0},{1},\fscx100\fscy100)}}";
+        private const string PopTagTemplate = @"{{\fscx{0}\fscy{0}\t({1},{2},\fscx100\fscy100)}}";
 
         /// <summary>Ghi file ASS karaoke pop-up (UTF-8).</summary>
         public static void GenerateAssFile(
@@ -166,7 +169,194 @@ namespace tiktok_Omni.Services
             var sb = new StringBuilder();
             AppendAssHeader(sb, opt);
 
-            foreach (var chunk in GroupIntoLines(wordTimestamps, opt, wordsPerLineOverride))
+            AppendDialogueLines(sb, wordTimestamps, opt, PopStyleName);
+            return sb.ToString();
+        }
+
+        /// <summary>ASS Showcase: hook + thân với style/hiệu ứng riêng.</summary>
+        public static void WriteShowcaseAssFile(
+            string outputPath,
+            IReadOnlyList<WordTimestamp> words,
+            ShowcaseNarrationTimingManifest manifest,
+            ShowcaseSubtitleRenderPlan plan,
+            ShowcaseSubtitleDisplayPlan displayPlan = null,
+            IList<AiVideoGenInputItem> orderedScenes = null,
+            string ctaText = null,
+            ShowcaseVideoItem styleVideo = null,
+            AppSettings appSettings = null)
+        {
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                throw new ArgumentException("Đường dẫn ASS không hợp lệ.", nameof(outputPath));
+            }
+
+            if (words == null || words.Count == 0 || plan == null || !plan.HasAnyEnabled)
+            {
+                throw new ArgumentException("Không có từ hoặc plan phụ đề Showcase trống.", nameof(words));
+            }
+
+            var body = BuildShowcaseAssContent(
+                words,
+                manifest,
+                plan,
+                displayPlan,
+                orderedScenes,
+                ctaText,
+                styleVideo,
+                appSettings);
+            var dir = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            File.WriteAllText(outputPath, body, TextFileEncoding.Utf8NoBom);
+        }
+
+        private static string BuildShowcaseAssContent(
+            IReadOnlyList<WordTimestamp> words,
+            ShowcaseNarrationTimingManifest manifest,
+            ShowcaseSubtitleRenderPlan plan,
+            ShowcaseSubtitleDisplayPlan displayPlan = null,
+            IList<AiVideoGenInputItem> orderedScenes = null,
+            string ctaText = null,
+            ShowcaseVideoItem styleVideo = null,
+            AppSettings appSettings = null)
+        {
+            var settings = appSettings ?? new AppSettings();
+            var style = styleVideo ?? new ShowcaseVideoItem();
+            var useDisplayPlan = displayPlan != null
+                                 && orderedScenes != null
+                                 && orderedScenes.Count > 0
+                                 && ShowcaseSubtitleDisplayHelper.NeedsPerLineAssProcessing(displayPlan);
+
+            var hookWords = new List<WordTimestamp>();
+            var bodyWords = new List<WordTimestamp>();
+            ShowcaseKaraokeTimingHelper.SplitHookBodyWords(words, manifest, hookWords, bodyWords);
+
+            var sb = new StringBuilder();
+            AppendShowcaseAssHeader(sb, plan);
+
+            if (plan.HookEnabled && hookWords.Count > 0)
+            {
+                List<WordTimestamp> hookBurnIn = hookWords;
+                if (useDisplayPlan)
+                {
+                    var hookSource = (manifest?.HookText ?? string.Empty).Trim();
+                    if (string.IsNullOrEmpty(hookSource))
+                    {
+                        hookSource = ShowcaseSubtitleDisplayHelper.ResolveHookSpeechSourceFromScenesPublic(
+                            orderedScenes,
+                            ctaText);
+                    }
+
+                    var hookDisplay = string.IsNullOrWhiteSpace(displayPlan.Hook)
+                        ? hookSource
+                        : displayPlan.Hook.Trim();
+                    hookBurnIn = ShowcaseSubtitleDisplayHelper.FilterSegmentPublic(
+                        hookWords,
+                        hookSource,
+                        hookDisplay);
+                }
+
+                if (hookBurnIn.Count > 0)
+                {
+                    var hookOpts = ShowcaseSubtitleStyleHelper.BuildHookOptionsWithLineOverride(
+                        style,
+                        settings,
+                        useDisplayPlan ? displayPlan.HookAnimation : null);
+                    AppendDialogueLines(sb, hookBurnIn, hookOpts ?? plan.HookOptions ?? new AssSubtitleGeneratorOptions(), HookStyleName);
+                }
+            }
+
+            if (plan.BodyEnabled && bodyWords.Count > 0)
+            {
+                if (useDisplayPlan)
+                {
+                    var slices = ShowcaseSubtitleDisplayHelper.SliceBodyWordsForLineEffects(
+                        bodyWords,
+                        orderedScenes,
+                        ctaText,
+                        displayPlan);
+                    foreach (var slice in slices)
+                    {
+                        if (slice?.Words == null || slice.Words.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        var bodyOpts = ShowcaseSubtitleStyleHelper.BuildBodyOptionsWithLineOverride(
+                            style,
+                            settings,
+                            slice.AnimationStorage);
+                        AppendDialogueLines(
+                            sb,
+                            slice.Words,
+                            bodyOpts ?? plan.BodyOptions ?? new AssSubtitleGeneratorOptions(),
+                            BodyStyleName);
+                    }
+                }
+                else
+                {
+                    AppendDialogueLines(sb, bodyWords, plan.BodyOptions ?? new AssSubtitleGeneratorOptions(), BodyStyleName);
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static void AppendShowcaseAssHeader(StringBuilder sb, ShowcaseSubtitleRenderPlan plan)
+        {
+            var sample = plan.BodyOptions ?? plan.HookOptions ?? new AssSubtitleGeneratorOptions();
+            sb.AppendLine("[Script Info]");
+            sb.AppendLine("Title: Showcase ASS");
+            sb.AppendLine("ScriptType: v4.00+");
+            sb.AppendLine("PlayResX: " + sample.PlayResX.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("PlayResY: " + sample.PlayResY.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("WrapStyle: 0");
+            sb.AppendLine("ScaledBorderAndShadow: yes");
+            sb.AppendLine();
+            sb.AppendLine("[V4+ Styles]");
+            sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
+
+            if (plan.HookEnabled && plan.HookOptions != null)
+            {
+                AppendAssStyleLine(sb, HookStyleName, plan.HookOptions);
+            }
+
+            if (plan.BodyEnabled && plan.BodyOptions != null)
+            {
+                AppendAssStyleLine(sb, BodyStyleName, plan.BodyOptions);
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("[Events]");
+            sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
+        }
+
+        private static void AppendAssStyleLine(StringBuilder sb, string styleName, AssSubtitleGeneratorOptions opt)
+        {
+            var primary = string.IsNullOrWhiteSpace(opt.PrimaryColourAss) ? "&H00FFFFFF" : opt.PrimaryColourAss.Trim();
+            var secondary = string.IsNullOrWhiteSpace(opt.SecondaryColourAss) ? "&H000000FF" : opt.SecondaryColourAss.Trim();
+            var outline = opt.OutlineWidth > 0 ? opt.OutlineWidth : 10;
+            var shadow = opt.ShadowDepth >= 0 ? opt.ShadowDepth : 2;
+            sb.AppendLine(
+                "Style: " + styleName + "," + opt.FontName + "," + opt.FontSize.ToString(CultureInfo.InvariantCulture) +
+                "," + primary + "," + secondary + ",&H00000000,&H96000000," +
+                (opt.Bold ? "1" : "0") + "," + (opt.Italic ? "1" : "0") + ",0,0,100,100,0,0,1," +
+                outline.ToString(CultureInfo.InvariantCulture) + "," +
+                shadow.ToString(CultureInfo.InvariantCulture) + "," +
+                opt.Alignment.ToString(CultureInfo.InvariantCulture) + ",60,60," +
+                opt.MarginV.ToString(CultureInfo.InvariantCulture) + ",1");
+        }
+
+        private static void AppendDialogueLines(
+            StringBuilder sb,
+            IReadOnlyList<WordTimestamp> words,
+            AssSubtitleGeneratorOptions opt,
+            string styleName)
+        {
+            foreach (var chunk in GroupIntoLines(words, opt, null))
             {
                 if (chunk.Count == 0)
                 {
@@ -175,15 +365,13 @@ namespace tiktok_Omni.Services
 
                 var lineStartMs = chunk[0].StartTimeMs;
                 var lineEndMs = chunk[chunk.Count - 1].EndTimeMs;
-                var text = BuildChunkDialogueText(chunk, lineStartMs, opt.Animation);
+                var text = BuildChunkDialogueText(chunk, lineStartMs, opt);
                 sb.AppendLine(
                     "Dialogue: 0," +
                     FormatAssTime(lineStartMs) + "," +
                     FormatAssTime(lineEndMs) +
-                    "," + PopStyleName + ",,0,0,0,," + text);
+                    "," + styleName + ",,0,0,0,," + text);
             }
-
-            return sb.ToString();
         }
 
         private static IReadOnlyList<List<WordTimestamp>> GroupIntoLines(
@@ -199,7 +387,7 @@ namespace tiktok_Omni.Services
             var maxWords = wordsPerLineOverride ?? Math.Max(4, Math.Min(12, opt.WordsPerLine));
             if (opt.RhythmicLineBreaks)
             {
-                return GroupIntoRhythmicLines(wordTimestamps, maxWords);
+                return GroupIntoRhythmicLines(wordTimestamps, maxWords, Math.Max(1, opt.MinWordsPerLine));
             }
 
             var lines = new List<List<WordTimestamp>>();
@@ -225,7 +413,8 @@ namespace tiktok_Omni.Services
 
         private static List<List<WordTimestamp>> GroupIntoRhythmicLines(
             IReadOnlyList<WordTimestamp> words,
-            int maxWordsPerLine)
+            int maxWordsPerLine,
+            int minWordsPerLine)
         {
             var lines = new List<List<WordTimestamp>>();
             var current = new List<WordTimestamp>();
@@ -244,7 +433,7 @@ namespace tiktok_Omni.Services
                 }
 
                 current.Add(word);
-                if (ShouldBreakLineAfterWord(GetWordText(word), current.Count, maxWordsPerLine))
+                if (ShouldBreakLineAfterWord(GetWordText(word), current.Count, maxWordsPerLine, minWordsPerLine))
                 {
                     lines.Add(current);
                     current = new List<WordTimestamp>();
@@ -259,7 +448,7 @@ namespace tiktok_Omni.Services
             return lines;
         }
 
-        private static bool ShouldBreakLineAfterWord(string wordText, int wordsInLine, int maxWordsPerLine)
+        private static bool ShouldBreakLineAfterWord(string wordText, int wordsInLine, int maxWordsPerLine, int minWordsPerLine = 2)
         {
             if (wordsInLine <= 0)
             {
@@ -274,7 +463,7 @@ namespace tiktok_Omni.Services
             var w = (wordText ?? string.Empty).TrimEnd();
             if (w.EndsWith("...", StringComparison.Ordinal) || w.EndsWith("…", StringComparison.Ordinal))
             {
-                return true;
+                return wordsInLine >= minWordsPerLine;
             }
 
             if (w.Length == 0)
@@ -285,10 +474,10 @@ namespace tiktok_Omni.Services
             var last = w[w.Length - 1];
             if (last == '.' || last == '!' || last == '?' || last == ';' || last == ':')
             {
-                return true;
+                return wordsInLine >= minWordsPerLine;
             }
 
-            return last == ',' && wordsInLine >= 3;
+            return last == ',' && wordsInLine >= Math.Max(minWordsPerLine, 3);
         }
 
         private static void AppendAssHeader(StringBuilder sb, AssSubtitleGeneratorOptions opt)
@@ -319,58 +508,200 @@ namespace tiktok_Omni.Services
         private static string BuildChunkDialogueText(
             IReadOnlyList<WordTimestamp> chunk,
             double lineStartMs,
-            ReupKaraokeAnimationMode animation)
+            AssSubtitleGeneratorOptions options)
         {
+            var animation = options?.Animation ?? ReupKaraokeAnimationMode.Pop;
+            var popScale = options?.PopScalePercent > 0 ? options.PopScalePercent : 150;
+            var popDuration = options?.PopDurationMs > 0 ? options.PopDurationMs : 100;
+
             if (animation == ReupKaraokeAnimationMode.Plain)
             {
-                var plainParts = new List<string>(chunk.Count);
-                for (var i = 0; i < chunk.Count; i++)
-                {
-                    plainParts.Add(EscapeAssText(GetWordText(chunk[i])));
-                }
+                return BuildPlainChunkText(chunk);
+            }
 
-                return string.Join(" ", plainParts);
+            if (animation == ReupKaraokeAnimationMode.LineZoom)
+            {
+                return @"{\fscx52\fscy52\t(0,170,\fscx100\fscy100)}" + BuildPlainChunkText(chunk);
+            }
+
+            if (animation == ReupKaraokeAnimationMode.FlashColor)
+            {
+                return @"{\1c&H00FFFFFF&\t(0,90,\1c&H00FFFF00&)\t(90,180,\1c&H00FFFFFF&)}" + BuildPlainChunkText(chunk);
+            }
+
+            if (animation == ReupKaraokeAnimationMode.GlowPulse)
+            {
+                return @"{\bord4\blur1\t(0,140,\bord16)\t(140,260,\bord5)}" + BuildPlainChunkText(chunk);
             }
 
             if (animation == ReupKaraokeAnimationMode.Highlight)
             {
-                var highlightParts = new List<string>(chunk.Count);
-                for (var i = 0; i < chunk.Count; i++)
-                {
-                    var word = chunk[i];
-                    var durCs = (int)Math.Max(1, Math.Round((word.EndTimeMs - word.StartTimeMs) / 10d));
-                    highlightParts.Add("{\\k" + durCs.ToString(CultureInfo.InvariantCulture) + "}" + EscapeAssText(GetWordText(word)));
-                }
-
-                return string.Join(" ", highlightParts);
+                return BuildHighlightChunkText(chunk);
             }
 
             if (animation == ReupKaraokeAnimationMode.FadeIn)
             {
-                var fadeParts = new List<string>(chunk.Count);
-                for (var i = 0; i < chunk.Count; i++)
-                {
-                    var word = chunk[i];
-                    var offsetMs = (int)Math.Round(Math.Max(0d, word.StartTimeMs - lineStartMs));
-                    var fadeEndMs = offsetMs + 180;
-                    var fadeTag = string.Format(
-                        CultureInfo.InvariantCulture,
-                        @"{{\alpha&HFF&\t({0},{1},\alpha&H00&)}}",
-                        offsetMs,
-                        fadeEndMs);
-                    fadeParts.Add(fadeTag + EscapeAssText(GetWordText(word)));
-                }
-
-                return string.Join(" ", fadeParts);
+                return BuildFadeInChunkText(chunk, lineStartMs);
             }
 
+            if (animation == ReupKaraokeAnimationMode.Typewriter)
+            {
+                return BuildTypewriterChunkText(chunk, lineStartMs);
+            }
+
+            if (animation == ReupKaraokeAnimationMode.Bounce)
+            {
+                return BuildBounceChunkText(chunk, lineStartMs, popScale);
+            }
+
+            if (animation == ReupKaraokeAnimationMode.Shake)
+            {
+                return BuildShakeChunkText(chunk, lineStartMs, popScale, popDuration);
+            }
+
+            if (animation == ReupKaraokeAnimationMode.NeonSale)
+            {
+                return BuildPopChunkText(chunk, lineStartMs, popScale, popDuration);
+            }
+
+            return BuildPopChunkText(chunk, lineStartMs, popScale, popDuration);
+        }
+
+        private static string BuildPlainChunkText(IReadOnlyList<WordTimestamp> chunk)
+        {
+            var plainParts = new List<string>(chunk.Count);
+            for (var i = 0; i < chunk.Count; i++)
+            {
+                plainParts.Add(EscapeAssText(GetWordText(chunk[i])));
+            }
+
+            return string.Join(" ", plainParts);
+        }
+
+        private static string BuildHighlightChunkText(IReadOnlyList<WordTimestamp> chunk)
+        {
+            var highlightParts = new List<string>(chunk.Count);
+            for (var i = 0; i < chunk.Count; i++)
+            {
+                var word = chunk[i];
+                var durCs = (int)Math.Max(1, Math.Round((word.EndTimeMs - word.StartTimeMs) / 10d));
+                highlightParts.Add("{\\k" + durCs.ToString(CultureInfo.InvariantCulture) + "}" + EscapeAssText(GetWordText(word)));
+            }
+
+            return string.Join(" ", highlightParts);
+        }
+
+        private static string BuildFadeInChunkText(IReadOnlyList<WordTimestamp> chunk, double lineStartMs)
+        {
+            var fadeParts = new List<string>(chunk.Count);
+            for (var i = 0; i < chunk.Count; i++)
+            {
+                var word = chunk[i];
+                var offsetMs = (int)Math.Round(Math.Max(0d, word.StartTimeMs - lineStartMs));
+                var fadeEndMs = offsetMs + 180;
+                var fadeTag = string.Format(
+                    CultureInfo.InvariantCulture,
+                    @"{{\alpha&HFF&\t({0},{1},\alpha&H00&)}}",
+                    offsetMs,
+                    fadeEndMs);
+                fadeParts.Add(fadeTag + EscapeAssText(GetWordText(word)));
+            }
+
+            return string.Join(" ", fadeParts);
+        }
+
+        private static string BuildTypewriterChunkText(IReadOnlyList<WordTimestamp> chunk, double lineStartMs)
+        {
             var parts = new List<string>(chunk.Count);
             for (var i = 0; i < chunk.Count; i++)
             {
                 var word = chunk[i];
                 var offsetMs = (int)Math.Round(Math.Max(0d, word.StartTimeMs - lineStartMs));
-                var popEndMs = offsetMs + 100;
-                var popTag = string.Format(CultureInfo.InvariantCulture, PopTagTemplate, offsetMs, popEndMs);
+                var revealMs = offsetMs + 1;
+                var tag = string.Format(
+                    CultureInfo.InvariantCulture,
+                    @"{{\alpha&HFF&\t({0},{1},\alpha&H00&)}}",
+                    offsetMs,
+                    revealMs);
+                parts.Add(tag + EscapeAssText(GetWordText(word)));
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        private static string BuildBounceChunkText(
+            IReadOnlyList<WordTimestamp> chunk,
+            double lineStartMs,
+            int popScale)
+        {
+            var overshoot = Math.Max(108, Math.Min(130, popScale / 2));
+            var parts = new List<string>(chunk.Count);
+            for (var i = 0; i < chunk.Count; i++)
+            {
+                var word = chunk[i];
+                var offsetMs = (int)Math.Round(Math.Max(0d, word.StartTimeMs - lineStartMs));
+                var midMs = offsetMs + 70;
+                var endMs = offsetMs + 130;
+                var tag = string.Format(
+                    CultureInfo.InvariantCulture,
+                    @"{{\fscx{0}\fscy{0}\t({1},{2},\fscx{3}\fscy{3})\t({2},{4},\fscx100\fscy100)}}",
+                    popScale,
+                    offsetMs,
+                    midMs,
+                    overshoot,
+                    endMs);
+                parts.Add(tag + EscapeAssText(GetWordText(word)));
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        private static string BuildShakeChunkText(
+            IReadOnlyList<WordTimestamp> chunk,
+            double lineStartMs,
+            int popScale,
+            int popDuration)
+        {
+            var parts = new List<string>(chunk.Count);
+            for (var i = 0; i < chunk.Count; i++)
+            {
+                var word = chunk[i];
+                var offsetMs = (int)Math.Round(Math.Max(0d, word.StartTimeMs - lineStartMs));
+                var popEndMs = offsetMs + popDuration;
+                var shakeMid = offsetMs + 40;
+                var shakeEnd = offsetMs + 80;
+                var tag = string.Format(
+                    CultureInfo.InvariantCulture,
+                    @"{{\fscx{0}\fscy{0}\t({1},{2},\fscx100\fscy100\frz-4)\t({2},{3},\frz4)\t({3},{4},\frz0)}}",
+                    popScale,
+                    offsetMs,
+                    popEndMs,
+                    shakeMid,
+                    shakeEnd);
+                parts.Add(tag + EscapeAssText(GetWordText(word)));
+            }
+
+            return string.Join(" ", parts);
+        }
+
+        private static string BuildPopChunkText(
+            IReadOnlyList<WordTimestamp> chunk,
+            double lineStartMs,
+            int popScale,
+            int popDuration)
+        {
+            var parts = new List<string>(chunk.Count);
+            for (var i = 0; i < chunk.Count; i++)
+            {
+                var word = chunk[i];
+                var offsetMs = (int)Math.Round(Math.Max(0d, word.StartTimeMs - lineStartMs));
+                var popEndMs = offsetMs + popDuration;
+                var popTag = string.Format(
+                    CultureInfo.InvariantCulture,
+                    PopTagTemplate,
+                    popScale.ToString(CultureInfo.InvariantCulture),
+                    offsetMs,
+                    popEndMs);
                 parts.Add(popTag + EscapeAssText(GetWordText(word)));
             }
 
@@ -431,6 +762,9 @@ namespace tiktok_Omni.Services
     {
         public int WordsPerLine { get; set; } = 6;
 
+        /// <summary>Tối thiểu từ trên một dòng trước khi ngắt theo dấu câu nhẹ (ví dụ phẩy).</summary>
+        public int MinWordsPerLine { get; set; } = 2;
+
         /// <summary>Ngắt dòng theo dấu câu / khoảng dừng thay vì cố định N từ.</summary>
         public bool RhythmicLineBreaks { get; set; }
 
@@ -452,6 +786,18 @@ namespace tiktok_Omni.Services
         public bool Italic { get; set; }
 
         public ReupKaraokeAnimationMode Animation { get; set; } = ReupKaraokeAnimationMode.Pop;
+
+        /// <summary>Pop scale % (150 = phóng 1.5x). Hook thường 220–280.</summary>
+        public int PopScalePercent { get; set; } = 150;
+
+        /// <summary>Thời gian pop ms.</summary>
+        public int PopDurationMs { get; set; } = 100;
+
+        /// <summary>Độ dày viền ASS (bord).</summary>
+        public int OutlineWidth { get; set; } = 10;
+
+        /// <summary>Độ sâu bóng ASS (shadow).</summary>
+        public int ShadowDepth { get; set; } = 2;
 
         /// <summary>ASS PrimaryColour tùy chỉnh (ví dụ &amp;H00FFFFFF).</summary>
         public string PrimaryColourAss { get; set; }

@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Helpers;
 using tiktok_Omni.Models;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
@@ -15,9 +16,9 @@ namespace tiktok_Omni
 {
     public partial class Form1
     {
-        private static readonly Font PhilosophyUiFont = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        private static readonly Font PhilosophyPrimaryActionFont = new Font("Segoe UI", 12F, FontStyle.Bold, GraphicsUnit.Point);
-        private static readonly Font PhilosophyCommandFont = new Font("Segoe UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point);
+        private static readonly Font PhilosophyUiFont = AppLabelFont;
+        private static readonly Font PhilosophyPrimaryActionFont = AppPrimaryActionFont;
+        private static readonly Font PhilosophyCommandFont = AppJellyButtonFont;
         private static readonly Color PhilosophyPanelBack = Color.FromArgb(31, 34, 42);
         private static readonly Color PhilosophyChromeBack = Color.FromArgb(36, 39, 48);
         private static readonly Color PhilosophyConfigBarBack = Color.FromArgb(33, 36, 44);
@@ -28,9 +29,9 @@ namespace tiktok_Omni
         private static readonly Color PhilosophyTintResume = Color.FromArgb(68, 118, 178);
         private static readonly Padding PhilosophyFlowItemMargin = new Padding(4, 4, 10, 6);
         private static readonly Padding PhilosophyFlowSectionMargin = new Padding(0, 0, 18, 4);
-        private const int PhilosophyCommandButtonHeight = 44;
-        private const int PhilosophyPrimaryActionHeight = 52;
-        private const int PhilosophyCommandHorizontalPad = 28;
+        private const int PhilosophyCommandButtonHeight = AppJellyButtonHeight;
+        private const int PhilosophyPrimaryActionHeight = AppPrimaryActionHeight;
+        private const int PhilosophyCommandHorizontalPad = AppJellyButtonHorizontalPad;
 
         private Panel pnlPhilosophyTopChrome;
         private Panel pnlPhilosophyCommandBar;
@@ -165,10 +166,7 @@ namespace tiktok_Omni
                 BackgroundColor = PhilosophyPanelBack,
                 BorderStyle = BorderStyle.FixedSingle,
                 EnableHeadersVisualStyles = false,
-                Font = PhilosophyUiFont,
-                RowTemplate = { Height = 28 },
-                ColumnHeadersHeight = AppGridHeaderHeight,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
+                Font = AppGridBodyFont,
                 DefaultCellStyle =
                 {
                     BackColor = PhilosophyPanelBack,
@@ -181,14 +179,15 @@ namespace tiktok_Omni
                 {
                     BackColor = Color.FromArgb(45, 49, 60),
                     ForeColor = Color.WhiteSmoke,
-                    Font = AppGridHeaderFont,
-                    Alignment = DataGridViewContentAlignment.MiddleCenter,
-                    Padding = new Padding(6, 8, 6, 8)
+                    Alignment = DataGridViewContentAlignment.MiddleCenter
                 }
             };
             ConfigurePhilosophyScriptGrid();
             WirePhilosophyGridEvents();
             ApplyGridProfileComboColumn(dgvPhilosophyScripts, "colPhilosophyProfile");
+            // Có nhiều ComboBox trong ô — dùng chiều cao combo chuẩn.
+            ApplyAppComboGridRowHeight(dgvPhilosophyScripts);
+            ApplyAppGridChrome(dgvPhilosophyScripts);
         }
 
         private void BuildPhilosophyMainGrid()
@@ -221,6 +220,7 @@ namespace tiktok_Omni
             dgvPhilosophyScripts.Dock = DockStyle.Fill;
 
             ApplyTopFillBottomDockLayout(pnlPhilosophyGridWrap, dgvPhilosophyScripts, bottom: null, lblPhilosophyPrereq);
+            ApplyAppGridChrome(dgvPhilosophyScripts);
         }
 
         private void BuildPhilosophyTopChrome()
@@ -575,7 +575,10 @@ namespace tiktok_Omni
 
             if (btnPhilosophyStartRender == null || btnPhilosophyStartRender.IsDisposed)
             {
-                btnPhilosophyStartRender = CreatePhilosophyCommandButton("btnPhilosophyStartRender", "Bắt đầu Render", PhilosophyTintRender);
+                btnPhilosophyStartRender = CreateAppPrimaryJellyButton(
+                    "btnPhilosophyStartRender",
+                    "Bắt đầu Render",
+                    PhilosophyTintRender);
             }
 
             btnPhilosophyStartRender.Click -= btnPhilosophyStartRender_Click;
@@ -604,41 +607,28 @@ namespace tiktok_Omni
             ApplyPhilosophyCommandButtonMetrics(btnPhilosophyStopRender);
             ApplyPhilosophyCommandButtonMetrics(btnPhilosophyPushToAutoPost);
             btnPhilosophyPushToAutoPost.Width = 196;
+            btnPhilosophyPushToAutoPost.MaximumSize = new Size(196, PhilosophyCommandButtonHeight);
 
-            var renderWidth = Math.Max(
-                280,
-                TextRenderer.MeasureText(
-                    btnPhilosophyStartRender.Text,
-                    PhilosophyPrimaryActionFont,
-                    new Size(int.MaxValue, PhilosophyPrimaryActionHeight),
-                    TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width
-                + PhilosophyCommandHorizontalPad + 24);
+            ResizeAppJellyButton(
+                btnPhilosophyStartRender,
+                PhilosophyPrimaryActionHeight,
+                AppPrimaryActionMinWidth,
+                AppPrimaryActionHorizontalPad);
             btnPhilosophyStartRender.Font = PhilosophyPrimaryActionFont;
-            btnPhilosophyStartRender.Height = PhilosophyPrimaryActionHeight;
-            btnPhilosophyStartRender.Width = renderWidth;
-            btnPhilosophyStartRender.MinimumSize = new Size(renderWidth, PhilosophyPrimaryActionHeight);
-            btnPhilosophyStartRender.MaximumSize = new Size(renderWidth, PhilosophyPrimaryActionHeight);
             btnPhilosophyStartRender.Margin = new Padding(0, 8, 6, 0);
 
             btnPhilosophyOpenAssets.Margin = new Padding(0, 8, 10, 0);
 
-            var stopWidth = Math.Max(
+            btnPhilosophyStopRender.Text = "Dừng";
+            ResizeAppJellyButton(
+                btnPhilosophyStopRender,
+                PhilosophyPrimaryActionHeight,
                 140,
-                TextRenderer.MeasureText(
-                    "Tiếp tục",
-                    PhilosophyPrimaryActionFont,
-                    new Size(int.MaxValue, PhilosophyPrimaryActionHeight),
-                    TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width
-                + PhilosophyCommandHorizontalPad);
+                AppPrimaryActionHorizontalPad);
             btnPhilosophyStopRender.Font = PhilosophyPrimaryActionFont;
-            btnPhilosophyStopRender.Height = PhilosophyPrimaryActionHeight;
-            btnPhilosophyStopRender.Width = stopWidth;
-            btnPhilosophyStopRender.MinimumSize = new Size(stopWidth, PhilosophyPrimaryActionHeight);
-            btnPhilosophyStopRender.MaximumSize = new Size(stopWidth, PhilosophyPrimaryActionHeight);
             btnPhilosophyStopRender.Margin = new Padding(0, 8, 0, 0);
             btnPhilosophyStopRender.Visible = true;
             btnPhilosophyStopRender.Enabled = false;
-            btnPhilosophyStopRender.Text = "Dừng";
 
             var barColor = Color.FromArgb(28, 30, 38);
             pnlPhilosophyRenderHost = new Panel
@@ -900,32 +890,14 @@ namespace tiktok_Omni
 
         private static Button CreatePhilosophyCommandButton(string name, string text, Color tint)
         {
-            var width = Math.Max(
-                96,
-                TextRenderer.MeasureText(
-                    text,
-                    PhilosophyCommandFont,
-                    new Size(int.MaxValue, PhilosophyCommandButtonHeight),
-                    TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width
-                + PhilosophyCommandHorizontalPad);
-            var btn = new Button
-            {
-                Name = name,
-                Text = text,
-                Font = PhilosophyCommandFont,
-                AutoSize = false,
-                Width = width,
-                Height = PhilosophyCommandButtonHeight,
-                MinimumSize = new Size(width, PhilosophyCommandButtonHeight),
-                MaximumSize = new Size(width, PhilosophyCommandButtonHeight),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = tint,
-                ForeColor = Color.FromArgb(245, 247, 250),
-                Margin = PhilosophyFlowItemMargin,
-                UseVisualStyleBackColor = false
-            };
-            btn.FlatAppearance.BorderSize = 0;
-            return btn;
+            return CreateAppJellyButton(
+                name,
+                text,
+                tint,
+                heightOverride: PhilosophyCommandButtonHeight,
+                minWidth: 96,
+                horizontalPad: PhilosophyCommandHorizontalPad,
+                margin: PhilosophyFlowItemMargin);
         }
 
         private static void ApplyPhilosophyCommandButtonMetrics(Button btn)
@@ -935,20 +907,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            var width = Math.Max(
-                96,
-                TextRenderer.MeasureText(
-                    btn.Text,
-                    PhilosophyCommandFont,
-                    new Size(int.MaxValue, PhilosophyCommandButtonHeight),
-                    TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width
-                + PhilosophyCommandHorizontalPad);
-            btn.Font = PhilosophyCommandFont;
-            btn.AutoSize = false;
-            btn.Height = PhilosophyCommandButtonHeight;
-            btn.Width = width;
-            btn.MinimumSize = new Size(width, PhilosophyCommandButtonHeight);
-            btn.MaximumSize = new Size(width, PhilosophyCommandButtonHeight);
+            ResizeAppJellyButton(btn, PhilosophyCommandButtonHeight, 96, PhilosophyCommandHorizontalPad);
             btn.Margin = PhilosophyFlowItemMargin;
         }
 
@@ -1650,6 +1609,15 @@ namespace tiktok_Omni
             }
 
             var toRemove = GetPhilosophyTargetRowsFromGrid();
+            if (toRemove.Count == 0)
+            {
+                return;
+            }
+
+            if (!UiConfirmHelper.ConfirmDeleteRows(this, toRemove.Count))
+            {
+                return;
+            }
 
             foreach (var item in toRemove)
             {
@@ -2536,9 +2504,21 @@ namespace tiktok_Omni
             }
 
             btnPhilosophyStopRender.Text = resumeMode ? "Tiếp tục" : "Dừng";
-            btnPhilosophyStopRender.BackColor = resumeMode ? PhilosophyTintResume : PhilosophyTintStop;
             btnPhilosophyStopRender.Font = PhilosophyPrimaryActionFont;
-            btnPhilosophyStopRender.Height = PhilosophyPrimaryActionHeight;
+            if (btnPhilosophyStopRender is JellyButton stopJelly)
+            {
+                stopJelly.JellyTint = resumeMode ? PhilosophyTintResume : PhilosophyTintStop;
+            }
+            else
+            {
+                btnPhilosophyStopRender.BackColor = resumeMode ? PhilosophyTintResume : PhilosophyTintStop;
+            }
+
+            ResizeAppJellyButton(
+                btnPhilosophyStopRender,
+                PhilosophyPrimaryActionHeight,
+                140,
+                AppPrimaryActionHorizontalPad);
             btnPhilosophyStopRender.Enabled = enabled;
         }
 

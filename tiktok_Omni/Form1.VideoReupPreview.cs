@@ -19,11 +19,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            dgvVideoReupInput.EnableHeadersVisualStyles = false;
-            if (dgvVideoReupInput.ColumnHeadersHeight < AppGridHeaderHeight)
-            {
-                dgvVideoReupInput.ColumnHeadersHeight = AppGridHeaderHeight;
-            }
+            ApplyAppGridChrome(dgvVideoReupInput);
 
             dgvVideoReupInput.Dock = DockStyle.Fill;
         }
@@ -53,7 +49,7 @@ namespace tiktok_Omni
 
             if (!string.IsNullOrWhiteSpace(stageHint))
             {
-                SetVideoReupProgress(stageHint, pbVideoReupProgress?.Value ?? 0);
+                SetVideoReupProgress(stageHint, 0);
             }
 
             await Task.CompletedTask.ConfigureAwait(true);
@@ -80,6 +76,57 @@ namespace tiktok_Omni
             {
                 LogVideoReup("Không mở được video: " + ex.Message);
             }
+        }
+        private async void btnVideoReupOpenOutput_Click(object sender, EventArgs e)
+        {
+            if (btnVideoReupOpenOutput != null)
+            {
+                btnVideoReupOpenOutput.Enabled = false;
+            }
+
+            try
+            {
+                await OpenVideoReupOutputFolderInExplorerAsync().ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                LogVideoReup("[Folder] Không mở được thư mục output Reup: " + ex.Message);
+                MessageBox.Show(
+                    this,
+                    "Không mở được thư mục: " + ex.Message,
+                    "Thư mục output Reup",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                if (btnVideoReupOpenOutput != null && !btnVideoReupOpenOutput.IsDisposed)
+                {
+                    btnVideoReupOpenOutput.Enabled = true;
+                }
+            }
+        }
+
+        private async Task OpenVideoReupOutputFolderInExplorerAsync()
+        {
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+            if (TryGetVideoReupSelectedRow(out var row) && !string.IsNullOrWhiteSpace(row?.ProfileName))
+            {
+                profile = ProfileScopedPaths.ResolveProfileName(row.ProfileName);
+            }
+
+            ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(settings.StorageRootPath, profile);
+            var path = ProfileScopedPaths.GetVideoReupOutputRoot(profile);
+            Directory.CreateDirectory(path);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = "\"" + path + "\"",
+                UseShellExecute = true
+            });
+            LogVideoReup("[Folder] Đã mở output Reup: " + path);
         }
     }
 }

@@ -25,20 +25,19 @@ namespace tiktok_Omni.Services
 
     public sealed class PhilosophyDraftStore
     {
-        private static readonly string DraftPath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "draft_philosophy.json");
+        private const string FileName = "draft_philosophy.json";
 
         public PhilosophyDraftDocument Load()
         {
-            if (!File.Exists(DraftPath))
+            var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy);
+            if (!File.Exists(path))
             {
                 return new PhilosophyDraftDocument();
             }
 
             try
             {
-                var json = File.ReadAllText(DraftPath, TextFileEncoding.Utf8);
+                var json = File.ReadAllText(path, TextFileEncoding.Utf8);
                 var doc = JsonConvert.DeserializeObject<PhilosophyDraftDocument>(json);
                 if (doc == null)
                 {
@@ -48,6 +47,12 @@ namespace tiktok_Omni.Services
                 doc.Scripts = doc.Scripts?
                     .Where(s => s != null)
                     .ToList() ?? new List<PhilosophyScriptItem>();
+
+                if (migrateFromLegacy && doc.Scripts.Count > 0)
+                {
+                    Save(doc);
+                }
+
                 return doc;
             }
             catch
@@ -65,10 +70,8 @@ namespace tiktok_Omni.Services
 
             try
             {
-                File.WriteAllText(
-                    DraftPath,
-                    JsonConvert.SerializeObject(doc, Formatting.Indented),
-                    TextFileEncoding.Utf8NoBom);
+                AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(doc, Formatting.Indented));
+                AppDataPaths.TryDeleteLegacyJson(FileName);
             }
             catch
             {

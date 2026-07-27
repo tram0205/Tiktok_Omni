@@ -2555,8 +2555,9 @@ return bestScore >= 20 ? best : null;") as IWebElement;
             if (images != null && images.Count > 0)
                 throw new Exception("Video này là định dạng Ảnh trượt (Slideshow). Không thể phát MP4. Vui lòng chọn video khác!");
 
-            var play = data["play"]?.ToString();
-            if (string.IsNullOrWhiteSpace(play)) play = data["hdplay"]?.ToString();
+            // Ưu tiên HD → chất lượng gốc cao nhất; fallback về play chuẩn
+            var play = data["hdplay"]?.ToString();
+            if (string.IsNullOrWhiteSpace(play)) play = data["play"]?.ToString();
             if (string.IsNullOrWhiteSpace(play))
                 throw new Exception("TikWM API không thể bóc tách được video này.");
             if (play.StartsWith("/", StringComparison.Ordinal))

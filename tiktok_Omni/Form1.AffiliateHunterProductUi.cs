@@ -17,7 +17,7 @@ namespace tiktok_Omni
         private const float HuntProductManualLinkFontSize = AppInputFontSize;
         private static readonly Font HuntProductFieldFont = AppInputFont;
         private static readonly Font HuntProductManualLinkFont = AppInputFont;
-        private const int HuntProductInputHeight = AppInputMinHeight;
+        private const int HuntProductInputHeight = AppDefaultInputHeight;
         private const int HuntProductFilterRowHeight = AppGridHeaderHeight;
         private const float HuntProductNumericEditorWidth = 104F;
         private const float HuntProductMaxResultsWidth = 64F;
@@ -69,6 +69,7 @@ namespace tiktok_Omni
             split.Panel1.Padding = new Padding(0, 0, 0, 4);
             split.Panel1.Controls.Add(pnlFilters);
             split.Panel2.Controls.Add(dgvHuntProduct);
+            ApplyAppGridChrome(dgvHuntProduct);
 
             var pnlHuntProductFooter = BuildHuntProductFooterPanel();
             pnlHuntProductFooter.Dock = DockStyle.Bottom;
@@ -152,7 +153,7 @@ namespace tiktok_Omni
                 TextAlign = ContentAlignment.MiddleLeft,
                 ForeColor = Color.FromArgb(160, 210, 175),
                 BackColor = Color.Transparent,
-                Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point),
+                Font = AppLabelFont,
                 Text = "Sẵn sàng — nhập từ khoá, bấm «Săn SP Affiliate» (TikTok chỉ qua RapidAPI key tab Cài đặt, lọc HH > 5%)."
             };
 
@@ -841,9 +842,7 @@ namespace tiktok_Omni
                 BackgroundColor = Color.FromArgb(20, 22, 28),
                 BorderStyle = BorderStyle.FixedSingle,
                 GridColor = Color.FromArgb(60, 64, 77),
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                ColumnHeadersHeight = AppGridHeaderHeight,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
             };
             grid.DefaultCellStyle = new DataGridViewCellStyle
             {
@@ -859,11 +858,9 @@ namespace tiktok_Omni
                 SelectionBackColor = Color.FromArgb(40, 44, 54),
                 SelectionForeColor = Color.WhiteSmoke,
                 Alignment = DataGridViewContentAlignment.MiddleLeft,
-                Font = AppGridHeaderFont,
-                Padding = new Padding(6, 8, 6, 8),
                 WrapMode = DataGridViewTriState.False
             };
-            grid.EnableHeadersVisualStyles = false;
+            ApplyAppGridChrome(grid);
             grid.DataSource = _huntProductBindingList;
             grid.DataBindingComplete += dgvHuntProduct_DataBindingComplete;
             return grid;
@@ -876,6 +873,8 @@ namespace tiktok_Omni
                 return;
             }
 
+            EnsureAppGridRowHeights(dgvHuntProduct);
+
             foreach (DataGridViewColumn col in dgvHuntProduct.Columns)
             {
                 var prop = col.DataPropertyName ?? string.Empty;
@@ -886,48 +885,35 @@ namespace tiktok_Omni
                         break;
                     case "SourcePlatform":
                         col.HeaderText = "Nền tảng";
-                        col.FillWeight = 8;
-                        col.MinimumWidth = 64;
                         break;
                     case "ProfileName":
                         col.HeaderText = "Profile";
-                        col.FillWeight = 10;
-                        col.MinimumWidth = 64;
                         break;
                     case "ProductName":
                         col.HeaderText = "Tên sản phẩm";
-                        col.FillWeight = 40;
-                        col.MinimumWidth = 120;
                         break;
                     case "ProductLink":
                         col.HeaderText = "Link";
-                        col.FillWeight = 18;
-                        col.MinimumWidth = 100;
                         break;
                     case "SalesVolume":
                         col.HeaderText = "Lượt bán";
-                        col.FillWeight = 10;
-                        col.MinimumWidth = 72;
                         col.DefaultCellStyle.Format = "N0";
                         break;
                     case "Rating":
                         col.HeaderText = "Điểm đánh giá";
-                        col.FillWeight = 10;
-                        col.MinimumWidth = 72;
                         col.DefaultCellStyle.Format = "0.0";
                         break;
                     case "Price":
                         col.HeaderText = "Giá";
-                        col.FillWeight = 10;
-                        col.MinimumWidth = 64;
                         break;
                     case "Commission":
                         col.HeaderText = "% Hoa hồng";
-                        col.FillWeight = 10;
-                        col.MinimumWidth = 72;
                         break;
                 }
             }
+
+            // Sau khi gán HeaderText tiếng Việt — áp lại font tiêu đề + độ rộng (net472).
+            ApplyAppGridChrome(dgvHuntProduct);
         }
 
         private void btnHuntProductAddManual_Click(object sender, EventArgs e)
@@ -996,6 +982,11 @@ namespace tiktok_Omni
             if (toRemove.Count == 0)
             {
                 Log("Chọn ít nhất một dòng để xóa.");
+                return;
+            }
+
+            if (!UiConfirmHelper.ConfirmDeleteRows(this, toRemove.Count))
+            {
                 return;
             }
 

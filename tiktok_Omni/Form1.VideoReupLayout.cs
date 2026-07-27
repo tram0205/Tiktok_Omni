@@ -8,18 +8,19 @@ namespace tiktok_Omni
 {
     public partial class Form1
     {
-        private static readonly Font ReupPrimaryActionFont = new Font("Segoe UI", 12F, FontStyle.Bold);
-        private static readonly Font ReupJellyButtonFont = new Font("Segoe UI", 10.5F, FontStyle.Bold);
-        private const int ReupPrimaryActionHeight = 52;
-        private const int ReupPrimaryActionMinWidth = 300;
-        private const int ReupCommandButtonHeight = 44;
-        private const int ReupCommandHorizontalPad = 30;
+        private static readonly Font ReupPrimaryActionFont = AppPrimaryActionFont;
+        private static readonly Font ReupJellyButtonFont = AppJellyButtonFont;
+        private const int ReupPrimaryActionHeight = AppPrimaryActionHeight;
+        private const int ReupPrimaryActionMinWidth = AppPrimaryActionMinWidth;
+        private const int ReupCommandButtonHeight = AppJellyButtonHeight;
+        private const int ReupCommandHorizontalPad = AppJellyButtonHorizontalPad;
         private static readonly Color ReupTintAddRow = Color.FromArgb(55, 95, 160);
         private static readonly Color ReupTintAffiliateImport = Color.FromArgb(76, 110, 245);
         private static readonly Color ReupTintRender = Color.FromArgb(56, 158, 88);
-        private static readonly Color ReupTintRenderBatch = Color.FromArgb(48, 138, 78);
         private static readonly Color ReupTintStop = Color.FromArgb(195, 72, 72);
+        private static readonly Color ReupTintContinue = Color.FromArgb(220, 110, 50);
         private static readonly Color ReupTintOutput = Color.FromArgb(88, 94, 112);
+        private static readonly Color ReupTintFolder = Color.FromArgb(55, 100, 140);
         private static readonly Padding ReupFlowItemMargin = new Padding(4, 4, 10, 6);
         private static readonly Padding ReupFlowSectionMargin = new Padding(0, 0, 18, 4);
 
@@ -92,7 +93,6 @@ namespace tiktok_Omni
             };
         }
 
-        private Panel pnlReupCommandBar;
         private Panel pnlReupHookToolbar;
         private Panel pnlReupTopChrome;
         private Panel pnlReupGridWrap;
@@ -122,14 +122,9 @@ namespace tiktok_Omni
                 BuildReupMainSplit();
                 DetachReupEditorPanelFromTab();
 
-                if (pnlVideoReupProgress != null)
-                {
-                    pnlVideoReupProgress.Dock = DockStyle.Bottom;
-                }
-
                 pnlVideoReupStatus.Dock = DockStyle.Bottom;
-                pnlVideoReupStatus.Height = 88;
-                pnlVideoReupStatus.MinimumSize = new Size(0, 72);
+                pnlVideoReupStatus.Height = 210;
+                pnlVideoReupStatus.MinimumSize = new Size(0, 177);
 
                 pnlReupTopChrome.Dock = DockStyle.Top;
                 pnlReupRenderHost.Dock = DockStyle.Bottom;
@@ -166,33 +161,19 @@ namespace tiktok_Omni
 
         private static int MeasureReupButtonTextWidth(string text)
         {
-            return TextRenderer.MeasureText(
-                text,
-                ReupJellyButtonFont,
-                new Size(int.MaxValue, ReupCommandButtonHeight),
-                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.GlyphOverhangPadding).Width;
+            return MeasureAppJellyButtonTextWidth(text, ReupJellyButtonFont, ReupCommandButtonHeight);
         }
 
         private static JellyButton CreateReupJellyButton(string name, string text, Color tint, int minWidth = 96)
         {
-            var width = Math.Max(minWidth, MeasureReupButtonTextWidth(text) + ReupCommandHorizontalPad);
-            return new JellyButton
-            {
-                Name = name,
-                Text = text,
-                Font = ReupJellyButtonFont,
-                JellyTint = tint,
-                JellyFillOpacity = 1f - JellyButton.DefaultTransparency,
-                ForeColor = Color.FromArgb(245, 247, 250),
-                AutoSize = false,
-                Width = width,
-                Height = ReupCommandButtonHeight,
-                MinimumSize = new Size(width, ReupCommandButtonHeight),
-                MaximumSize = new Size(width, ReupCommandButtonHeight),
-                Margin = ReupFlowItemMargin,
-                Tag = JellyButton.ChromeTag,
-                AccessibleName = JellyButton.ChromeTag
-            };
+            return CreateAppJellyButton(
+                name,
+                text,
+                tint,
+                heightOverride: ReupCommandButtonHeight,
+                minWidth: minWidth,
+                horizontalPad: ReupCommandHorizontalPad,
+                margin: ReupFlowItemMargin);
         }
 
         private static void ApplyReupCommandBarButtonMetrics(Button btn)
@@ -202,15 +183,8 @@ namespace tiktok_Omni
                 return;
             }
 
-            var width = Math.Max(
-                btn.MinimumSize.Width > 0 ? btn.MinimumSize.Width : 96,
-                MeasureReupButtonTextWidth(btn.Text) + ReupCommandHorizontalPad);
-            btn.Font = ReupJellyButtonFont;
-            btn.AutoSize = false;
-            btn.Height = ReupCommandButtonHeight;
-            btn.Width = width;
-            btn.MinimumSize = new Size(width, ReupCommandButtonHeight);
-            btn.MaximumSize = new Size(width, ReupCommandButtonHeight);
+            var minWidth = btn.MinimumSize.Width > 0 ? btn.MinimumSize.Width : 96;
+            ResizeAppJellyButton(btn, ReupCommandButtonHeight, minWidth, ReupCommandHorizontalPad);
             btn.Margin = ReupFlowItemMargin;
             if (btn is JellyButton jelly)
             {
@@ -247,19 +221,35 @@ namespace tiktok_Omni
 
             if (lblVideoReupReadiness != null)
             {
-                lblVideoReupReadiness.AutoSize = false;
-                lblVideoReupReadiness.Height = 28;
-                lblVideoReupReadiness.Padding = new Padding(4, 4, 4, 2);
+                lblVideoReupReadiness.AutoSize = true;
+                lblVideoReupReadiness.AutoEllipsis = false;
+                lblVideoReupReadiness.Dock = DockStyle.Top;
+                lblVideoReupReadiness.Padding = new Padding(4, 4, 4, 4);
+                WireAffiliateDeepReadinessWrap(lblVideoReupReadiness, pnlReupGridWrap);
+            }
+
+            if (pnlReupGridToolbar != null)
+            {
+                pnlReupGridToolbar.Dock = DockStyle.Top;
+                pnlReupGridToolbar.Margin = new Padding(0, 0, 0, 4);
             }
 
             dgvVideoReupInput.Margin = Padding.Empty;
             dgvVideoReupInput.MinimumSize = new Size(120, 80);
+            dgvVideoReupInput.Dock = DockStyle.Fill;
 
-            ApplyTopFillBottomDockLayout(
-                pnlReupGridWrap,
-                dgvVideoReupInput,
-                bottom: null,
-                lblVideoReupReadiness);
+            pnlReupGridWrap.Controls.Add(dgvVideoReupInput);
+            if (pnlReupGridToolbar != null)
+            {
+                pnlReupGridWrap.Controls.Add(pnlReupGridToolbar);
+            }
+
+            if (lblVideoReupReadiness != null)
+            {
+                pnlReupGridWrap.Controls.Add(lblVideoReupReadiness);
+            }
+
+            dgvVideoReupInput.BringToFront();
         }
 
         /// <summary>Gỡ panel editor cũ khỏi tab — các control hook/nhạc đã reparent sang thanh công cụ.</summary>
@@ -276,7 +266,6 @@ namespace tiktok_Omni
 
         private void BuildReupTopChrome()
         {
-            BuildReupCommandBar();
             BuildReupHookToolbar();
 
             pnlReupTopChrome = new Panel
@@ -291,9 +280,7 @@ namespace tiktok_Omni
             };
 
             pnlReupHookToolbar.Dock = DockStyle.Top;
-            pnlReupCommandBar.Dock = DockStyle.Top;
             pnlReupTopChrome.Controls.Add(pnlReupHookToolbar);
-            pnlReupTopChrome.Controls.Add(pnlReupCommandBar);
         }
 
         private static void ReparentReupControl(Control control, Control parent)
@@ -328,182 +315,60 @@ namespace tiktok_Omni
                 group.Controls.Add(btn);
             }
 
-            var grpHook = CreateReupToolGroup("Hook:", barColor);
-            AddHookBtn(grpHook, btnVideoReupHookGemini, ReupTintAffiliateImport);
-            AddHookBtn(grpHook, btnVideoReupHookRegen, Color.FromArgb(60, 100, 200));
+            var grpGemini = CreateReupToolGroup(string.Empty, barColor);
+            AddHookBtn(grpGemini, btnPushSelectionToVideoReup, ReupTintAffiliateImport);
+            AddHookBtn(grpGemini, btnVideoReupHookGemini, ReupTintAffiliateImport);
+            if (btnVideoReupHookGemini != null)
+            {
+                btnVideoReupHookGemini.Text = "Tạo Hook+Script+Hashtag";
+            }
             if (btnVideoReupLyriaHook != null)
             {
                 btnVideoReupLyriaHook.Visible = false;
             }
 
-            var grpScript = CreateReupToolGroup("Script:", barColor);
-            AddHookBtn(grpScript, btnVideoReupNarrationScriptGemini, Color.FromArgb(72, 130, 185));
-            AddHookBtn(grpScript, btnVideoReupNarrationScriptRegen, Color.FromArgb(58, 108, 168));
+            flpHookRoot.Controls.Add(grpGemini);
 
-            var grpSfx = CreateReupToolGroup("SFX mặc định:", barColor);
-            ReparentReupControl(cbReupVisualHookPreset, grpSfx);
-            ReparentReupControl(txtReupVisualHookSfx, grpSfx);
-            ReparentReupControl(btnBrowseReupVisualHookSfx, grpSfx);
-            if (cbReupVisualHookPreset != null)
+            EnsureReupNarrationScriptButtons();
+            var grpNarration = CreateReupToolGroup(string.Empty, barColor);
+            AddHookBtn(grpNarration, btnVideoReupNarrationScriptGemini, ReupTintAffiliateImport);
+            AddHookBtn(grpNarration, btnVideoReupNarrationScriptRegen, Color.FromArgb(120, 70, 160));
+
+            var grpSfx = CreateReupToolGroup(string.Empty, barColor);
+            ReparentReupControl(btnVideoReupOpenHookSfxFolder, grpSfx);
+            if (btnVideoReupOpenHookSfxFolder != null)
             {
-                cbReupVisualHookPreset.Width = 120;
-                ApplyReupFlowControlMargin(cbReupVisualHookPreset, top: 6);
+                ApplyReupCommandBarButtonMetrics(btnVideoReupOpenHookSfxFolder);
+                ApplyReupFlowControlMargin(btnVideoReupOpenHookSfxFolder, top: 6);
             }
 
-            if (txtReupVisualHookSfx != null)
-            {
-                txtReupVisualHookSfx.Width = 140;
-                ApplyReupFlowControlMargin(txtReupVisualHookSfx, top: 6);
-            }
-
-            if (btnBrowseReupVisualHookSfx != null)
-            {
-                btnBrowseReupVisualHookSfx.Height = 32;
-                ApplyReupFlowControlMargin(btnBrowseReupVisualHookSfx, top: 6);
-            }
-
-            var grpMusic = CreateReupToolGroup("Nhạc:", barColor);
-            ReparentReupControl(btnVideoReupRefreshMusicList, grpMusic);
+            var grpMusic = CreateReupToolGroup(string.Empty, barColor);
             ReparentReupControl(btnVideoReupOpenMusicFolder, grpMusic);
-            if (btnVideoReupRefreshMusicList != null)
-            {
-                ApplyReupCommandBarButtonMetrics(btnVideoReupRefreshMusicList);
-                btnVideoReupRefreshMusicList.Height = 32;
-            }
-
             if (btnVideoReupOpenMusicFolder != null)
             {
                 ApplyReupCommandBarButtonMetrics(btnVideoReupOpenMusicFolder);
-                btnVideoReupOpenMusicFolder.Height = 32;
             }
 
-            flpHookRoot.Controls.Add(grpHook);
-            flpHookRoot.Controls.Add(grpScript);
+            flpHookRoot.Controls.Add(grpNarration);
             flpHookRoot.Controls.Add(grpSfx);
             flpHookRoot.Controls.Add(grpMusic);
+
+            EnsureReupGeminiButtonTooltips();
+            EnsureReupNarrationScriptTooltips();
+
+            if (btnVideoReupHookGemini != null)
+            {
+                btnVideoReupHookGemini.Enabled = true;
+            }
 
             HideDetachedReupEditorControls();
 
             pnlReupHookToolbar.Controls.Add(flpHookRoot);
         }
 
-        private void BuildReupSubtitleToolbar()
-        {
-            var barColor = Color.FromArgb(30, 33, 40);
-            pnlReupSubtitleToolbar = CreateReupAutoSizeBar("pnlReupSubtitleToolbar", barColor);
-
-            var flp = CreateReupWrapFlowPanel("flpReupSubtitleStyle", barColor);
-
-            Label MkLbl(string text) => new Label
-            {
-                Text = text,
-                AutoSize = true,
-                ForeColor = Color.FromArgb(150, 158, 172),
-                Margin = new Padding(0, 10, 4, 4)
-            };
-
-            cbReupSubtitlePosition = CreateReupSubtitleCombo("cbReupSubtitlePosition", 88);
-            cbReupSubtitlePosition.Items.AddRange(new object[] { "Dưới", "Giữa", "Trên" });
-            cbReupSubtitlePosition.SelectedIndex = 0;
-
-            cbReupSubtitleFont = CreateReupSubtitleCombo("cbReupSubtitleFont", 130);
-            cbReupSubtitleFont.Items.AddRange(ReupSubtitleStyleHelper.FontChoices.Cast<object>().ToArray());
-            cbReupSubtitleFont.SelectedIndex = 0;
-
-            numReupSubtitleFontSize = new NumericUpDown
-            {
-                Name = "numReupSubtitleFontSize",
-                Width = 54,
-                Height = 24,
-                Minimum = 32,
-                Maximum = 160,
-                Value = 88,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 6, 6, 0)
-            };
-
-            cbReupSubtitleAnimation = CreateReupSubtitleCombo("cbReupSubtitleAnimation", 130);
-            cbReupSubtitleAnimation.Items.AddRange(new object[]
-            {
-                "Pop (phóng to)",
-                "Karaoke (tô màu)",
-                "Hiện dần",
-                "Cả dòng"
-            });
-            cbReupSubtitleAnimation.SelectedIndex = 0;
-
-            chkReupSubtitleBold = new CheckBox
-            {
-                Name = "chkReupSubtitleBold",
-                Text = "Đậm",
-                AutoSize = true,
-                Checked = true,
-                ForeColor = Color.Gainsboro,
-                Margin = new Padding(4, 8, 4, 0)
-            };
-
-            chkReupSubtitleItalic = new CheckBox
-            {
-                Name = "chkReupSubtitleItalic",
-                Text = "Nghiêng",
-                AutoSize = true,
-                ForeColor = Color.Gainsboro,
-                Margin = new Padding(0, 8, 6, 0)
-            };
-
-            numReupSubtitleWordsPerLine = new NumericUpDown
-            {
-                Name = "numReupSubtitleWordsPerLine",
-                Width = 44,
-                Height = 24,
-                Minimum = 4,
-                Maximum = 8,
-                Value = 6,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 6, 0, 0)
-            };
-
-            flp.Controls.Add(MkLbl("Phụ đề:"));
-            flp.Controls.Add(MkLbl("Vị trí"));
-            flp.Controls.Add(cbReupSubtitlePosition);
-            flp.Controls.Add(MkLbl("Font"));
-            flp.Controls.Add(cbReupSubtitleFont);
-            flp.Controls.Add(MkLbl("Cỡ"));
-            flp.Controls.Add(numReupSubtitleFontSize);
-            flp.Controls.Add(MkLbl("Chạy chữ"));
-            flp.Controls.Add(cbReupSubtitleAnimation);
-            flp.Controls.Add(chkReupSubtitleBold);
-            flp.Controls.Add(chkReupSubtitleItalic);
-            flp.Controls.Add(MkLbl("Từ/dòng"));
-            flp.Controls.Add(numReupSubtitleWordsPerLine);
-
-            pnlReupSubtitleToolbar.Controls.Add(flp);
-        }
-
-        private static ComboBox CreateReupSubtitleCombo(string name, int width)
-        {
-            return new ComboBox
-            {
-                Name = name,
-                Width = width,
-                Height = 24,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(4, 6, 6, 4)
-            };
-        }
-
         /// <summary>Ẩn control đã chuyển sang lưới — tránh trùng trên toolbar.</summary>
         private void HideDetachedReupEditorControls()
         {
-            if (chkReupUseVisualHookSfx != null)
-            {
-                chkReupUseVisualHookSfx.Visible = false;
-            }
-
             if (cbVideoReupMusic != null)
             {
                 cbVideoReupMusic.Visible = false;
@@ -530,56 +395,17 @@ namespace tiktok_Omni
             }
         }
 
-        private void BuildReupCommandBar()
-        {
-            EnsureReupPlaybackButtons();
-
-            var barColor = Color.FromArgb(36, 39, 48);
-            pnlReupCommandBar = CreateReupAutoSizeBar("pnlReupCommandBar", barColor);
-
-            var flpReupActions = CreateReupWrapFlowPanel("flpReupActions", barColor);
-
-            void AddBtn(Button btn)
-            {
-                if (btn == null)
-                {
-                    return;
-                }
-
-                btn.Parent?.Controls.Remove(btn);
-                ApplyReupCommandBarButtonMetrics(btn);
-                flpReupActions.Controls.Add(btn);
-            }
-
-            AddBtn(btnVideoReupAddManualRow);
-            AddBtn(btnPushSelectionToVideoReup);
-
-            btnVideoReupStop = CreateReupJellyButton("btnVideoReupStop", "D\u1EEBng h\u00E0ng \u0111\u1EE3i", ReupTintStop, 124);
-            btnVideoReupStop.Click += btnVideoReupStop_Click;
-            AddBtn(btnVideoReupStop);
-
-            btnVideoReupPushToAutoPost = CreateReupJellyButton(
-                "btnVideoReupPushToAutoPost",
-                "Đẩy sang Đăng tự động",
-                ReupTintAffiliateImport,
-                196);
-            btnVideoReupPushToAutoPost.Click += btnVideoReupPushToAutoPost_Click;
-            AddBtn(btnVideoReupPushToAutoPost);
-
-            pnlReupCommandBar.Controls.Add(flpReupActions);
-        }
-
         private void BuildReupRenderActionBar()
         {
             EnsureReupPlaybackButtons();
 
             if (btnVideoReupProcessVideo == null || btnVideoReupProcessVideo.IsDisposed)
             {
-                btnVideoReupProcessVideo = CreateAffiliateJellyButton(
+                btnVideoReupProcessVideo = CreateAppPrimaryJellyButton(
                     "btnVideoReupProcessVideo",
                     "Render & Đóng gói",
-                    AffiliateTintHunt);
-                PrepareAffiliateToolbarButtonForFlow(btnVideoReupProcessVideo);
+                    ReupTintRender,
+                    minWidth: ReupPrimaryActionMinWidth);
                 btnVideoReupProcessVideo.Click += btnProcessVideo_Click;
             }
             else
@@ -589,35 +415,56 @@ namespace tiktok_Omni
 
             btnPlaySource.Parent?.Controls.Remove(btnPlaySource);
             btnPlayOutput.Parent?.Controls.Remove(btnPlayOutput);
+            btnVideoReupAddManualRow?.Parent?.Controls.Remove(btnVideoReupAddManualRow);
+            btnVideoReupPushToAutoPost?.Parent?.Controls.Remove(btnVideoReupPushToAutoPost);
             btnPlaySource.Text = "Video nguồn";
             btnPlayOutput.Text = "Video thành phẩm";
             ApplyReupCommandBarButtonMetrics(btnPlaySource);
             ApplyReupCommandBarButtonMetrics(btnPlayOutput);
+            if (btnVideoReupAddManualRow != null)
+            {
+                ApplyReupCommandBarButtonMetrics(btnVideoReupAddManualRow);
+            }
 
-            var renderWidth = Math.Max(
-                ReupPrimaryActionMinWidth + 40,
-                TextRenderer.MeasureText(
-                    btnVideoReupProcessVideo.Text,
-                    ReupPrimaryActionFont,
-                    new Size(int.MaxValue, ReupPrimaryActionHeight),
-                    TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.GlyphOverhangPadding).Width
-                + ReupCommandHorizontalPad + 32);
+            if (btnVideoReupPushToAutoPost == null || btnVideoReupPushToAutoPost.IsDisposed)
+            {
+                btnVideoReupPushToAutoPost = CreateReupJellyButton(
+                    "btnVideoReupPushToAutoPost",
+                    "Đẩy sang Đăng tự động",
+                    ReupTintAffiliateImport,
+                    196);
+                btnVideoReupPushToAutoPost.Click += btnVideoReupPushToAutoPost_Click;
+            }
+
+            ApplyReupCommandBarButtonMetrics(btnVideoReupPushToAutoPost);
+
+            ResizeAppJellyButton(
+                btnVideoReupProcessVideo,
+                AppPrimaryActionHeight,
+                ReupPrimaryActionMinWidth,
+                AppPrimaryActionHorizontalPad);
             btnVideoReupProcessVideo.Font = ReupPrimaryActionFont;
-            btnVideoReupProcessVideo.AutoSize = false;
-            btnVideoReupProcessVideo.Height = ReupPrimaryActionHeight;
-            btnVideoReupProcessVideo.Width = renderWidth;
-            btnVideoReupProcessVideo.MinimumSize = new Size(renderWidth, ReupPrimaryActionHeight);
-            btnVideoReupProcessVideo.MaximumSize = new Size(renderWidth, ReupPrimaryActionHeight);
             btnVideoReupProcessVideo.Margin = new Padding(4, 4, 12, 6);
             btnVideoReupProcessVideo.Anchor = AnchorStyles.None;
             if (btnVideoReupProcessVideo is JellyButton renderJelly)
             {
-                renderJelly.JellyFillOpacity = 1f - JellyButton.DefaultTransparency;
                 renderJelly.JellyTint = ReupTintRender;
-                renderJelly.ForeColor = Color.FromArgb(245, 247, 250);
             }
 
-            btnVideoReupProcessVideo.Enabled = true;
+            btnVideoReupProcessVideo.Enabled = ResolveVideoReupRenderReady();
+
+            if (btnVideoReupStop == null || btnVideoReupStop.IsDisposed)
+            {
+                btnVideoReupStop = CreateReupJellyButton("btnVideoReupStop", "D\u1EEBng render", ReupTintStop, 108);
+                btnVideoReupStop.Click += btnVideoReupStop_Click;
+            }
+            else
+            {
+                btnVideoReupStop.Parent?.Controls.Remove(btnVideoReupStop);
+            }
+
+            ApplyReupCommandBarButtonMetrics(btnVideoReupStop);
+            ApplyVideoReupRenderStopButtonUi(continueMode: false, enabled: false);
 
             var renderBarColor = Color.FromArgb(28, 30, 38);
             pnlReupRenderHost = new Panel
@@ -632,9 +479,19 @@ namespace tiktok_Omni
 
             var flpRender = CreateReupWrapFlowPanel("flpReupRenderActions", renderBarColor);
             flpRender.Padding = new Padding(8, 4, 8, 4);
+            if (btnVideoReupAddManualRow != null)
+            {
+                flpRender.Controls.Add(btnVideoReupAddManualRow);
+            }
+
             flpRender.Controls.Add(btnPlaySource);
             flpRender.Controls.Add(btnVideoReupProcessVideo);
+            flpRender.Controls.Add(btnVideoReupStop);
             flpRender.Controls.Add(btnPlayOutput);
+            if (btnVideoReupPushToAutoPost != null)
+            {
+                flpRender.Controls.Add(btnVideoReupPushToAutoPost);
+            }
 
             pnlReupRenderHost.Controls.Add(flpRender);
         }
@@ -661,7 +518,7 @@ namespace tiktok_Omni
         }
 
         /// <summary>Cập nhật ffmpeg path trong OcrService sau khi Settings được load (có thể khác bundled).</summary>
-        private void RefreshVideoOcrService()
+        private void RefreshVideoOcrService(AppSettings settings = null)
         {
             if (_videoReupRemixService == null)
             {
@@ -670,7 +527,7 @@ namespace tiktok_Omni
 
             try
             {
-                var settings = _configManager.LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+                settings = settings ?? _configManager.LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
                 string ffmpegPath = null;
                 if (Services.FfmpegToolkitService.TryResolve(settings, out var toolkit, out _))
                 {
@@ -684,15 +541,99 @@ namespace tiktok_Omni
 
                 if (string.IsNullOrWhiteSpace(ffmpegPath) || !System.IO.File.Exists(ffmpegPath))
                 {
+                    _videoReupRemixService.OcrService = null;
+                    LogVideoReup("[OCR] Chưa có FFmpeg — bỏ qua OCR (body vẫn lật ngang mặc định).");
                     return;
                 }
 
                 var tessdataPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
+                if (!System.IO.Directory.Exists(tessdataPath))
+                {
+                    _videoReupRemixService.OcrService = null;
+                    LogVideoReup("[OCR] Không tìm thấy tessdata tại «" + tessdataPath + "» — bỏ qua OCR (body vẫn lật ngang).");
+                    return;
+                }
+
                 _videoReupRemixService.OcrService = new Services.VideoOcrService(ffmpegPath, tessdataPath);
+                LogVideoReup("[OCR] Sẵn sàng — kiểm tra chữ trước khi lật ngang body.");
             }
             catch (Exception ex)
             {
+                _videoReupRemixService.OcrService = null;
                 LogVideoReup("[OCR] RefreshVideoOcrService lỗi (bỏ qua): " + ex.Message);
+            }
+        }
+
+        private void EnsureReupNarrationScriptButtons()
+        {
+            if (btnVideoReupNarrationScriptGemini == null || btnVideoReupNarrationScriptGemini.IsDisposed)
+            {
+                btnVideoReupNarrationScriptGemini = CreateReupJellyButton(
+                    "btnVideoReupNarrationScriptGemini",
+                    "Tạo script",
+                    ReupTintAffiliateImport,
+                    108);
+                btnVideoReupNarrationScriptGemini.Click += btnVideoReupNarrationScriptGemini_Click;
+            }
+
+            if (btnVideoReupNarrationScriptRegen == null || btnVideoReupNarrationScriptRegen.IsDisposed)
+            {
+                btnVideoReupNarrationScriptRegen = CreateReupJellyButton(
+                    "btnVideoReupNarrationScriptRegen",
+                    "Tạo lại script",
+                    Color.FromArgb(120, 70, 160),
+                    124);
+                btnVideoReupNarrationScriptRegen.Click += btnVideoReupNarrationScriptRegen_Click;
+            }
+        }
+
+        private void EnsureReupNarrationScriptTooltips()
+        {
+            if (_reupPathTip == null)
+            {
+                return;
+            }
+
+            if (btnVideoReupNarrationScriptGemini != null)
+            {
+                _reupPathTip.SetToolTip(
+                    btnVideoReupNarrationScriptGemini,
+                    "Sinh script thuyết minh bằng Gemini — chỉ dòng có cột «Chế độ» = «Hook + Thuyết minh».");
+            }
+
+            if (btnVideoReupNarrationScriptRegen != null)
+            {
+                _reupPathTip.SetToolTip(
+                    btnVideoReupNarrationScriptRegen,
+                    "Tạo lại script thuyết minh (bỏ qua script đã có).");
+            }
+        }
+
+        private void EnsureReupGeminiButtonTooltips()
+        {
+            if (_reupPathTip == null)
+            {
+                _reupPathTip = new System.Windows.Forms.ToolTip
+                {
+                    AutoPopDelay = 12000,
+                    InitialDelay = 400,
+                    ReshowDelay = 200,
+                    ShowAlways = true
+                };
+            }
+
+            const string createTip = "Gọi Gemini sinh hook, script và hashtag cho dòng đã chọn.";
+
+            if (btnVideoReupHookGemini != null)
+            {
+                _reupPathTip.SetToolTip(btnVideoReupHookGemini, createTip);
+            }
+
+            if (btnVideoReupStop != null)
+            {
+                _reupPathTip.SetToolTip(
+                    btnVideoReupStop,
+                    "Dừng render lô đang chạy. Sau khi dừng, bấm «Tiếp tục» để render các dòng còn lại.");
             }
         }
 
@@ -735,12 +676,9 @@ namespace tiktok_Omni
             }
         }
 
-        private void btnVideoReupStop_Click(object sender, System.EventArgs e)
+        private async void btnVideoReupStop_Click(object sender, System.EventArgs e)
         {
-            CancelAllVideoReupBatchJobs();
-            _globalJobQueue?.ClearAll();
-            SetVideoReupProgress("Đã dừng hàng đợi render", 0);
-            LogVideoReup("Đã dừng các job Video reup đang chờ/chạy.");
+            await HandleVideoReupRenderStopButtonClickAsync().ConfigureAwait(true);
         }
     }
 }

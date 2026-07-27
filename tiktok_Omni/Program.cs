@@ -18,7 +18,57 @@ namespace tiktok_Omni
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Form1());
+            // Xác nhận DPI awareness từ app.manifest (Output → Debug).
+            System.Diagnostics.Debug.WriteLine(
+                "Startup DPI-aware: " + Form1.IsAppDpiAware());
+            var mainForm = new Form1();
+            TryAttachConsoleCancelHandler(mainForm);
+            Application.Run(mainForm);
+        }
+
+        /// <summary>dotnet run gắn console — Ctrl+C cần đóng WinForms, không chỉ dừng prompt.</summary>
+        private static void TryAttachConsoleCancelHandler(Form mainForm)
+        {
+            try
+            {
+                Console.CancelKeyPress += (_, e) =>
+                {
+                    e.Cancel = true;
+                    if (mainForm == null || mainForm.IsDisposed)
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        mainForm.BeginInvoke(new Action(() =>
+                        {
+                            if (mainForm is Form1 app && !app.IsDisposed)
+                            {
+                                app.ShutdownAndClose();
+                            }
+                            else if (!mainForm.IsDisposed)
+                            {
+                                mainForm.Close();
+                            }
+                        }));
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            Environment.Exit(0);
+                        }
+                        catch
+                        {
+                        }
+                    }
+                };
+            }
+            catch
+            {
+                // Không có console (chạy .exe trực tiếp) — bỏ qua.
+            }
         }
 
         private static bool TryRunChromeLoginVerify(string[] args)

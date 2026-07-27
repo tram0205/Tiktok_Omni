@@ -72,7 +72,7 @@ namespace tiktok_Omni.Services
 
         public async Task<List<ApprovalQueueItem>> LoadAsync()
         {
-            var path = GetQueuePath();
+            var path = AppDataPaths.ResolveReadableJsonPath(QueueFileName, out var migrate);
             if (!File.Exists(path))
             {
                 return new List<ApprovalQueueItem>();
@@ -87,11 +87,17 @@ namespace tiktok_Omni.Services
                 }
 
                 var items = JsonConvert.DeserializeObject<List<ApprovalQueueItem>>(json) ?? new List<ApprovalQueueItem>();
-                return items
+                var list = items
                     .Where(x => x != null && !string.IsNullOrWhiteSpace(x.Id))
                     .OrderByDescending(x => x.CreatedAtUtc)
                     .Take(MaxItems)
                     .ToList();
+                if (migrate && list.Count > 0)
+                {
+                    await SaveAsync(list).ConfigureAwait(false);
+                }
+
+                return list;
             }
             catch
             {
@@ -108,12 +114,11 @@ namespace tiktok_Omni.Services
                 .ToList();
 
             var json = JsonConvert.SerializeObject(normalized, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetQueuePath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
-        }
-
-        private static string GetQueuePath()
-        {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, QueueFileName);
+            await Task.Run(() =>
+            {
+                AppDataPaths.WriteJson(QueueFileName, json);
+                AppDataPaths.TryDeleteLegacyJson(QueueFileName);
+            }).ConfigureAwait(false);
         }
     }
 }

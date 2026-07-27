@@ -23,7 +23,28 @@ namespace tiktok_Omni.Services
         FadeIn,
 
         /// <summary>Hiện cả cụm — không hiệu ứng từng từ.</summary>
-        Plain
+        Plain,
+
+        /// <summary>Pop có overshoot rồi hồi (hook Showcase).</summary>
+        Bounce,
+
+        /// <summary>Zoom cả dòng một lần (hook Showcase).</summary>
+        LineZoom,
+
+        /// <summary>Rung nhẹ khi xuất hiện (hook Showcase).</summary>
+        Shake,
+
+        /// <summary>Nhấp nháy vàng ↔ trắng (hook Showcase).</summary>
+        FlashColor,
+
+        /// <summary>Neon đỏ/cam sale — pop mạnh (hook Showcase).</summary>
+        NeonSale,
+
+        /// <summary>Từng từ hiện đột ngột (hook Showcase).</summary>
+        Typewriter,
+
+        /// <summary>Viền pulse sáng (hook Showcase).</summary>
+        GlowPulse
     }
 
     /// <summary>Map cài đặt Video reup → <see cref="AssSubtitleGeneratorOptions"/>.</summary>

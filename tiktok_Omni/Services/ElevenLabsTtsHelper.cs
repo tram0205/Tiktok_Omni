@@ -23,6 +23,39 @@ namespace tiktok_Omni.Services
 
         public const double DefaultSimilarityBoost = 0.75;
 
+        /// <summary>Hook TikTok — biểu cảm hơn (stability thấp, style cao).</summary>
+        public const double HookStability = 0.38;
+
+        public const double HookSimilarityBoost = 0.78;
+
+        public const double HookStyleExaggeration = 0.32;
+
+        /// <summary>Thuyết minh Video reup — ổn định hơn (formal).</summary>
+        public const double NarrationStability = 0.58;
+
+        public const double NarrationSimilarityBoost = 0.72;
+
+        public const double NarrationStyleExaggeration = 0.08;
+
+        /// <summary>Showcase thân+CTA — giọng Nam trôi, ổn hơn hook một chút.</summary>
+        public const double ShowcaseBodyStability = 0.48;
+
+        public const double ShowcaseBodySimilarityBoost = 0.78;
+
+        public const double ShowcaseBodyStyleExaggeration = 0.26;
+
+        public enum VoiceDeliveryMode
+        {
+            /// <summary>Video reup thuyết minh — stability cao, style thấp.</summary>
+            Narration = 0,
+
+            /// <summary>Hook / CTA — nhấn mạnh, style cao.</summary>
+            Hook = 1,
+
+            /// <summary>Showcase cảnh thân — giữ accent clone, kể tự nhiên hơn hook.</summary>
+            ShowcaseBody = 2
+        }
+
         public static string ResolveModelId(AppSettings settings)
         {
             var model = (settings?.TtsElevenLabsModel ?? string.Empty).Trim();
@@ -119,22 +152,74 @@ namespace tiktok_Omni.Services
             };
         }
 
-        /// <summary>Giữ tương thích tên cũ — cùng preset Web.</summary>
+        /// <summary>Giọng hook Video reup — nhấn mạnh, nhiều cảm xúc (eleven_v3 + style).</summary>
         public static object CreateVietnameseHookVoiceSettings()
         {
-            return CreateDefaultVoiceSettings();
+            return new
+            {
+                stability = HookStability,
+                similarity_boost = HookSimilarityBoost,
+                style = HookStyleExaggeration
+            };
         }
 
-        /// <summary>Giữ tương thích tên cũ — cùng preset Web.</summary>
+        /// <summary>Giọng thuyết minh Video reup — kể chuyện ổn định.</summary>
         public static object CreateVietnameseNarrationVoiceSettings()
         {
-            return CreateDefaultVoiceSettings();
+            return new
+            {
+                stability = NarrationStability,
+                similarity_boost = NarrationSimilarityBoost,
+                style = NarrationStyleExaggeration
+            };
+        }
+
+        /// <summary>Showcase: thoại từng cảnh — cùng voice_id, giữ accent clone, kể tự nhiên (không kéo về giọng Bắc).</summary>
+        public static object CreateShowcaseBodyVoiceSettings()
+        {
+            return new
+            {
+                stability = ShowcaseBodyStability,
+                similarity_boost = ShowcaseBodySimilarityBoost,
+                style = ShowcaseBodyStyleExaggeration
+            };
+        }
+
+        private static object ResolveVoiceSettings(bool emphaticHook, bool showcaseExpressiveBody)
+        {
+            if (emphaticHook)
+            {
+                return CreateVietnameseHookVoiceSettings();
+            }
+
+            if (showcaseExpressiveBody)
+            {
+                return CreateShowcaseBodyVoiceSettings();
+            }
+
+            return CreateVietnameseNarrationVoiceSettings();
         }
 
         /// <summary>JSON body POST /text-to-speech/{voice_id} — luôn có language_code vi.</summary>
-        public static object BuildPayload(string text, AppSettings settings, bool emphaticHook, string voiceId = null)
+        public static object BuildPayload(
+            string text,
+            AppSettings settings,
+            bool emphaticHook,
+            string voiceId = null,
+            bool showcaseExpressiveBody = false,
+            string languageCodeOverride = null)
         {
-            var cleanText = ApplyDeepPauses(VietnameseTtsTextNormalizer.SanitizeForElevenLabsRequest(text));
+            var sanitized = VietnameseTtsTextNormalizer.SanitizeForElevenLabsRequest(text);
+            var cleanText = emphaticHook || showcaseExpressiveBody
+                ? sanitized
+                : ApplyDeepPauses(sanitized);
+            var voiceSettings = ResolveVoiceSettings(emphaticHook, showcaseExpressiveBody);
+            var lang = (languageCodeOverride ?? string.Empty).Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(lang))
+            {
+                lang = ResolveLanguageCode(settings);
+            }
+
             var vid = (voiceId ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(vid))
             {
@@ -142,10 +227,8 @@ namespace tiktok_Omni.Services
                 {
                     text = cleanText,
                     model_id = ResolveModelId(settings),
-                    language_code = ResolveLanguageCode(settings),
-                    voice_settings = emphaticHook
-                        ? CreateVietnameseHookVoiceSettings()
-                        : CreateVietnameseNarrationVoiceSettings()
+                    language_code = lang,
+                    voice_settings = voiceSettings
                 };
             }
 
@@ -153,18 +236,29 @@ namespace tiktok_Omni.Services
             {
                 text = cleanText,
                 model_id = ResolveModelId(settings),
-                language_code = ResolveLanguageCode(settings),
+                language_code = lang,
                 voice_id = vid,
-                voice_settings = emphaticHook
-                    ? CreateVietnameseHookVoiceSettings()
-                    : CreateVietnameseNarrationVoiceSettings()
+                voice_settings = voiceSettings
             };
         }
 
         /// <summary>JSON body POST /text-to-speech/{voice_id} — luôn có language_code vi.</summary>
         public static object BuildPayload(string text, AppSettings settings, bool emphaticHook)
         {
-            return BuildPayload(text, settings, emphaticHook, voiceId: null);
+            return BuildPayload(text, settings, emphaticHook, voiceId: null, showcaseExpressiveBody: false);
+        }
+
+        public static object CreateVoiceSettings(VoiceDeliveryMode mode)
+        {
+            switch (mode)
+            {
+                case VoiceDeliveryMode.Hook:
+                    return CreateVietnameseHookVoiceSettings();
+                case VoiceDeliveryMode.ShowcaseBody:
+                    return CreateShowcaseBodyVoiceSettings();
+                default:
+                    return CreateVietnameseNarrationVoiceSettings();
+            }
         }
 
         /// <summary>Thay dấu chấm câu bằng ... để ElevenLabs nghỉ sâu hơn (triết lý / quote).</summary>
@@ -178,6 +272,19 @@ namespace tiktok_Omni.Services
 
             s = Regex.Replace(s, @"(?<=[^\d])\.(?=\s|$)", "...");
             s = Regex.Replace(s, @"(?<=[^\d])\.(?=[^\s\d])", "...");
+            return s;
+        }
+
+        /// <summary>Nghỉ ngắn cho hook ngắn (dấu phẩy → … nhẹ).</summary>
+        public static string ApplyHookDeliveryPauses(string text)
+        {
+            var s = (text ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(s))
+            {
+                return s;
+            }
+
+            s = Regex.Replace(s, @",\s+", ", … ");
             return s;
         }
 

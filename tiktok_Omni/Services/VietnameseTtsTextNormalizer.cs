@@ -29,13 +29,22 @@ namespace tiktok_Omni.Services
         };
 
         /// <summary>Làm sạch văn bản trước khi gửi ElevenLabs (đồng bộ + Gemini nếu cần).</summary>
-        public static async Task<string> PrepareForElevenLabsAsync(
+        public static Task<string> PrepareForElevenLabsAsync(
             string rawText,
             AppSettings settings,
             Action<string> log,
             CancellationToken cancellationToken)
         {
-            var text = NormalizePunctuation(rawText);
+            return PrepareForOnlineTtsAsync(rawText, settings, log, cancellationToken);
+        }
+
+        private static async Task<string> PrepareForOnlineTtsAsync(
+            string rawText,
+            AppSettings settings,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            var text = SanitizeForElevenLabsRequest(rawText);
             if (string.IsNullOrWhiteSpace(text))
             {
                 return text;
@@ -51,7 +60,7 @@ namespace tiktok_Omni.Services
             {
                 if (LooksLikeMissingDiacritics(text))
                 {
-                    log?.Invoke("[TTS] Cảnh báo: văn bản có thể thiếu dấu — thêm AI API Key để tự sửa trước ElevenLabs.");
+                    log?.Invoke("[TTS] Cảnh báo: văn bản có thể thiếu dấu — thêm AI API Key để tự sửa trước TTS.");
                 }
 
                 return text;
@@ -59,16 +68,17 @@ namespace tiktok_Omni.Services
 
             try
             {
-                log?.Invoke("[TTS] Gemini: đang bổ sung dấu và ngắt câu cho ElevenLabs…");
+                log?.Invoke("[TTS] Gemini: đang bổ sung dấu và ngắt câu cho TTS…");
                 var gemini = new GeminiService();
                 var prompt =
-                    "Bạn là biên tập lời thoại TTS tiếng Việt cho ElevenLabs.\r\n" +
+                    "Bạn là biên tập lời thoại TTS tiếng Việt.\r\n" +
                     "Nhiệm vụ: nhận văn bản sau và trả về DUY NHẤT bản đã chỉnh — không giải thích, không markdown, không ngoặc kép.\r\n" +
                     "Yêu cầu:\r\n" +
-                    "1) Bổ sung đầy đủ dấu thanh đúng chính tả tiếng Việt.\r\n" +
+                    "1) Bổ sung đầy đủ dấu thanh đúng chính tả tiếng Việt (mọi từ tiếng Việt phải có dấu, không để chữ không dấu).\r\n" +
                     "2) Thêm dấu phẩy (,) và chấm (.) hợp lý để người đọc biết chỗ nghỉ ngắn và chỗ nhấn giọng.\r\n" +
-                    "3) Giữ nguyên ý nghĩa, độ dài gần với bản gốc, văn phong tự nhiên như hook TikTok.\r\n\r\n" +
-                    "Văn bản:\r\n" + text;
+                    "3) Giữ nguyên ý nghĩa, độ dài gần với bản gốc, văn phong tự nhiên như hook TikTok.\r\n" +
+                    "4) KHÔNG thêm tag [excited] hay markdown — chỉ văn bản thuần.\r\n" +
+                    "\r\nVăn bản:\r\n" + text;
 
                 var fixedText = await gemini.GenerateScriptAsync(
                     prompt,
@@ -317,6 +327,41 @@ namespace tiktok_Omni.Services
             }
 
             return text.Length >= 18 && text.IndexOf(',') < 0;
+        }
+
+        private static readonly Regex UnaccentedTokenRegex = new Regex(
+            @"\b[A-Za-z]{3,}\b",
+            RegexOptions.Compiled);
+
+        private static bool HasUnaccentedVietnameseTokens(string text)
+        {
+            var s = (text ?? string.Empty).Trim();
+            if (s.Length < 6)
+            {
+                return false;
+            }
+
+            var hasDiacritic = VietnameseDiacriticRegex.IsMatch(s);
+            if (!hasDiacritic)
+            {
+                return LooksLikeMissingDiacritics(s);
+            }
+
+            foreach (Match m in UnaccentedTokenRegex.Matches(s))
+            {
+                var token = m.Value;
+                if (token.Length < 4)
+                {
+                    continue;
+                }
+
+                if (!VietnameseDiacriticRegex.IsMatch(token))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool EndsWithClausePunctuation(string token)

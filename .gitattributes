@@ -4,3 +4,6 @@
 *.sln text
 *.json text
 *.md text
+tiktok_Omni/Assets/Backgrounds/*.mp4 filter=lfs diff=lfs merge=lfs -text
+tiktok_Omni/Assets/Audio/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
+tiktok_Omni/Assets/Audio/**/*.wav filter=lfs diff=lfs merge=lfs -text

@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Helpers;
 using Newtonsoft.Json;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
@@ -55,6 +56,13 @@ namespace tiktok_Omni
             dgvTikTokSchedule?.Refresh();
             dgvFacebookSchedule?.Refresh();
             dgvYouTubeSchedule?.Refresh();
+        }
+
+        private void ApplyAutoPostScheduleProfileComboColumns()
+        {
+            ApplyGridProfileComboColumn(dgvTikTokSchedule, "colAutoPostProfile");
+            ApplyGridProfileComboColumn(dgvFacebookSchedule, "colAutoPostProfile");
+            ApplyGridProfileComboColumn(dgvYouTubeSchedule, "colAutoPostProfile");
         }
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -148,6 +156,9 @@ namespace tiktok_Omni
             tbl.Controls.Add(toolbar,  0, 0);
             tbl.Controls.Add(dgv,      0, 1);
             tbl.Controls.Add(logStrip, 0, 2);
+            // net472: Controls.Add đè font header — áp lại sau khi đã gắn parent.
+            ApplyAppGridChrome(dgv);
+            ApplyGridProfileComboColumn(dgv, "colAutoPostProfile");
 
             var pnl = new Panel { Dock = DockStyle.Fill, BackColor = surfaceColor, Padding = Padding.Empty };
             pnl.Controls.Add(tbl);
@@ -202,23 +213,18 @@ namespace tiktok_Omni
             };
             dgv.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
             {
-                Font = AppGridHeaderFont,
                 BackColor = Color.FromArgb(40, 44, 54),
                 ForeColor = Color.WhiteSmoke,
                 Alignment = DataGridViewContentAlignment.MiddleLeft,
-                Padding = new Padding(6, 0, 6, 0),
                 WrapMode = DataGridViewTriState.False
             };
-            dgv.ColumnHeadersHeight = AppGridHeaderHeight;
-            dgv.EnableHeadersVisualStyles = false;
-            dgv.RowTemplate.Height = 34;
 
             // Video — clickable to open player
             dgv.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name             = "colVideoLabel",
                 DataPropertyName = "VideoLabel",
-                HeaderText       = "Video  (bấm để xem)",
+                HeaderText       = "Video",
                 FillWeight       = 20,
                 MinimumWidth     = 100,
                 ReadOnly         = true
@@ -260,7 +266,7 @@ namespace tiktok_Omni
             dgv.Columns.Add(new DataGridViewTextBoxColumn
             {
                 DataPropertyName = "Link",
-                HeaderText = "Link (Affiliate/Shopee)",
+                HeaderText = "Link Affiliate",
                 FillWeight = 18,
                 MinimumWidth = 100,
                 ReadOnly = false
@@ -275,7 +281,7 @@ namespace tiktok_Omni
                 {
                     Name             = "colYtTitlePreview",
                     DataPropertyName = "YtTitlePreview",
-                    HeaderText       = "Tiêu đề  (bấm để chọn)",
+                    HeaderText       = "Tiêu đề",
                     FillWeight       = 14,
                     MinimumWidth     = 90,
                     ReadOnly         = true
@@ -288,7 +294,7 @@ namespace tiktok_Omni
             {
                 Name             = "colCaptionStatus",
                 DataPropertyName = "Caption",
-                HeaderText       = "Caption  (bấm chọn phong cách / F2 sửa trực tiếp)",
+                HeaderText       = "Caption",
                 FillWeight       = 20,
                 MinimumWidth     = 140,
                 ReadOnly         = false
@@ -299,7 +305,7 @@ namespace tiktok_Omni
             {
                 Name             = "colHashtagPreview",
                 DataPropertyName = "HashtagPreview",
-                HeaderText       = "Hashtag  (bấm để sửa)",
+                HeaderText       = "Hashtag",
                 FillWeight       = 16,
                 MinimumWidth     = 100,
                 ReadOnly         = true
@@ -407,6 +413,11 @@ namespace tiktok_Omni
 
             // Delete key removes selected rows (with confirmation when > 1 row selected)
             dgv.KeyDown += PlatformGrid_KeyDown;
+
+            // Áp dụng chrome sau khi đã có cột ComboBox → dùng AppComboGridRowHeight.
+            ApplyAppComboGridRowHeight(dgv);
+            ApplyAppGridChrome(dgv);
+            dgv.DataBindingComplete += (_, __) => EnsureAppGridRowHeights(dgv);
 
             return dgv;
         }
@@ -529,16 +540,19 @@ namespace tiktok_Omni
             string profile,
             string ytTitle = null,
             string ytDesc  = null,
+            string hashtag = null,
             DateTime? scheduledAt = null)
         {
             var lbl    = string.IsNullOrWhiteSpace(videoLabel) ? System.IO.Path.GetFileName(videoPath ?? string.Empty) : videoLabel;
             var status = scheduledAt.HasValue && scheduledAt.Value > DateTime.Now.AddMinutes(1) ? "Scheduled" : "Pending";
+            var tags   = (hashtag ?? string.Empty).Trim();
 
             var tik = new ScheduleEntry
             {
                 VideoFilePath = videoPath ?? string.Empty,
                 VideoLabel    = lbl,
                 Caption       = caption ?? string.Empty,
+                Hashtag       = tags,
                 Link          = link ?? string.Empty,
                 Profile       = profile ?? "default",
                 ScheduledAt   = scheduledAt,
@@ -569,6 +583,7 @@ namespace tiktok_Omni
             VideoFilePath = src.VideoFilePath,
             VideoLabel    = src.VideoLabel,
             Caption       = src.Caption,
+            Hashtag       = src.Hashtag,
             YtTitle       = src.YtTitle,
             YtDescription = src.YtDescription,
             Link          = src.Link,
@@ -638,6 +653,16 @@ namespace tiktok_Omni
                 .Select(r => r.DataBoundItem as ScheduleEntry)
                 .Where(e => e != null && !string.Equals(e.Status, "Running", StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            if (toRemove.Count == 0)
+            {
+                return;
+            }
+
+            if (!UiConfirmHelper.ConfirmDeleteRows(this, toRemove.Count))
+            {
+                return;
+            }
 
             foreach (var entry in toRemove) list.Remove(entry);
             RefreshAutoPostScheduleStatus();
@@ -1211,10 +1236,7 @@ namespace tiktok_Omni
                     btnStartAutoPost.Text = "BẮT ĐẦU ĐĂNG";
                 }
 
-                var width = MeasureAutoPostJellyButtonTextWidth(btnStartAutoPost.Text) + 24;
-                btnStartAutoPost.Width = width;
-                btnStartAutoPost.MinimumSize = new Size(width, btnStartAutoPost.Height);
-                btnStartAutoPost.MaximumSize = new Size(width, btnStartAutoPost.Height);
+                ResizeAppJellyButton(btnStartAutoPost, AutoPostActionButtonHeight);
             }
 
             if (btnStartAutoPost?.InvokeRequired ?? false)
@@ -1263,7 +1285,9 @@ namespace tiktok_Omni
                 Repopulate(_facebookList, data.Facebook);
                 Repopulate(_youTubeList,  data.YouTube);
                 RefreshAutoPostScheduleStatus();
-                LogAutoPost("[Lịch đăng] Đã nạp lịch từ file.");
+                var path = ScheduleManager.DefaultFilePath;
+                var total = (_tikTokList?.Count ?? 0) + (_facebookList?.Count ?? 0) + (_youTubeList?.Count ?? 0);
+                LogAutoPost("[Lịch đăng] Đã nạp " + total + " dòng từ " + path + ".");
             }
             catch (Exception ex)
             {
@@ -1550,15 +1574,9 @@ namespace tiktok_Omni
             var list     = GetPlatformList(platform);
             if (list == null) return;
 
-            // Confirm only when deleting more than 1 row
-            if (dgv.SelectedRows.Count > 1)
+            if (!UiConfirmHelper.ConfirmDeleteRows(this, dgv.SelectedRows.Count))
             {
-                var ans = MessageBox.Show(
-                    $"Xóa {dgv.SelectedRows.Count} dòng đã chọn?",
-                    "Xác nhận xóa",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-                if (ans != DialogResult.Yes) return;
+                return;
             }
 
             var toRemove = dgv.SelectedRows.Cast<DataGridViewRow>()

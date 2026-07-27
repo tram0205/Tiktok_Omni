@@ -13,7 +13,7 @@ namespace tiktok_Omni.Services
 
         public async Task<List<WarmupQueueSnapshotItem>> LoadAsync()
         {
-            var path = GetPath();
+            var path = ResolveReadablePath(QueueFileName, out var migrate);
             if (!File.Exists(path))
             {
                 return new List<WarmupQueueSnapshotItem>();
@@ -27,8 +27,14 @@ namespace tiktok_Omni.Services
                     return new List<WarmupQueueSnapshotItem>();
                 }
 
-                return JsonConvert.DeserializeObject<List<WarmupQueueSnapshotItem>>(json)
+                var items = JsonConvert.DeserializeObject<List<WarmupQueueSnapshotItem>>(json)
                        ?? new List<WarmupQueueSnapshotItem>();
+                if (migrate && items.Count > 0)
+                {
+                    await SaveAsync(items).ConfigureAwait(false);
+                }
+
+                return items;
             }
             catch
             {
@@ -40,12 +46,16 @@ namespace tiktok_Omni.Services
         {
             var safeItems = items == null ? new List<WarmupQueueSnapshotItem>() : new List<WarmupQueueSnapshotItem>(items);
             var json = JsonConvert.SerializeObject(safeItems, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetPath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
+            await Task.Run(() =>
+            {
+                AppDataPaths.WriteJson(QueueFileName, json);
+                AppDataPaths.TryDeleteLegacyJson(QueueFileName);
+            }).ConfigureAwait(false);
         }
 
         public async Task<bool> LoadPausedFlagAsync()
         {
-            var path = GetRuntimePath();
+            var path = ResolveReadablePath(RuntimeFileName, out var migrate);
             if (!File.Exists(path))
             {
                 return false;
@@ -55,7 +65,13 @@ namespace tiktok_Omni.Services
             {
                 var json = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
                 var state = JsonConvert.DeserializeObject<WarmupQueueRuntimeState>(json ?? string.Empty);
-                return state?.IsPaused ?? false;
+                var paused = state?.IsPaused ?? false;
+                if (migrate && state != null)
+                {
+                    await SavePausedFlagAsync(paused).ConfigureAwait(false);
+                }
+
+                return paused;
             }
             catch
             {
@@ -66,17 +82,16 @@ namespace tiktok_Omni.Services
         public async Task SavePausedFlagAsync(bool isPaused)
         {
             var json = JsonConvert.SerializeObject(new WarmupQueueRuntimeState { IsPaused = isPaused }, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetRuntimePath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
+            await Task.Run(() =>
+            {
+                AppDataPaths.WriteJson(RuntimeFileName, json);
+                AppDataPaths.TryDeleteLegacyJson(RuntimeFileName);
+            }).ConfigureAwait(false);
         }
 
-        private static string GetPath()
+        private static string ResolveReadablePath(string fileName, out bool migrateFromLegacy)
         {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, QueueFileName);
-        }
-
-        private static string GetRuntimePath()
-        {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, RuntimeFileName);
+            return AppDataPaths.ResolveReadableJsonPath(fileName, out migrateFromLegacy);
         }
 
         private class WarmupQueueRuntimeState

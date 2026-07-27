@@ -41,56 +41,53 @@ namespace tiktok_Omni.Services
         }
 
         public Task StartWarmupAsync(
-            string keywords,
-            int videoCount,
-            bool autoComment,
-            bool dryRun,
-            int startIndex,
-            int watchSecondsMin,
-            int watchSecondsMax,
+            WarmupRunState state,
             CancellationToken cancellationToken,
             Action<string> logAction,
-            Action<int, int> progressAction,
-            string runningProfileName = null)
+            Action<int, int> progressAction)
         {
-            if (videoCount <= 0)
+            if (state == null)
             {
-                throw new ArgumentOutOfRangeException(nameof(videoCount), "Video count must be greater than 0.");
+                throw new ArgumentNullException(nameof(state));
+            }
+
+            if (state.VideoCount <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(state.VideoCount), "Video count must be greater than 0.");
             }
 
             return BrowserLock.WithLockAsync(
-                ProfileScopedPaths.ResolveProfileName(runningProfileName),
-                ct => StartWarmupCoreAsync(
-                    keywords,
-                    videoCount,
-                    autoComment,
-                    dryRun,
-                    startIndex,
-                    watchSecondsMin,
-                    watchSecondsMax,
-                    ct,
-                    logAction,
-                    progressAction,
-                    runningProfileName),
+                ProfileScopedPaths.ResolveProfileName(state.RunningProfileName),
+                ct => StartWarmupCoreAsync(state, ct, logAction, progressAction),
                 cancellationToken);
         }
 
         private async Task StartWarmupCoreAsync(
-            string keywords,
-            int videoCount,
-            bool autoComment,
-            bool dryRun,
-            int startIndex,
-            int watchSecondsMin,
-            int watchSecondsMax,
+            WarmupRunState state,
             CancellationToken cancellationToken,
             Action<string> logAction,
-            Action<int, int> progressAction,
-            string runningProfileName = null)
+            Action<int, int> progressAction)
         {
-            logAction?.Invoke($"Loading settings for warm-up with keywords: {keywords}");
+            var keywords = (state.Keywords ?? string.Empty).Trim();
+            var useKeywordSearch = !string.IsNullOrWhiteSpace(keywords);
+            var videoCount = state.VideoCount;
+            var dryRun = state.DryRun;
+            var startIndex = Math.Max(0, state.CompletedCount);
+            var runningProfileName = state.RunningProfileName;
+
+            logAction?.Invoke(useKeywordSearch
+                ? $"Loading settings for warm-up with keywords: {keywords}"
+                : "Loading settings for warm-up (For You — chưa có từ khóa).");
+
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
             var safeStartIndex = Math.Max(0, Math.Min(startIndex, videoCount));
+            var rawWatchMin = state.WatchPercentageMin <= 0 ? 80 : state.WatchPercentageMin;
+            var rawWatchMax = state.WatchPercentageMax <= 0 ? 150 : state.WatchPercentageMax;
+            var watchPctMin = Math.Max(1, Math.Min(300, Math.Min(rawWatchMin, rawWatchMax)));
+            var watchPctMax = Math.Max(watchPctMin, Math.Min(300, Math.Max(rawWatchMin, rawWatchMax)));
+            var likeProb = Math.Max(0, Math.Min(100, state.LikeProbability));
+            var commentProb = Math.Max(0, Math.Min(100, state.CommentProbability));
+            var shareProb = Math.Max(0, Math.Min(100, state.ShareProbability));
 
             if (videoCount > 50)
             {
@@ -113,7 +110,10 @@ namespace tiktok_Omni.Services
                     throw new InvalidOperationException(staleBuildMessage);
                 }
 
-                logAction?.Invoke("[LIVE] Build marker: " + WarmupBuildInfo.BuildId + " (watch once, pause at end, no loop).");
+                logAction?.Invoke(
+                    "[LIVE] Build marker: "
+                    + WarmupBuildInfo.BuildId
+                    + " (tim HumanClick + nhớ comment/tim giữa job).");
                 // #region agent log
                 var asmPath = Assembly.GetExecutingAssembly().Location;
                 var procStartUtc = Process.GetCurrentProcess().StartTime.ToUniversalTime();
@@ -125,8 +125,13 @@ namespace tiktok_Omni.Services
                     {
                         buildId = WarmupBuildInfo.BuildId,
                         keywords,
+                        useKeywordSearch,
                         videoCount,
-                        autoComment,
+                        watchPctMin,
+                        watchPctMax,
+                        likeProb,
+                        commentProb,
+                        shareProb,
                         dryRun,
                         asmPath,
                         asmWriteUtc = File.Exists(asmPath) ? File.GetLastWriteTimeUtc(asmPath).ToString("O") : "n/a",
@@ -135,6 +140,9 @@ namespace tiktok_Omni.Services
                     "post-fix");
                 // #endregion
                 var browser = new BrowserAutomation();
+                var engagementStore = new WarmupEngagementStore();
+                WarmupProfileEngagementRecord engagementRecord = null;
+                var engagementProfileKey = string.Empty;
                 try
                 {
                     browser.ResetWarmupSession();
@@ -145,6 +153,16 @@ namespace tiktok_Omni.Services
                     var effectiveProfileName = string.IsNullOrWhiteSpace(runningProfileName)
                         ? (selectedProfile?.Name ?? "default")
                         : runningProfileName.Trim();
+                    engagementProfileKey = effectiveProfileName;
+                    engagementRecord = await engagementStore.LoadProfileAsync(effectiveProfileName).ConfigureAwait(false);
+                    var persistedExcludeIds = engagementStore.GetAllExcludeVideoIds(engagementRecord);
+                    browser.SeedWarmupExcludedVideoIds(persistedExcludeIds);
+                    if (persistedExcludeIds.Count > 0)
+                    {
+                        logAction?.Invoke(
+                            "[LIVE] Nhớ " + persistedExcludeIds.Count
+                            + " video từ job trước (xem/comment/tim) — bỏ qua khi mở từ search, lướt ↓ feed bình thường.");
+                    }
 
                     await browser.LaunchAsync(
                         cancellationToken,
@@ -155,20 +173,55 @@ namespace tiktok_Omni.Services
 
                     var ownAccount = await browser.TryExtractTikTokAccountSnapshotAsync(cancellationToken, logAction)
                         .ConfigureAwait(false);
-                    var excludeOwnUniqueId = ownAccount?.UniqueId;
+                    var excludeOwnUniqueId = (ownAccount?.UniqueId ?? string.Empty).Trim().TrimStart('@');
+                    if (string.IsNullOrWhiteSpace(excludeOwnUniqueId))
+                    {
+                        excludeOwnUniqueId = (selectedProfile?.TikTokUniqueId ?? string.Empty).Trim().TrimStart('@');
+                    }
+
                     if (!string.IsNullOrWhiteSpace(excludeOwnUniqueId))
                     {
                         logAction?.Invoke("[LIVE] Will skip own channel videos: @" + excludeOwnUniqueId);
                     }
+                    else
+                    {
+                        logAction?.Invoke(
+                            "[LIVE] WARN: Chưa biết @ của nick đang chạy — có thể mở nhầm video của chính mình. " +
+                            "Đăng nhập lại ở Cài đặt để lưu TikTokUniqueId.");
+                    }
 
-                    await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction).ConfigureAwait(false);
+                    await GotoWarmupFeedEntryAsync(browser, useKeywordSearch, keywords, cancellationToken, logAction)
+                        .ConfigureAwait(false);
 
-                    var remainingVideoCount = videoCount - safeStartIndex;
-                    var watchBudgets = AllocateSessionWatchSeconds(
-                        watchSecondsMin,
-                        watchSecondsMax,
-                        remainingVideoCount,
-                        logAction);
+                    logAction?.Invoke(
+                        $"[LIVE] Retention {watchPctMin}-{watchPctMax}% | Like {likeProb}% | Comment {commentProb}% | Share {shareProb}%.");
+                    logAction?.Invoke(useKeywordSearch
+                        ? "[LIVE] Chế độ feed: mở 1 video từ search, rồi lướt lên sang clip kế (không quay lại tìm kiếm)."
+                        : "[LIVE] Chế độ For You: lướt video dạo, tim/share/comment theo kế hoạch trên từng clip.");
+                    var commentSlots = PlanWarmupEngagementSlots(videoCount, commentProb);
+                    var likeSlots = PlanWarmupEngagementSlots(videoCount, likeProb);
+                    var shareSlots = PlanWarmupEngagementSlots(videoCount, shareProb);
+                    if (likeProb > 0)
+                    {
+                        logAction?.Invoke(
+                            $"[LIVE] Kế hoạch tim: {likeSlots.Count}/{videoCount} video ({likeProb}%) — slot {FormatWarmupSlotList(likeSlots)}.");
+                    }
+
+                    if (shareProb > 0)
+                    {
+                        logAction?.Invoke(
+                            $"[LIVE] Kế hoạch share: {shareSlots.Count}/{videoCount} video ({shareProb}%) — slot {FormatWarmupSlotList(shareSlots)}.");
+                    }
+
+                    if (commentProb > 0)
+                    {
+                        logAction?.Invoke(
+                            $"[LIVE] Kế hoạch comment: {commentSlots.Count}/{videoCount} video ({commentProb}%) — slot {FormatWarmupSlotList(commentSlots)}.");
+                    }
+
+                    var consecutiveSkips = 0;
+                    const int maxConsecutiveSkips = 6;
+                    var needFeedEntry = true;
 
                     for (var i = safeStartIndex + 1; i <= videoCount; i++)
                     {
@@ -179,60 +232,197 @@ namespace tiktok_Omni.Services
 
                         try
                         {
-                            await browser.OpenVideoAsync(i, cancellationToken, logAction, excludeOwnUniqueId, keywords)
-                                .ConfigureAwait(false);
+                            if (needFeedEntry)
+                            {
+                                await OpenWarmupFeedEntryVideoAsync(
+                                        browser,
+                                        useKeywordSearch,
+                                        keywords,
+                                        cancellationToken,
+                                        logAction,
+                                        excludeOwnUniqueId)
+                                    .ConfigureAwait(false);
+                                needFeedEntry = false;
+                            }
 
-                            var allocatedSec = watchBudgets[i - safeStartIndex - 1];
-                            var watchRange = BuildWatchRangeForAllocatedSeconds(allocatedSec);
-                            logAction?.Invoke(
-                                $"[LIVE] Human-watch mode: {watchRange.mode} ({watchRange.min}s..{watchRange.max}s, phân bổ {allocatedSec}s trong tổng phiên).");
-                            await browser.WatchAsync(watchRange.min, watchRange.max, cancellationToken, logAction)
+                            var durationSec = await browser.GetCurrentVideoDurationSecondsAsync().ConfigureAwait(false);
+                            if (durationSec <= 0)
+                            {
+                                durationSec = 15;
+                            }
+
+                            var retentionPct = _random.Next(watchPctMin, watchPctMax + 1);
+                            var watchSec = ResolveWarmupWatchSeconds(durationSec, retentionPct, logAction, useKeywordSearch);
+                            await browser.WatchAsync(watchSec, watchSec, cancellationToken, logAction)
                                 .ConfigureAwait(false);
                             if (await browser.IsShopInAppGateBlockingAsync().ConfigureAwait(false))
                             {
                                 logAction?.Invoke(
-                                    "[LIVE] Trang hiện tại bị chặn TikTok Shop (xem trong app). Bỏ tim/comment, quay lại tìm kiếm.");
+                                    "[LIVE] Trang hiện tại bị chặn TikTok Shop (xem trong app). Bỏ tim/comment, chuyển video khác.");
                                 // #region agent log
                                 DebugAgentLog.Write("F", "TikTokAutomation.StartWarmupCore", "shop gate after watch", new { slot = i, url = browser.Page?.Url });
                                 // #endregion
                                 throw new ShopVideoGateException();
                             }
 
-                            await browser.LikeCurrentVideoAsync(cancellationToken, logAction).ConfigureAwait(false);
+                            if (likeSlots.Contains(i))
+                            {
+                                var likeVideoId = browser.WarmupLockedVideoId;
+                                if (engagementStore.HasLikedVideo(engagementRecord, likeVideoId))
+                                {
+                                    logAction?.Invoke(
+                                        "[LIVE] Video " + (likeVideoId ?? "?")
+                                        + " đã tim trong job trước — bỏ tim.");
+                                }
+                                else
+                                {
+                                    var liked = await browser.LikeCurrentVideoAsync(cancellationToken, logAction)
+                                        .ConfigureAwait(false);
+                                    if (liked && !string.IsNullOrWhiteSpace(likeVideoId))
+                                    {
+                                        engagementStore.RecordLike(engagementRecord, likeVideoId);
+                                        engagementStore.RecordWatchedFingerprint(
+                                            engagementRecord,
+                                            browser.WarmupLastAuthor,
+                                            browser.WarmupLastCaption);
+                                    }
+                                }
+                            }
+                            else if (likeProb > 0)
+                            {
+                                logAction?.Invoke(
+                                    $"[LIVE] Bỏ qua tim (slot {i}/{videoCount} không nằm trong kế hoạch {likeSlots.Count} video).");
+                            }
 
-                            if (autoComment)
+                            if (shareSlots.Contains(i))
+                            {
+                                await browser.ShareCurrentVideoAsync(cancellationToken, logAction).ConfigureAwait(false);
+                            }
+                            else if (shareProb > 0)
+                            {
+                                logAction?.Invoke(
+                                    $"[LIVE] Bỏ qua share (slot {i}/{videoCount} không nằm trong kế hoạch {shareSlots.Count} video).");
+                            }
+
+                            if (commentSlots.Contains(i))
                             {
                                 if (string.IsNullOrWhiteSpace(settings.AiApiKey))
                                 {
-                                    logAction?.Invoke("[LIVE] Auto comment enabled but AI API key is missing. Skipping comment.");
+                                    logAction?.Invoke("[LIVE] Slot " + i + " trong kế hoạch comment nhưng thiếu AI API key — bỏ comment.");
                                     // #region agent log
                                     DebugAgentLog.Write("C", "TikTokAutomation.StartWarmupCore", "comment skipped no api key", new { slot = i });
                                     // #endregion
                                 }
                                 else
                                 {
-                                    var prompt = BuildCommentPrompt(keywords, settings.CommentStyle);
-                                    var generated = await _geminiService.GenerateScriptAsync(
-                                        prompt,
-                                        settings.AiProvider,
-                                        settings.AiApiKey,
-                                        settings.AiModel,
-                                        cancellationToken).ConfigureAwait(false);
+                                    logAction?.Invoke("[LIVE] Slot " + i + "/" + videoCount + " — comment theo kế hoạch.");
+                                    try
+                                    {
+                                        string videoCaption = null;
+                                        videoCaption = await browser.GetCurrentVideoCaptionAsync(cancellationToken)
+                                            .ConfigureAwait(false);
+                                        if (!useKeywordSearch)
+                                        {
+                                            if (!string.IsNullOrWhiteSpace(videoCaption))
+                                            {
+                                                logAction?.Invoke(
+                                                    "[LIVE] AI comment dựa theo tiêu đề video: "
+                                                    + FormatCaptionPreview(videoCaption));
+                                            }
+                                            else
+                                            {
+                                                logAction?.Invoke(
+                                                    "[LIVE] Không đọc được tiêu đề video — AI comment chung For You.");
+                                            }
+                                        }
 
-                                    var commentText = SanitizeComment(generated);
-                                    // #region agent log
-                                    DebugAgentLog.Write("C", "TikTokAutomation.StartWarmupCore", "ai comment ready", new { slot = i, len = commentText?.Length ?? 0 });
-                                    // #endregion
-                                    if (!string.IsNullOrWhiteSpace(commentText))
-                                    {
-                                        await browser.CommentCurrentVideoAsync(commentText, cancellationToken, logAction).ConfigureAwait(false);
+                                        var commentVideoId = browser.WarmupLockedVideoId;
+                                        if (engagementStore.HasCommentedVideo(engagementRecord, commentVideoId))
+                                        {
+                                            logAction?.Invoke(
+                                                "[LIVE] Video " + (commentVideoId ?? "?")
+                                                + " đã comment trong job trước — bỏ comment.");
+                                        }
+                                        else if (engagementStore.HasCommentedCaption(engagementRecord, videoCaption))
+                                        {
+                                            logAction?.Invoke(
+                                                "[LIVE] Caption đã comment trước đó — bỏ comment trùng nội dung.");
+                                        }
+                                        else
+                                        {
+                                        var prompt = BuildCommentPrompt(keywords, settings.CommentStyle, videoCaption);
+                                        logAction?.Invoke("[LIVE] Đang gọi AI comment...");
+                                        var generated = await _geminiService.GenerateScriptAsync(
+                                            prompt,
+                                            settings.AiProvider,
+                                            settings.AiApiKey,
+                                            settings.AiModel,
+                                            cancellationToken).ConfigureAwait(false);
+
+                                        var commentText = SanitizeComment(generated);
+                                        // #region agent log
+                                        DebugAgentLog.Write("C", "TikTokAutomation.StartWarmupCore", "ai comment ready", new { slot = i, len = commentText?.Length ?? 0 });
+                                        // #endregion
+                                        if (!string.IsNullOrWhiteSpace(commentText))
+                                        {
+                                            try
+                                            {
+                                                var commented = await browser.CommentCurrentVideoAsync(
+                                                        commentText,
+                                                        cancellationToken,
+                                                        logAction)
+                                                    .ConfigureAwait(false);
+                                                if (commented)
+                                                {
+                                                    engagementStore.RecordComment(
+                                                        engagementRecord,
+                                                        commentVideoId,
+                                                        videoCaption,
+                                                        browser.WarmupLastAuthor);
+                                                }
+                                            }
+                                            catch (ShopVideoGateException)
+                                            {
+                                                throw;
+                                            }
+                                            catch (Exception commentEx)
+                                            {
+                                                logAction?.Invoke(
+                                                    "[LIVE] Lỗi gửi comment slot " + i + ": " + commentEx.Message + " — bỏ comment, tiếp slot.");
+                                            }
+                                        }
+                                        else
+                                        {
+                                            logAction?.Invoke("[LIVE] AI returned empty text. Skipping comment.");
+                                        }
+                                        }
                                     }
-                                    else
+                                    catch (OperationCanceledException)
                                     {
-                                        logAction?.Invoke("[LIVE] AI returned empty text. Skipping comment.");
+                                        throw;
+                                    }
+                                    catch (Exception aiEx)
+                                    {
+                                        logAction?.Invoke(
+                                            "[LIVE] Lỗi AI comment slot " + i + ": " + aiEx.Message + " — bỏ comment, tiếp slot.");
                                     }
                                 }
                             }
+                            else if (commentProb > 0)
+                            {
+                                logAction?.Invoke(
+                                    $"[LIVE] Bỏ qua comment (slot {i}/{videoCount} không nằm trong kế hoạch {commentSlots.Count} video).");
+                            }
+
+                            // Đánh dấu đã xem — slot sau không mở lại cùng video (kể cả của người khác).
+                            browser.ExcludeCurrentWarmupVideo();
+                            engagementStore.RecordWatched(engagementRecord, browser.WarmupLockedVideoId);
+                            engagementStore.RecordWatchedFingerprint(
+                                engagementRecord,
+                                browser.WarmupLastAuthor,
+                                browser.WarmupLastCaption);
+                            consecutiveSkips = 0;
+                            logAction?.Invoke("[LIVE] Đã xong slot " + i + " — chuyển video khác.");
                         }
                         catch (CheckpointDetectedException)
                         {
@@ -243,9 +433,10 @@ namespace tiktok_Omni.Services
                         }
                         catch (CaptchaDetectedException)
                         {
-                            if (!await TryResolveCaptchaAndResumeWarmupSearchAsync(
+                            if (!await TryResolveCaptchaAndResumeWarmupFeedAsync(
                                     browser,
                                     settings,
+                                    useKeywordSearch,
                                     keywords,
                                     cancellationToken,
                                     logAction).ConfigureAwait(false))
@@ -254,18 +445,58 @@ namespace tiktok_Omni.Services
                                 throw new OperationCanceledException();
                             }
 
+                            needFeedEntry = true;
                             i--;
                             continue;
                         }
-                        catch (ShopVideoGateException)
+                        catch (ShopVideoGateException ex)
                         {
                             browser.ExcludeCurrentWarmupVideo();
-                            logAction?.Invoke("[LIVE] Bỏ qua video TikTok Shop, chọn video khác từ kết quả tìm kiếm.");
+                            consecutiveSkips++;
+                            var reason = string.IsNullOrWhiteSpace(ex.Message) ? "Shop / lỗi tải" : ex.Message;
+                            logAction?.Invoke(
+                                "[LIVE] Bỏ qua video không xem được (" + reason + ") — lần " + consecutiveSkips + "/" + maxConsecutiveSkips + ".");
                             // #region agent log
-                            DebugAgentLog.Write("F", "TikTokAutomation.StartWarmupCore", "shop gate skip slot", new { slot = i }, "post-fix");
+                            DebugAgentLog.Write("F", "TikTokAutomation.StartWarmupCore", "shop gate skip slot", new { slot = i, reason, consecutiveSkips }, "post-fix");
                             // #endregion
-                            await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction)
-                                .ConfigureAwait(false);
+
+                            if (consecutiveSkips >= maxConsecutiveSkips)
+                            {
+                                logAction?.Invoke(
+                                    "[LIVE] Quá nhiều video đen/skeleton liên tiếp (" + consecutiveSkips + "). Dừng warm-up — thử lại sau hoặc đổi từ khóa / đăng nhập lại.");
+                                throw new OperationCanceledException("Too many consecutive unplayable videos.");
+                            }
+
+                            // Thử cuộn sang clip kế; về entry khi feed kẹt.
+                            var advancedPast = false;
+                            for (var skipTry = 0; skipTry < 3 && !advancedPast; skipTry++)
+                            {
+                                try
+                                {
+                                    await browser.AdvanceToNextWarmupVideoInFeedAsync(
+                                            cancellationToken,
+                                            logAction,
+                                            excludeOwnUniqueId)
+                                        .ConfigureAwait(false);
+                                    advancedPast = true;
+                                    needFeedEntry = false;
+                                }
+                                catch
+                                {
+                                    // thử tiếp / fallback search
+                                }
+                            }
+
+                            if (!advancedPast)
+                            {
+                                logAction?.Invoke(
+                                    useKeywordSearch
+                                        ? "[LIVE] Feed không cuộn được — quay lại search mở video khác."
+                                        : "[LIVE] Feed không cuộn được — quay lại For You mở video khác.");
+                                await GotoWarmupFeedEntryAsync(browser, useKeywordSearch, keywords, cancellationToken, logAction)
+                                    .ConfigureAwait(false);
+                                needFeedEntry = true;
+                            }
 
                             i--;
                             continue;
@@ -273,26 +504,32 @@ namespace tiktok_Omni.Services
 
                         progressAction?.Invoke(i, videoCount);
 
+                        // Sau khi xem xong: cuộn feed (không quay lại search). Lỗi cuộn không hoàn tác slot đã xong.
                         if (i < videoCount)
                         {
                             try
                             {
-                                await browser.RandomDelayAsync(1500, 3500, cancellationToken).ConfigureAwait(false);
-                                await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction)
+                                await browser.RandomDelayAsync(800, 1800, cancellationToken).ConfigureAwait(false);
+                                await browser.AdvanceToNextWarmupVideoInFeedAsync(
+                                        cancellationToken,
+                                        logAction,
+                                        excludeOwnUniqueId)
                                     .ConfigureAwait(false);
+                                needFeedEntry = false;
                             }
                             catch (CheckpointDetectedException)
                             {
-                                var notifyText = "Phát hiện CHECKPOINT khi đang điều hướng. Hệ thống sẽ dừng profile.";
+                                var notifyText = "Phát hiện CHECKPOINT khi đang cuộn feed. Hệ thống sẽ dừng profile.";
                                 await RaiseCheckpointAlertAsync(browser, effectiveProfileName, notifyText, logAction, cancellationToken).ConfigureAwait(false);
                                 logAction?.Invoke("[LIVE] " + notifyText);
                                 throw new OperationCanceledException("Checkpoint detected.");
                             }
                             catch (CaptchaDetectedException)
                             {
-                                if (!await TryResolveCaptchaAndResumeWarmupSearchAsync(
+                                if (!await TryResolveCaptchaAndResumeWarmupFeedAsync(
                                         browser,
                                         settings,
+                                        useKeywordSearch,
                                         keywords,
                                         cancellationToken,
                                         logAction).ConfigureAwait(false))
@@ -301,7 +538,17 @@ namespace tiktok_Omni.Services
                                     throw new OperationCanceledException();
                                 }
 
-                                i--;
+                                needFeedEntry = true;
+                            }
+                            catch (Exception advanceEx)
+                            {
+                                logAction?.Invoke(
+                                    useKeywordSearch
+                                        ? "[LIVE] Không cuộn sang video kế (" + advanceEx.Message + ") — quay lại search."
+                                        : "[LIVE] Không cuộn sang video kế (" + advanceEx.Message + ") — quay lại For You.");
+                                await GotoWarmupFeedEntryAsync(browser, useKeywordSearch, keywords, cancellationToken, logAction)
+                                    .ConfigureAwait(false);
+                                needFeedEntry = true;
                             }
                         }
                     }
@@ -318,50 +565,123 @@ namespace tiktok_Omni.Services
                 }
                 finally
                 {
+                    if (engagementRecord != null && !string.IsNullOrWhiteSpace(engagementProfileKey))
+                    {
+                        try
+                        {
+                            await engagementStore.SaveProfileAsync(engagementProfileKey, engagementRecord)
+                                .ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            // Best-effort — không chặn đóng browser.
+                        }
+                    }
+
                     await browser.CloseAsync().ConfigureAwait(false);
                 }
             }
 
-            var dryRemainingVideoCount = videoCount - safeStartIndex;
-            var dryWatchBudgets = AllocateSessionWatchSeconds(
-                watchSecondsMin,
-                watchSecondsMax,
-                dryRemainingVideoCount,
-                logAction);
+            logAction?.Invoke(useKeywordSearch
+                ? $"[DRY] Retention {watchPctMin}-{watchPctMax}% | Like {likeProb}% | Comment {commentProb}% | Share {shareProb}%."
+                : $"[DRY] For You browse (không từ khóa) | Retention {watchPctMin}-{watchPctMax}% | Like {likeProb}% | Comment {commentProb}% | Share {shareProb}%.");
+            var dryLikeSlots = PlanWarmupEngagementSlots(videoCount, likeProb);
+            var dryShareSlots = PlanWarmupEngagementSlots(videoCount, shareProb);
+            var dryCommentSlots = PlanWarmupEngagementSlots(videoCount, commentProb);
+            if (likeProb > 0)
+            {
+                logAction?.Invoke(
+                    $"[DRY] Kế hoạch tim: {dryLikeSlots.Count}/{videoCount} video ({likeProb}%) — slot {FormatWarmupSlotList(dryLikeSlots)}.");
+            }
+
+            if (shareProb > 0)
+            {
+                logAction?.Invoke(
+                    $"[DRY] Kế hoạch share: {dryShareSlots.Count}/{videoCount} video ({shareProb}%) — slot {FormatWarmupSlotList(dryShareSlots)}.");
+            }
+
+            if (commentProb > 0)
+            {
+                logAction?.Invoke(
+                    $"[DRY] Kế hoạch comment: {dryCommentSlots.Count}/{videoCount} video ({commentProb}%) — slot {FormatWarmupSlotList(dryCommentSlots)}.");
+            }
 
             for (var i = safeStartIndex + 1; i <= videoCount; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 progressAction?.Invoke(i - 1, videoCount);
 
-                var dryAllocatedSec = dryWatchBudgets[i - safeStartIndex - 1];
-                logAction?.Invoke($"[DRY] Interacting with video {i}/{videoCount} (watch budget {dryAllocatedSec}s)...");
+                var dryPct = _random.Next(watchPctMin, watchPctMax + 1);
+                logAction?.Invoke($"[DRY] Interacting with video {i}/{videoCount} (retention ~{dryPct}%)...");
                 await Task.Delay(200, cancellationToken).ConfigureAwait(false);
 
-                logAction?.Invoke($"[DRY] Simulated scroll/like/watch on video {i} for ~{dryAllocatedSec}s.");
-
-                if (!autoComment)
+                if (dryLikeSlots.Contains(i))
                 {
+                    logAction?.Invoke("[DRY] Slot " + i + "/" + videoCount + " — tim theo kế hoạch.");
+                }
+                else if (likeProb > 0)
+                {
+                    logAction?.Invoke(
+                        $"[DRY] Bỏ qua tim (slot {i}/{videoCount} không nằm trong kế hoạch {dryLikeSlots.Count} video).");
+                }
+
+                if (dryShareSlots.Contains(i))
+                {
+                    logAction?.Invoke("[DRY] Slot " + i + "/" + videoCount + " — share theo kế hoạch.");
+                }
+                else if (shareProb > 0)
+                {
+                    logAction?.Invoke(
+                        $"[DRY] Bỏ qua share (slot {i}/{videoCount} không nằm trong kế hoạch {dryShareSlots.Count} video).");
+                }
+
+                if (!dryCommentSlots.Contains(i))
+                {
+                    if (commentProb > 0)
+                    {
+                        logAction?.Invoke(
+                            $"[DRY] Bỏ qua comment (slot {i}/{videoCount} không nằm trong kế hoạch {dryCommentSlots.Count} video).");
+                    }
+
                     progressAction?.Invoke(i, videoCount);
                     continue;
                 }
+
+                logAction?.Invoke("[DRY] Slot " + i + "/" + videoCount + " — comment theo kế hoạch.");
 
                 if (string.IsNullOrWhiteSpace(settings.AiApiKey))
                 {
-                    logAction?.Invoke("Auto comment enabled but AI API key is missing. Skipping comment generation.");
+                    logAction?.Invoke("CommentProbability>0 but AI API key is missing. Skipping comment generation.");
                     progressAction?.Invoke(i, videoCount);
                     continue;
                 }
 
-                var dryPrompt = BuildCommentPrompt(keywords, settings.CommentStyle);
-                var generatedDry = await _geminiService.GenerateScriptAsync(
-                    dryPrompt,
-                    settings.AiProvider,
-                    settings.AiApiKey,
-                    settings.AiModel,
-                    cancellationToken).ConfigureAwait(false);
+                if (!useKeywordSearch)
+                {
+                    logAction?.Invoke("[DRY] AI comment theo tiêu đề video (Live sẽ đọc caption trên trang).");
+                }
 
-                logAction?.Invoke($"[DRY] Generated AI comment preview: {SanitizeComment(generatedDry)}");
+                try
+                {
+                    var dryPrompt = BuildCommentPrompt(keywords, settings.CommentStyle);
+                    logAction?.Invoke("[DRY] Đang gọi AI comment...");
+                    var generatedDry = await _geminiService.GenerateScriptAsync(
+                        dryPrompt,
+                        settings.AiProvider,
+                        settings.AiApiKey,
+                        settings.AiModel,
+                        cancellationToken).ConfigureAwait(false);
+
+                    logAction?.Invoke($"[DRY] Generated AI comment preview: {SanitizeComment(generatedDry)}");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception aiEx)
+                {
+                    logAction?.Invoke("[DRY] Lỗi AI comment slot " + i + ": " + aiEx.Message + " — bỏ comment, tiếp slot.");
+                }
                 progressAction?.Invoke(i, videoCount);
             }
 
@@ -1113,6 +1433,80 @@ namespace tiktok_Omni.Services
             return selected;
         }
 
+        /// <summary>
+        /// Engagement % × n video: chọn trước k slot (ví dụ 50% × 5 → ~2–3 slot ngẫu nhiên).
+        /// </summary>
+        private HashSet<int> PlanWarmupEngagementSlots(int videoCount, int engagementPercent)
+        {
+            var slots = new HashSet<int>();
+            var n = Math.Max(0, videoCount);
+            var pct = Math.Max(0, Math.Min(100, engagementPercent));
+            if (n == 0 || pct == 0)
+            {
+                return slots;
+            }
+
+            if (pct >= 100)
+            {
+                for (var i = 1; i <= n; i++)
+                {
+                    slots.Add(i);
+                }
+
+                return slots;
+            }
+
+            var target = (int)Math.Round(n * pct / 100.0, MidpointRounding.AwayFromZero);
+            target = Math.Max(0, Math.Min(n, target));
+            if (target == 0)
+            {
+                return slots;
+            }
+
+            var pool = Enumerable.Range(1, n).ToList();
+            for (var pick = 0; pick < target && pool.Count > 0; pick++)
+            {
+                var idx = _random.Next(pool.Count);
+                slots.Add(pool[idx]);
+                pool.RemoveAt(idx);
+            }
+
+            return slots;
+        }
+
+        /// <summary>Clip ngắn: retention %. Clip &gt; 60s (chỉ For You): cap 60s playback rồi chuyển.</summary>
+        private static int ResolveWarmupWatchSeconds(
+            double durationSec,
+            int retentionPct,
+            Action<string> logAction,
+            bool isKeywordSearch)
+        {
+            const double longClipThresholdSec = 60.0;
+            const int longClipWatchCapSec = 60;
+
+            if (!isKeywordSearch && durationSec > longClipThresholdSec)
+            {
+                logAction?.Invoke(
+                    $"[LIVE] Clip dài ~{durationSec:0.#}s (>60s) — cap xem {longClipWatchCapSec}s rồi chuyển clip.");
+                return longClipWatchCapSec;
+            }
+
+            var watchSec = Math.Max(3, (int)Math.Round(durationSec * retentionPct / 100.0));
+            logAction?.Invoke($"[LIVE] Retention {retentionPct}% of ~{durationSec:0.#}s → xem {watchSec}s.");
+            return watchSec;
+        }
+
+        private static string FormatWarmupSlotList(IEnumerable<int> slots)
+        {
+            if (slots == null)
+            {
+                return "-";
+            }
+
+            var ordered = slots.OrderBy(x => x).ToList();
+            return ordered.Count == 0 ? "-" : string.Join(", ", ordered);
+        }
+
         private int[] AllocateSessionWatchSeconds(
             int totalMin,
             int totalMax,
@@ -1264,9 +1658,54 @@ namespace tiktok_Omni.Services
             return !await browser.DetectChallengeAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task<bool> TryResolveCaptchaAndResumeWarmupSearchAsync(
+        private static async Task GotoWarmupFeedEntryAsync(
+            BrowserAutomation browser,
+            bool useKeywordSearch,
+            string keywords,
+            CancellationToken cancellationToken,
+            Action<string> logAction)
+        {
+            if (useKeywordSearch)
+            {
+                await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction).ConfigureAwait(false);
+            }
+            else
+            {
+                await browser.GotoWarmupForyouFeedAsync(cancellationToken, logAction).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task OpenWarmupFeedEntryVideoAsync(
+            BrowserAutomation browser,
+            bool useKeywordSearch,
+            string keywords,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string excludeOwnUniqueId)
+        {
+            if (useKeywordSearch)
+            {
+                await browser.OpenFirstWarmupVideoFromSearchAsync(
+                        keywords,
+                        cancellationToken,
+                        logAction,
+                        excludeOwnUniqueId)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await browser.OpenFirstWarmupVideoFromForyouAsync(
+                        cancellationToken,
+                        logAction,
+                        excludeOwnUniqueId)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        private async Task<bool> TryResolveCaptchaAndResumeWarmupFeedAsync(
             BrowserAutomation browser,
             AppSettings settings,
+            bool useKeywordSearch,
             string keywords,
             CancellationToken cancellationToken,
             Action<string> logAction)
@@ -1277,8 +1716,11 @@ namespace tiktok_Omni.Services
                 return false;
             }
 
-            logAction?.Invoke("[LIVE] CAPTCHA cleared — returning to video search results.");
-            await browser.GotoWarmupVideoSearchAsync(keywords, cancellationToken, logAction).ConfigureAwait(false);
+            logAction?.Invoke(useKeywordSearch
+                ? "[LIVE] CAPTCHA cleared — returning to video search results."
+                : "[LIVE] CAPTCHA cleared — returning to For You feed.");
+            await GotoWarmupFeedEntryAsync(browser, useKeywordSearch, keywords, cancellationToken, logAction)
+                .ConfigureAwait(false);
             return true;
         }
 
@@ -1337,15 +1779,62 @@ namespace tiktok_Omni.Services
             });
         }
 
-        private static string BuildCommentPrompt(string keywords, string style)
+        private static string BuildCommentPrompt(string keywords, string style, string videoCaption = null)
         {
             var safeStyle = string.IsNullOrWhiteSpace(style)
                 ? "ngắn gọn, tự nhiên, đúng ngữ cảnh, không spam emoji"
                 : style.Trim();
 
-            return $"Bạn là người dùng TikTok thật. Hãy viết MỘT comment {safeStyle} cho video thuộc niche: \"{keywords}\". " +
+            string contextPart;
+            if (!string.IsNullOrWhiteSpace(keywords))
+            {
+                contextPart = "video thuộc niche: \"" + keywords.Trim() + "\"";
+            }
+            else if (!string.IsNullOrWhiteSpace(videoCaption))
+            {
+                contextPart = "video có tiêu đề/mô tả: \"" + SanitizeCaptionForPrompt(videoCaption) + "\"";
+            }
+            else
+            {
+                contextPart = "video trên For You (TikTok Việt Nam)";
+            }
+
+            return $"Bạn là người dùng TikTok thật. Hãy viết MỘT comment {safeStyle} cho {contextPart}. " +
                    "Yêu cầu: tối đa 120 ký tự, không hashtag, không link, không trích dẫn, không xuống dòng, " +
                    "không bắt đầu bằng dấu nháy. Trả về duy nhất nội dung comment, không kèm giải thích.";
+        }
+
+        private static string SanitizeCaptionForPrompt(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return string.Empty;
+            }
+
+            var text = raw.Trim().Replace("\r", " ").Replace("\n", " ");
+            const int maxLen = 280;
+            if (text.Length > maxLen)
+            {
+                text = text.Substring(0, maxLen).TrimEnd() + "…";
+            }
+
+            return text;
+        }
+
+        private static string FormatCaptionPreview(string caption, int maxLen = 72)
+        {
+            var text = SanitizeCaptionForPrompt(caption);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            if (text.Length <= maxLen)
+            {
+                return text;
+            }
+
+            return text.Substring(0, maxLen - 1).TrimEnd() + "…";
         }
 
         private static string SanitizeComment(string raw)
@@ -2807,7 +3296,7 @@ namespace tiktok_Omni.Services
 
     internal static class WarmupBuildInfo
     {
-        public const string BuildId = "warmup-shop-fix-v7";
+        public const string BuildId = "warmup-engage-v14-dblclick-like";
 
         public static bool IsRunningStaleBuild(out string message)
         {

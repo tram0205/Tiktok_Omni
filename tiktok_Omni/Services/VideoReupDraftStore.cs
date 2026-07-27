@@ -8,22 +8,27 @@ namespace tiktok_Omni.Services
 {
     public sealed class VideoReupDraftStore
     {
-        private static readonly string DraftPath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "draft_reup.json");
+        private const string FileName = "draft_reup.json";
 
         public List<VideoReupRowItem> Load()
         {
-            if (!File.Exists(DraftPath))
+            var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy);
+            if (!File.Exists(path))
             {
                 return new List<VideoReupRowItem>();
             }
 
             try
             {
-                var json = File.ReadAllText(DraftPath, TextFileEncoding.Utf8);
+                var json = File.ReadAllText(path, TextFileEncoding.Utf8);
                 var rows = JsonConvert.DeserializeObject<List<VideoReupRowItem>>(json);
-                return rows?.Where(r => r != null).ToList() ?? new List<VideoReupRowItem>();
+                var list = rows?.Where(r => r != null).ToList() ?? new List<VideoReupRowItem>();
+                if (migrateFromLegacy && list.Count > 0)
+                {
+                    Save(list);
+                }
+
+                return list;
             }
             catch
             {
@@ -38,7 +43,8 @@ namespace tiktok_Omni.Services
                 .ToList();
             try
             {
-                File.WriteAllText(DraftPath, JsonConvert.SerializeObject(list, Formatting.Indented), TextFileEncoding.Utf8NoBom);
+                AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(list, Formatting.Indented));
+                AppDataPaths.TryDeleteLegacyJson(FileName);
             }
             catch
             {

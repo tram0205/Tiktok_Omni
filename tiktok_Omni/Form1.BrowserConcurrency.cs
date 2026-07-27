@@ -90,5 +90,32 @@ namespace tiktok_Omni
             _globalJobQueue?.CancelWhere(j =>
                 j != null && (j.Kind == OmniJobKind.AutoPost || j.Kind == OmniJobKind.HuntAffiliate));
         }
+
+        /// <summary>Hủy mọi job nền trước khi đóng app (Ctrl+C / nút X).</summary>
+        internal void ShutdownAllAutomationWork()
+        {
+            try
+            {
+                _warmupScheduleTimer?.Stop();
+            }
+            catch
+            {
+            }
+
+            CancelWarmupBrowserWork();
+            CancelAffiliateBrowserWork();
+        }
+
+        /// <summary>Đóng app từ console Ctrl+C (dotnet run).</summary>
+        internal void ShutdownAndClose()
+        {
+            if (IsDisposed || Disposing)
+            {
+                return;
+            }
+
+            ShutdownAllAutomationWork();
+            Close();
+        }
     }
 }

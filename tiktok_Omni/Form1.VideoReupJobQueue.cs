@@ -14,65 +14,6 @@ namespace tiktok_Omni
     public partial class Form1
     {
         private readonly HashSet<Guid> _videoReupBatchJobIds = new HashSet<Guid>();
-        private int _videoReupBatchRunExpected;
-        private int _videoReupBatchRunSuccess;
-        private int _videoReupBatchRunFail;
-
-        private async void btnVideoReupRenderBatch_Click(object sender, EventArgs e)
-        {
-            var list = GetVideoReupSelectedRowsOrdered();
-            if (list.Count == 0)
-            {
-                LogVideoReup("Video reup render lô: chọn ít nhất một dòng trong bảng (Ctrl+click nhiều dòng).");
-                return;
-            }
-
-            FlushVideoReupHookDraftFromEditor();
-            FlushVideoReupVideoUrlFromEditor();
-            AppSettings settings;
-            try
-            {
-                settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            }
-            catch (Exception ex)
-            {
-                LogVideoReup("Không nạp được cài đặt: " + ex.Message);
-                return;
-            }
-
-            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
-            SetVideoReupCaptionButtonsEnabled(false);
-            btnStopHunt.Enabled = true;
-            var enqueued = 0;
-            try
-            {
-                for (var i = 0; i < list.Count; i++)
-                {
-                    var row = list[i];
-                    if (EnqueueVideoReupJob(row, settings, i + 1, list.Count))
-                    {
-                        enqueued++;
-                        row.RemixStatus = "Chờ queue";
-                        row.RemixLastError = string.Empty;
-                    }
-                }
-
-                _videoReupBindingList?.ResetBindings();
-                LogVideoReup($"[JobQueue] Video reup lô: đã xếp {enqueued}/{list.Count} job. Bấm «Dừng» để hủy các job đang chờ.");
-                SetVideoReupProgress($"Đã xếp {enqueued} job vào hàng đợi", 5);
-                _videoReupBatchRunExpected = enqueued;
-                _videoReupBatchRunSuccess = 0;
-                _videoReupBatchRunFail = 0;
-            }
-            catch (Exception ex)
-            {
-                LogVideoReup("Video reup lô lỗi enqueue: " + ex.Message);
-            }
-            finally
-            {
-                SetVideoReupCaptionButtonsEnabled(true);
-            }
-        }
 
         private bool EnqueueVideoReupJob(VideoReupRowItem row, AppSettings settings, int batchIndex, int batchTotal)
         {
@@ -129,6 +70,7 @@ namespace tiktok_Omni
                 HookAudioPath = row.HookAudioPath,
                 ReupSuggestedMusicFile = row.ReupSuggestedMusicFile,
                 ReupSelectedMusicFile = row.ReupSelectedMusicFile,
+                ReupSelectedHookSfxFile = row.ReupSelectedHookSfxFile ?? string.Empty,
                 ReupAudioMode = row.ReupAudioMode,
                 ReupStageFolder = row.ReupStageFolder,
                 ReupDownloadedVideoPath = row.ReupDownloadedVideoPath,

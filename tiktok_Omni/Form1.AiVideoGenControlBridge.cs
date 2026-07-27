@@ -16,6 +16,7 @@ namespace tiktok_Omni
             flpSlideshowData = _aiVideoGenControls.SlideshowDataFlow;
             flpSlideshowExecute = _aiVideoGenControls.SlideshowExecuteFlow;
             flpAffiliateDeepHeaderActions = _aiVideoGenControls.AffiliateDeepHeaderActions;
+            flpAffiliateDeepExecuteActions = _aiVideoGenControls.AffiliateDeepExecuteActions;
         }
 
         private Button btnGenerateGeminiPrompt => _aiVideoGenControls?.GenerateGeminiPromptButton;
@@ -45,6 +46,20 @@ namespace tiktok_Omni
         private Button btnDeepEditScript => _aiVideoGenControls?.DeepEditScriptButton;
 
         private Button btnAffiliateDeepOpenOutput => _aiVideoGenControls?.AffiliateDeepOpenOutputButton;
+
+        private Button btnShowcaseExportExcel => _aiVideoGenControls?.ShowcaseExportExcelButton;
+
+        private Button btnShowcaseOpenClipsFolder => _aiVideoGenControls?.ShowcaseOpenClipsFolderButton;
+
+        private Button btnShowcaseRefreshClips => _aiVideoGenControls?.ShowcaseRefreshClipsButton;
+
+        private Button btnShowcaseGenerateVoiceover => _aiVideoGenControls?.ShowcaseGenerateVoiceoverButton;
+
+        private Button btnShowcasePreviewNarration => _aiVideoGenControls?.ShowcasePreviewNarrationButton;
+
+        private Button btnShowcaseListenNarration => _aiVideoGenControls?.ShowcaseListenNarrationButton;
+
+        private Button btnShowcaseAddLocalImages => _aiVideoGenControls?.ShowcaseAddLocalImagesButton;
 
         private ComboBox cbGeminiStyleTemplate => _aiVideoGenControls?.GeminiStyleTemplateCombo;
 

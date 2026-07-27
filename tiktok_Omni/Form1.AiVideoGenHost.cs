@@ -1,14 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Helpers;
 using Newtonsoft.Json;
 using tiktok_Omni.Controls;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni
 {
@@ -194,6 +197,41 @@ namespace tiktok_Omni
             {
                 MessageBox.Show(this, "Chọn một dòng sản phẩm để sửa script.", "Sửa Script",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return Task.CompletedTask;
+            }
+
+            if (IsDeepDiveModeTab())
+            {
+                if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                        "Chọn một hoặc nhiều dòng video trên lưới rồi bấm «Sửa kịch bản»."))
+                {
+                    return Task.CompletedTask;
+                }
+
+                foreach (var video in videos)
+                {
+                    ActivateShowcaseVideo(video, refreshStoryboard: false);
+                    var rowIndex = FindShowcaseVideoGridRowIndex(video);
+                    if (rowIndex < 0)
+                    {
+                        rowIndex = dgvDeepDiveInput?.CurrentRow?.Index ?? -1;
+                    }
+
+                    if (video.Scenes.Count == 0)
+                    {
+                        LogShowcase("[Showcase] «" + video.ProductName + "» chưa có cảnh — bỏ qua sửa kịch bản.");
+                        continue;
+                    }
+
+                    ShowShowcaseScriptEditor(video, rowIndex);
+                }
+
+                if (videos.Count > 0)
+                {
+                    ActivateShowcaseVideo(videos[videos.Count - 1]);
+                    SyncBuffersToGrids();
+                }
+
                 return Task.CompletedTask;
             }
 
@@ -447,9 +485,45 @@ namespace tiktok_Omni
             }
         }
 
-        Task IAiVideoGenControlsHost.OpenAffiliateDeepOutputFolderAsync()
+        async Task IAiVideoGenControlsHost.OpenAffiliateDeepOutputFolderAsync()
         {
-            return ((IAiVideoGenControlsHost)this).OpenSlideshowOutputFolderAsync();
+            try
+            {
+                var scenes = GetDeepDiveStoryboardOrderedBuffer();
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+                var profile = GetRunningProfileName();
+                var productName = (scenes.FirstOrDefault()?.ProductName ?? string.Empty).Trim();
+
+                if (string.IsNullOrWhiteSpace(productName))
+                {
+                    // Chưa có sản phẩm/phiên nào — mở thư mục output chung của profile như trước.
+                    await ((IAiVideoGenControlsHost)this).OpenSlideshowOutputFolderAsync().ConfigureAwait(true);
+                    return;
+                }
+
+                var session = EnsureShowcaseSession(profile, productName, settings.StorageRootPath, GetActiveShowcaseVideo());
+                var targetDir = !string.IsNullOrWhiteSpace(session?.OutputDir) ? session.OutputDir : session?.BaseDir;
+                if (string.IsNullOrWhiteSpace(targetDir))
+                {
+                    await ((IAiVideoGenControlsHost)this).OpenSlideshowOutputFolderAsync().ConfigureAwait(true);
+                    return;
+                }
+
+                Directory.CreateDirectory(targetDir);
+                Process.Start("explorer.exe", targetDir);
+                LogShowcase("[Showcase] Đã mở thư mục phiên: " + targetDir);
+            }
+            catch (Exception ex)
+            {
+                LogShowcase("[Folder] Không mở được thư mục output Showcase: " + ex.Message);
+                MessageBox.Show(
+                    this,
+                    "Không mở được thư mục: " + ex.Message,
+                    "Thư mục output",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         void IAiVideoGenControlsHost.OpenApprovalQueue()
@@ -461,40 +535,168 @@ namespace tiktok_Omni
         {
             try
             {
+                if (_selectedAiVideoGenMode == AiVideoGenMode.Slideshow
+                    || _selectedAiVideoGenMode == AiVideoGenMode.AffiliateDeep)
+                {
+                    var grid = GetActiveProductGrid();
+                    if (grid != null && TryDeleteSelectedProductInputGridRows(grid, out var deleted) && deleted > 0)
+                    {
+                        Log("[Grid] Đã xóa " + deleted + " dòng.");
+                    }
+
+                    return;
+                }
+
+                var count = GetActiveGridRowCountForClear();
+                if (count <= 0)
+                {
+                    return;
+                }
+
+                if (!UiConfirmHelper.ConfirmDeleteRows(this, count))
+                {
+                    return;
+                }
+
                 ClearActiveAiVideoGenModeBuffer();
             }
             catch (Exception ex)
             {
-                Log("[Grid] Làm sạch buffer lỗi: " + ex.Message);
+                Log("[Grid] Xóa dòng lỗi: " + ex.Message);
             }
         }
 
         async Task IAiVideoGenControlsHost.RunAffiliateDeepVideoAsync()
         {
-            var top4 = GetDeepDiveOrderedScenesForRender();
-            if (top4.Count < 4)
+            try
             {
-                Log("Affiliate Deep Video: cần ít nhất 4 ảnh của cùng 1 sản phẩm.");
-                return;
+                if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                        "Chọn ít nhất một dòng video trên lưới (Ctrl+click nhiều dòng) rồi bấm «Render video»."))
+                {
+                    return;
+                }
+
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+                var profile = GetRunningProfileName();
+                var enqueued = 0;
+
+                for (var i = 0; i < videos.Count; i++)
+                {
+                    ThrowIfShowcaseTabCancelled();
+                    var video = videos[i];
+                    ActivateShowcaseVideo(video, refreshStoryboard: false);
+                    if (videos.Count > 1)
+                    {
+                        LogShowcase("[Showcase] Render (" + (i + 1) + "/" + videos.Count + ") — «" + video.ProductName + "»");
+                    }
+
+                    if (await TryEnqueueShowcaseRenderForVideoAsync(video, settings, profile).ConfigureAwait(true))
+                    {
+                        enqueued++;
+                    }
+                }
+
+                if (enqueued > 0)
+                {
+                    ActivateShowcaseVideo(videos[videos.Count - 1]);
+                    SyncBuffersToGrids();
+                }
+            }
+            finally
+            {
+                RestoreShowcaseRenderButtonIfIdle();
+            }
+        }
+
+        private void RestoreShowcaseRenderButtonIfIdle()
+        {
+            UpdateShowcaseRenderButtonState();
+        }
+
+        private async Task<bool> TryEnqueueShowcaseRenderForVideoAsync(ShowcaseVideoItem video, AppSettings settings, string profile)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            if (!ShowcaseWorkflowConstants.HasEnoughScenes(scenes.Count))
+            {
+                LogShowcase("Showcase: «" + video.ProductName + "» cần ít nhất 1 ảnh trên storyboard.");
+                return false;
             }
 
-            var firstName = (top4[0]?.ProductName ?? string.Empty).Trim();
-            if (top4.Any(x => !string.Equals((x?.ProductName ?? string.Empty).Trim(), firstName, StringComparison.OrdinalIgnoreCase)))
+            var firstName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            if (scenes.Any(x => !string.Equals((x?.ProductName ?? string.Empty).Trim(), firstName, StringComparison.OrdinalIgnoreCase)))
             {
-                Log("Affiliate Deep Video: 4 ảnh đầu phải thuộc cùng một sản phẩm (ProductName giống nhau).");
-                return;
+                LogShowcase("Showcase: «" + firstName + "» — các cảnh phải cùng tên sản phẩm.");
+                return false;
             }
 
-            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
-            var profile = GetRunningProfileName();
-            var category = (top4[0]?.Category ?? string.Empty).Trim();
+            if (_showcaseSession == null || !string.Equals(_showcaseSession.ProductName, firstName, StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureShowcaseSession(profile, firstName, settings.StorageRootPath, video);
+            }
+
+            if (_showcaseSession == null)
+            {
+                MessageBox.Show(this,
+                    "«" + firstName + "» chưa có phiên Showcase. Hãy bấm «Tạo kịch bản» rồi «Tải excel prompt» (bảng Prompt) trước khi Render.",
+                    "Render video",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return false;
+            }
+
+            var missingClips = ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, LogShowcase);
+            video.RefreshDisplayFields();
+            SyncBuffersToGrids();
+            RefreshAiVideoGenModeReadinessLabels();
+            if (missingClips.Count > 0)
+            {
+                LogShowcase("Showcase: «" + firstName + "» thiếu clip Veo cảnh " + string.Join(", ", missingClips));
+                MessageBox.Show(this,
+                    "«" + firstName + "» thiếu clip Veo cảnh: " + string.Join(", ", missingClips) +
+                    ".\r\n\r\nHãy tạo clip Veo (theo Excel prompt đã tải), đặt tên scene_0" + missingClips[0] +
+                    ".mp4 (...) rồi bỏ vào thư mục veo_clips trước khi Render.",
+                    "Thiếu clip Veo",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return false;
+            }
+
+            if (!ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(video, scenes))
+            {
+                var synced = ShowcaseVoiceoverHelper.IsVoiceoverSyncedToClips(video, scenes);
+                var hasText = ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes);
+                LogShowcase("Showcase: «" + firstName + "» chưa có thoại khớp clip — bấm «Tạo lời thoại» trước khi Render.");
+                var body = hasText && !synced
+                    ? "«" + firstName + "» có thoại nháp (ảnh) hoặc clip đã thay — cần «Tạo lời thoại» lại sau khi clip ổn.\r\n\r\nGemini sẽ xem clip và căn độ dài thoại."
+                    : "«" + firstName + "» chưa có lời thoại khớp clip.\r\n\r\nBấm «Tạo lời thoại» khi đã có ít nhất 1 clip — không cần đủ mọi cảnh; Gemini căn theo clip có sẵn.";
+                MessageBox.Show(this, body, "Chưa có thoại khớp clip", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            if (numAiTransitionDuration != null)
+            {
+                settings.VideoTransitionDurationSeconds = (double)numAiTransitionDuration.Value;
+            }
+
+            ShowcaseTransitionHelper.EnsureVideoDefaults(video, settings);
+            var renderSettings = ShowcasePerVideoRenderSettings.FromVideo(video, settings);
+            settings.VideoTransitionDurationSeconds = renderSettings.TransitionSeconds;
+            settings.VideoTextSize = video.ShowcaseSubtitleFontSize > 0 ? video.ShowcaseSubtitleFontSize : 72;
+            settings.VideoMusicVolume = renderSettings.MusicVolume;
+            settings.VideoBackgroundMusicFileName = VideoReupRowItem.IsNoMusicSelection(renderSettings.BackgroundMusicFile)
+                ? VideoReupRowItem.NoMusicSelectionLabel
+                : (renderSettings.BackgroundMusicFile ?? string.Empty).Trim();
+
+            await _configManager.SaveAsync(settings).ConfigureAwait(true);
+
+            var category = (scenes[0]?.Category ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(category))
             {
-                category = "AffiliateDeep";
+                category = "Showcase";
             }
 
-            foreach (var item in top4)
+            foreach (var item in scenes)
             {
                 if (item != null)
                 {
@@ -503,8 +705,8 @@ namespace tiktok_Omni
                 }
             }
 
-            ScoreAndApplyAiVideoGenSafety(top4, txtAiVideoGenPrompt?.Text?.Trim());
-            SyncBuffersToGrids();
+            video.PipelineStatus = "Đang render";
+            ScoreAndApplyAiVideoGenSafety(scenes, txtAiVideoGenPrompt?.Text?.Trim());
 
             if (btnProcessVideo != null)
             {
@@ -522,33 +724,44 @@ namespace tiktok_Omni
             }
 
             ResetAiRenderSlotProgress();
-            UpdateSinglePipelineProgress(2, "Đã xếp hàng Deep render…");
+            UpdateSinglePipelineProgress(2, "Đã xếp hàng Showcase render…");
 
             var job = new OmniJob
             {
                 Kind = OmniJobKind.AffiliateDeepRender,
-                Title = "Affiliate Deep — " + firstName,
+                Title = "Showcase — " + firstName,
                 ProfileName = profile,
                 PayloadJson = JsonConvert.SerializeObject(new AffiliateDeepRenderJobPayload
                 {
+                    ShowcaseVideoId = video.VideoId,
                     ProfileName = profile,
                     ProductName = firstName,
                     Category = category,
-                    Products = top4,
+                    Products = scenes,
                     StorageRootPath = settings.StorageRootPath ?? string.Empty,
-                    SafetyScore = top4[0]?.SafetyScore ?? 100,
-                    UseMultiVoiceNarration = UseMultiVoiceNarrationEnabled(),
-                    AffiliateLink = top4[0]?.AffiliateLink ?? string.Empty,
-                    ProductId = top4[0]?.ProductId ?? string.Empty
+                    SafetyScore = scenes[0]?.SafetyScore ?? 100,
+                    AffiliateLink = scenes[0]?.AffiliateLink ?? string.Empty,
+                    ProductId = scenes[0]?.ProductId ?? string.Empty,
+                    Theme = _showcaseSession.Theme ?? string.Empty,
+                    HookText = !string.IsNullOrWhiteSpace(video.ShowcaseHookText)
+                        ? video.ShowcaseHookText
+                        : (_showcaseSession.HookText ?? string.Empty),
+                    CtaText = !string.IsNullOrWhiteSpace(video.ShowcaseCtaText)
+                        ? video.ShowcaseCtaText
+                        : (_showcaseSession.CtaText ?? string.Empty),
+                    RenderSettings = renderSettings
                 }),
                 MaxRetries = 1,
-                AffiliateLink = top4[0]?.AffiliateLink ?? string.Empty,
-                ProductId = top4[0]?.ProductId ?? string.Empty
+                AffiliateLink = scenes[0]?.AffiliateLink ?? string.Empty,
+                ProductId = scenes[0]?.ProductId ?? string.Empty,
+                Tag = CreateShowcaseLinkedJobCancellation()
             };
 
             _activeAffiliateDeepRenderJobId = job.Id;
             _globalJobQueue.Enqueue(job);
-            Log("[JobQueue] Affiliate Deep render đã vào hàng đợi (không chạy trên UI).");
+            RefreshShowcaseStopButtonState();
+            LogShowcase("[JobQueue] Showcase render «" + firstName + "» đã vào hàng đợi.");
+            return true;
         }
 
         async Task IAiVideoGenControlsHost.SaveGeminiStyleTemplateAsync(GeminiStyleTemplate template)

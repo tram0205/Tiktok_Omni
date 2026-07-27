@@ -13,7 +13,7 @@ namespace tiktok_Omni.Services
 
         public async Task<List<WarmupQueueHistoryRecord>> LoadAsync()
         {
-            var path = GetPath();
+            var path = AppDataPaths.ResolveReadableJsonPath(HistoryFileName, out var migrate);
             if (!File.Exists(path))
             {
                 return new List<WarmupQueueHistoryRecord>();
@@ -27,8 +27,14 @@ namespace tiktok_Omni.Services
                     return new List<WarmupQueueHistoryRecord>();
                 }
 
-                return JsonConvert.DeserializeObject<List<WarmupQueueHistoryRecord>>(json)
+                var items = JsonConvert.DeserializeObject<List<WarmupQueueHistoryRecord>>(json)
                        ?? new List<WarmupQueueHistoryRecord>();
+                if (migrate && items.Count > 0)
+                {
+                    await SaveAllAsync(items).ConfigureAwait(false);
+                }
+
+                return items;
             }
             catch
             {
@@ -50,13 +56,17 @@ namespace tiktok_Omni.Services
                 list.RemoveRange(MaxHistoryRecords, list.Count - MaxHistoryRecords);
             }
 
-            var json = JsonConvert.SerializeObject(list, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetPath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
+            await SaveAllAsync(list).ConfigureAwait(false);
         }
 
-        private static string GetPath()
+        private static async Task SaveAllAsync(List<WarmupQueueHistoryRecord> list)
         {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, HistoryFileName);
+            var json = JsonConvert.SerializeObject(list, Formatting.Indented);
+            await Task.Run(() =>
+            {
+                AppDataPaths.WriteJson(HistoryFileName, json);
+                AppDataPaths.TryDeleteLegacyJson(HistoryFileName);
+            }).ConfigureAwait(false);
         }
     }
 

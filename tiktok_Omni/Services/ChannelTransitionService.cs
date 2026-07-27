@@ -149,8 +149,6 @@ namespace tiktok_Omni.Services
 
         private static WarmupRunState BuildHighIntensityWarmupState(string profileName, AppSettings settings)
         {
-            var watchMin = Math.Max(3, settings?.ChannelHealthHighIntensityWatchSecondsMin ?? 45);
-            var watchMax = Math.Max(watchMin, settings?.ChannelHealthHighIntensityWatchSecondsMax ?? 120);
             var videoCount = Math.Max(1, settings?.ChannelHealthHighIntensityVideoCount ?? 15);
             var keywords = (settings?.ChannelHealthWarmupKeywords ?? "tiktok shop affiliate").Trim();
             if (string.IsNullOrWhiteSpace(keywords))
@@ -163,9 +161,11 @@ namespace tiktok_Omni.Services
                 RunningProfileName = profileName,
                 Keywords = keywords,
                 VideoCount = videoCount,
-                WatchSecondsMin = watchMin,
-                WatchSecondsMax = watchMax,
-                AutoComment = false,
+                WatchPercentageMin = 100,
+                WatchPercentageMax = 150,
+                LikeProbability = 40,
+                CommentProbability = 0,
+                ShareProbability = 8,
                 DryRun = false,
                 CompletedCount = 0,
                 LastUpdatedUtc = DateTime.UtcNow

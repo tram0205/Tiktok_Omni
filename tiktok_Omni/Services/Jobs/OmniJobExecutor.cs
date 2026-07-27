@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using tiktok_Omni.Models;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Affiliate;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services.Jobs
 {
@@ -536,6 +537,10 @@ namespace tiktok_Omni.Services.Jobs
             }
         }
 
+        /// <summary>
+        /// Showcase sản phẩm (trước đây "Affiliate Deep") — ghép clip Veo đã tạo TAY theo Excel prompt.
+        /// Không còn tự gọi Veo (hạn chế cũ của Affiliate Deep: Veo tự động bất khả thi/lệch sản phẩm).
+        /// </summary>
         private async Task ExecuteAffiliateDeepRenderAsync(OmniJob job, IJobUiBridge ui, CancellationToken cancellationToken)
         {
             var payload = JsonConvert.DeserializeObject<AffiliateDeepRenderJobPayload>(job.PayloadJson ?? "{}")
@@ -546,17 +551,29 @@ namespace tiktok_Omni.Services.Jobs
 
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
             var products = payload.Products ?? new List<AiVideoGenInputItem>();
-            if (products.Count < 4)
+            if (!ShowcaseWorkflowConstants.HasEnoughScenes(products.Count))
             {
-                throw new InvalidOperationException("Affiliate Deep render cần ít nhất 4 ảnh cùng sản phẩm.");
+                throw new InvalidOperationException("Showcase render cần ít nhất 1 ảnh/clip cùng sản phẩm.");
             }
 
-            ui.Log("[Job] Affiliate Deep render — «" + profile + "»: " + (payload.ProductName ?? string.Empty));
+            ui.Log("[Job] Showcase render — «" + profile + "»: " + (payload.ProductName ?? string.Empty));
+
+            var renderSettings = payload.RenderSettings ?? new ShowcasePerVideoRenderSettings();
+            settings.VideoTransitionDurationSeconds = renderSettings.TransitionSeconds > 0
+                ? renderSettings.TransitionSeconds
+                : settings.VideoTransitionDurationSeconds;
+            settings.VideoMusicVolume = renderSettings.MusicVolume >= 0
+                ? renderSettings.MusicVolume
+                : settings.VideoMusicVolume;
+            settings.VideoBackgroundMusicFileName = (renderSettings.BackgroundMusicFile ?? string.Empty).Trim();
+            var subtitleOptions = ShowcaseSubtitleStyleHelper.BuildOptions(renderSettings, settings);
 
             try
             {
-                var result = await _videoProcessingService.GenerateAffiliateProductVideoAsync(
+                var result = await _videoProcessingService.GenerateShowcaseVideoFromClipsAsync(
                     products,
+                    payload.HookText,
+                    payload.CtaText,
                     settings,
                     profile,
                     ui.Log,
@@ -564,11 +581,12 @@ namespace tiktok_Omni.Services.Jobs
                     (percent, stage) =>
                     {
                         var mapped = ProductionPipeline.MapRenderStageToStatus(stage, percent);
-                        ui.Log("[Deep Render] " + mapped + " " + percent + "% — " + stage);
+                        ui.Log("[Showcase Render] " + mapped + " " + percent + "% — " + stage);
                     },
                     payload.Category,
                     payload.StorageRootPath,
-                    payload.UseMultiVoiceNarration).ConfigureAwait(false);
+                    renderSettings,
+                    subtitleOptions).ConfigureAwait(false);
 
                 var output = result?.FinalVideoPath ?? string.Empty;
                 ui.OnAffiliateDeepRenderFinished(job.Id, true, output, string.Empty);

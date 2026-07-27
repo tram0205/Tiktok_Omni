@@ -28,89 +28,119 @@ namespace tiktok_Omni
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox     = false;
             MinimizeBox     = false;
-            ClientSize      = new Size(500, 220);
+            ShowInTaskbar   = false;
+            ClientSize      = new Size(1000, 480);
             BackColor       = Color.FromArgb(28, 31, 38);
+            Font            = new Font("Segoe UI", 10.5F);
+            Padding         = new Padding(20);
 
-            // Header
-            Controls.Add(new Label
-            {
-                Text      = "Nhập hashtag, cách nhau bằng dấu cách. KHÔNG DẤU tiếng Việt.",
-                Location  = new Point(14, 14),
-                Size      = new Size(470, 20),
-                Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(100, 200, 220),
-            });
-
-            // Hint
             var hint = PlatformHints.TryGetValue(platform, out var h)
                 ? h : "VD: #kênh #sảnphẩm #trend";
-            Controls.Add(new Label
-            {
-                Text      = hint,
-                Location  = new Point(14, 38),
-                Size      = new Size(470, 18),
-                Font      = new Font("Segoe UI", 8.5f),
-                ForeColor = Color.FromArgb(120, 130, 145),
-            });
 
-            // Textbox
+            var tbl = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 5,
+                BackColor = BackColor
+            };
+            tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
+
+            tbl.Controls.Add(new Label
+            {
+                Text = "Nhập hashtag, cách nhau bằng dấu cách. KHÔNG DẤU tiếng Việt.",
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(100, 200, 220),
+                Margin = new Padding(0, 0, 0, 6)
+            }, 0, 0);
+
+            tbl.Controls.Add(new Label
+            {
+                Text = hint,
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = Color.FromArgb(120, 130, 145),
+                Margin = new Padding(0, 0, 0, 10)
+            }, 0, 1);
+
             _tb = new TextBox
             {
-                Location    = new Point(14, 62),
-                Size        = new Size(470, 56),
-                Multiline   = true,
-                WordWrap    = true,
-                ScrollBars  = ScrollBars.Vertical,
-                Text        = current ?? string.Empty,
-                BackColor   = Color.FromArgb(38, 42, 52),
-                ForeColor   = Color.FromArgb(220, 225, 235),
-                Font        = new Font("Segoe UI", 9.5f),
+                Dock = DockStyle.Fill,
+                Multiline = true,
+                WordWrap = true,
+                ScrollBars = ScrollBars.Vertical,
+                Text = current ?? string.Empty,
+                BackColor = Color.FromArgb(38, 42, 52),
+                ForeColor = Color.FromArgb(220, 225, 235),
+                Font = new Font("Segoe UI", 11F),
                 BorderStyle = BorderStyle.FixedSingle,
+                Margin = new Padding(0, 0, 0, 8)
             };
-            Controls.Add(_tb);
+            tbl.Controls.Add(_tb, 0, 2);
 
-            // Char count hint
             var lblCount = new Label
             {
-                Location  = new Point(14, 124),
-                AutoSize  = true,
-                Font      = new Font("Segoe UI", 8f),
+                AutoSize = true,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 9.5F),
                 ForeColor = Color.FromArgb(110, 120, 135),
-                Text      = $"{_tb.Text.Length} ký tự",
+                Text = $"{_tb.Text.Length} ký tự",
+                Margin = new Padding(0, 0, 0, 8)
             };
             _tb.TextChanged += (_, __) => lblCount.Text = $"{_tb.Text.Length} ký tự";
-            Controls.Add(lblCount);
+            tbl.Controls.Add(lblCount, 0, 3);
 
-            // Buttons
-            var btnSave = new Button
+            var flpButtons = new FlowLayoutPanel
             {
-                Text      = "💾 Lưu",
-                Location  = new Point(296, 174),
-                Size      = new Size(90, 32),
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(40, 130, 80),
-                ForeColor = Color.White,
-                Font      = new Font("Segoe UI", 9f, FontStyle.Bold),
-                Cursor    = Cursors.Hand,
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                Padding = new Padding(0, 8, 0, 0),
+                BackColor = BackColor
             };
-            btnSave.FlatAppearance.BorderColor = Color.FromArgb(60, 180, 110);
-            btnSave.Click += (_, __) => { ResultHashtag = _tb.Text.Trim(); DialogResult = DialogResult.OK; Close(); };
-            Controls.Add(btnSave);
 
             var btnCancel = new Button
             {
-                Text      = "Hủy",
-                Location  = new Point(396, 174),
-                Size      = new Size(88, 32),
+                Text = "Hủy",
+                AutoSize = true,
+                MinimumSize = new Size(112, 40),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(70, 50, 55),
                 ForeColor = Color.FromArgb(220, 200, 200),
-                Font      = new Font("Segoe UI", 9f),
-                Cursor    = Cursors.Hand,
+                Font = new Font("Segoe UI", 10.5F),
+                Cursor = Cursors.Hand,
+                Margin = new Padding(8, 0, 0, 0)
             };
             btnCancel.FlatAppearance.BorderColor = Color.FromArgb(120, 70, 80);
             btnCancel.Click += (_, __) => { DialogResult = DialogResult.Cancel; Close(); };
-            Controls.Add(btnCancel);
+
+            var btnSave = new Button
+            {
+                Text = "💾 Lưu",
+                AutoSize = true,
+                MinimumSize = new Size(112, 40),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(40, 130, 80),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Margin = Padding.Empty
+            };
+            btnSave.FlatAppearance.BorderColor = Color.FromArgb(60, 180, 110);
+            btnSave.Click += (_, __) => { ResultHashtag = _tb.Text.Trim(); DialogResult = DialogResult.OK; Close(); };
+
+            flpButtons.Controls.Add(btnCancel);
+            flpButtons.Controls.Add(btnSave);
+            tbl.Controls.Add(flpButtons, 0, 4);
+
+            Controls.Add(tbl);
 
             AcceptButton = btnSave;
             CancelButton = btnCancel;

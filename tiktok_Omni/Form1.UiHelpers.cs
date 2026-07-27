@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Helpers;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Affiliate;
 
@@ -114,6 +115,21 @@ namespace tiktok_Omni
             row.ReupSelectedMusicFile = VideoReupRowItem.NoMusicSelectionLabel;
         }
 
+        private static void EnsureVideoReupRowHookSfxDefault(VideoReupRowItem row)
+        {
+            if (row == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(row.ReupSelectedHookSfxFile))
+            {
+                return;
+            }
+
+            row.ReupSelectedHookSfxFile = VideoReupRowItem.NoHookSfxSelectionLabel;
+        }
+
         private void dgvAffiliateResults_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode != Keys.Delete || e.Alt || e.Control)
@@ -140,6 +156,13 @@ namespace tiktok_Omni
                 return;
             }
 
+            if (!UiConfirmHelper.ConfirmDeleteRows(this, items.Count))
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
             foreach (var candidate in items)
             {
                 _affiliateBindingList.Remove(candidate);
@@ -160,11 +183,20 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (dgvProxyProfiles.Columns[e.ColumnIndex]?.Name != "colProfileMascotImage")
-            {
-                return;
-            }
+            var colName = dgvProxyProfiles.Columns[e.ColumnIndex]?.Name;
 
+            if (colName == "colProfileMascotImage")
+            {
+                HandleProfileMascotImageClick(e);
+            }
+            else if (colName == "colProfileHookClips")
+            {
+                HandleProfileHookClipsClick(e);
+            }
+        }
+
+        private void HandleProfileMascotImageClick(DataGridViewCellEventArgs e)
+        {
             if (!(dgvProxyProfiles.Rows[e.RowIndex].DataBoundItem is AutomationProfile profile))
             {
                 return;
@@ -173,9 +205,11 @@ namespace tiktok_Omni
             var profileName = (profile.Name ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(profileName))
             {
+                Log("Ảnh profile: dòng chưa có «Tên profile» — nhập tên nick trước.");
                 return;
             }
 
+            var dir = AvatarIdentityPackStore.GetProfileDirectory(profileName);
             using (var dialog = new OpenFileDialog())
             {
                 dialog.Filter = "Image Files|*.jpg;*.jpeg;*.png;*.webp";
@@ -185,7 +219,6 @@ namespace tiktok_Omni
                     return;
                 }
 
-                var dir = AvatarIdentityPackStore.GetProfileDirectory(profileName);
                 foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".webp" })
                 {
                     var old = Path.Combine(dir, "mascot" + ext);
@@ -210,7 +243,53 @@ namespace tiktok_Omni
 
                 var dest = Path.Combine(dir, "mascot" + destExt.ToLowerInvariant());
                 File.Copy(dialog.FileName, dest, true);
-                Log("AvatarVault: đã lưu ảnh profile «" + profileName + "» → " + dest);
+
+                var sizeKb = new FileInfo(dest).Length / 1024;
+                Log("✓ Ảnh profile «" + profileName + "» đã lưu: " + Path.GetFileName(dest) + " (" + sizeKb + " KB)");
+                Log("   Thư mục AvatarVault: " + dir);
+                Log("   Video reup hook intro sẽ dùng ảnh này khi render.");
+
+                dgvProxyProfiles.InvalidateCell(e.ColumnIndex, e.RowIndex);
+            }
+        }
+
+        private async void HandleProfileHookClipsClick(DataGridViewCellEventArgs e)
+        {
+            if (!(dgvProxyProfiles.Rows[e.RowIndex].DataBoundItem is AutomationProfile profile))
+            {
+                return;
+            }
+
+            var profileName = (profile.Name ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(profileName))
+            {
+                Log("Hook Clips: dòng chưa có «Tên profile» — nhập tên nick trước.");
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+
+            // Tạo sẵn tất cả 5 thư mục style\{profileName}\ và trả về thư mục cha (trong style đầu tiên → lấy cha chung)
+            var profileRoot = HookStyleCatalog.EnsureProfileFolders(profileName, settings);
+
+            if (string.IsNullOrEmpty(profileRoot) || !Directory.Exists(profileRoot))
+            {
+                Log($"Hook Clips «{profileName}»: không thể tạo thư mục — kiểm tra «HookStockClipsRoot» trong Cài đặt.");
+                return;
+            }
+
+            var summary = HookStyleCatalog.GetCatalogStatusSummary(settings, profileName);
+            Log($"📁 Hook Clips «{profileName}»: {summary}");
+            Log($"   Thư mục: {profileRoot}");
+            Log("   Cấu trúc: noi_dau\\ boc_phot\\ huong_dan\\ fomo\\ ke_chuyen\\ → thêm .mp4 vào style tương ứng.");
+
+            try
+            {
+                System.Diagnostics.Process.Start("explorer.exe", profileRoot);
+            }
+            catch (Exception ex)
+            {
+                Log($"Hook Clips: không mở được Explorer — {ex.Message}");
             }
         }
 

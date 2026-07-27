@@ -250,6 +250,26 @@ namespace tiktok_Omni.Services
             await _geminiThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                InvalidOperationException lastRateLimit = null;
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    try
+                    {
+                        return await SendGeminiRequestAsync(prompt, model, apiKey, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (InvalidOperationException ex) when (attempt < 2 && IsLikelyGeminiQuotaOrRateLimit(ex.Message))
+                    {
+                        lastRateLimit = ex;
+                        var waitSec = 6 * (attempt + 1);
+                        await Task.Delay(TimeSpan.FromSeconds(waitSec), cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                if (lastRateLimit != null)
+                {
+                    throw lastRateLimit;
+                }
+
                 return await SendGeminiRequestAsync(prompt, model, apiKey, cancellationToken).ConfigureAwait(false);
             }
             finally
@@ -343,6 +363,238 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>Showcase: gửi NHIỀU ảnh + 1 prompt văn bản cho Gemini (vision) — dùng để suy luận chủ đề/thứ tự cảnh.</summary>
+        public async Task<string> GenerateScriptWithImagesAsync(
+            string prompt,
+            IList<string> imagePaths,
+            string provider,
+            string apiKey,
+            string model = "gemini-2.0-flash",
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                throw new ArgumentException("Prompt is required.", nameof(prompt));
+            }
+
+            if (imagePaths == null || imagePaths.Count == 0)
+            {
+                throw new ArgumentException("At least one reference image is required.", nameof(imagePaths));
+            }
+
+            foreach (var path in imagePaths)
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    throw new FileNotFoundException("Reference image not found.", path ?? string.Empty);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("AI provider API key is required.");
+            }
+
+            var normalizedProvider = (provider ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalizedProvider.Contains("claude") || normalizedProvider.Contains("anthropic"))
+            {
+                // Claude multi-image inline chưa được hỗ trợ trong codebase — fallback text-only.
+                return await SendClaudeRequestAsync(prompt, model, apiKey, cancellationToken).ConfigureAwait(false);
+            }
+
+            await _geminiThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var safeModel = string.IsNullOrWhiteSpace(model) ? "gemini-2.0-flash" : model.Trim();
+                var parts = new JArray { new JObject { ["text"] = prompt } };
+                foreach (var path in imagePaths)
+                {
+                    var fileInfo = new FileInfo(path);
+                    if (fileInfo.Length > MaxInlineImageBytes)
+                    {
+                        throw new InvalidOperationException(
+                            "Ảnh «" + Path.GetFileName(path) + "» (" + (fileInfo.Length / 1024d / 1024d).ToString("0.0") +
+                            " MB) lớn hơn giới hạn inline của Gemini.");
+                    }
+
+                    var mime = GuessImageMime(path);
+                    var bytes = await ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+                    var b64 = Convert.ToBase64String(bytes);
+                    parts.Add(new JObject
+                    {
+                        ["inline_data"] = new JObject
+                        {
+                            ["mime_type"] = mime,
+                            ["data"] = b64
+                        }
+                    });
+                }
+
+                var body = new JObject
+                {
+                    ["contents"] = new JArray(
+                        new JObject
+                        {
+                            ["role"] = "user",
+                            ["parts"] = parts
+                        }),
+                    ["generationConfig"] = new JObject
+                    {
+                        ["responseMimeType"] = "application/json"
+                    }
+                };
+
+                var endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + safeModel + ":generateContent";
+                var apiClient = new ApiClient(endpoint, TimeSpan.FromMinutes(3));
+                var request = new RestRequest(string.Empty, Method.Post);
+                request.AddHeader("Content-Type", "application/json");
+                request.AddQueryParameter("key", apiKey);
+                request.AddStringBody(body.ToString(Newtonsoft.Json.Formatting.None), DataFormat.Json);
+
+                var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                var json = JObject.Parse(response.Content ?? "{}");
+                return json["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString()
+                       ?? string.Empty;
+            }
+            finally
+            {
+                await Task.Delay(4000, CancellationToken.None).ConfigureAwait(false);
+                _geminiThrottle.Release();
+            }
+        }
+
+        /// <summary>Showcase: nén từng clip phân cảnh rồi gửi Gemini vision — viết thoại khớp clip.</summary>
+        public async Task<string> GenerateShowcaseVoiceoverFromClipsAsync(
+            string prompt,
+            IList<string> clipPaths,
+            string provider,
+            string apiKey,
+            string model = "gemini-2.0-flash",
+            Action<string> logAction = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                throw new ArgumentException("Prompt is required.", nameof(prompt));
+            }
+
+            if (clipPaths == null || clipPaths.Count == 0)
+            {
+                throw new ArgumentException("At least one clip is required.", nameof(clipPaths));
+            }
+
+            foreach (var path in clipPaths)
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    throw new FileNotFoundException("Scene clip not found.", path ?? string.Empty);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("AI provider API key is required.");
+            }
+
+            var normalizedProvider = (provider ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalizedProvider.Contains("claude") || normalizedProvider.Contains("anthropic"))
+            {
+                return await SendClaudeRequestAsync(prompt, model, apiKey, cancellationToken).ConfigureAwait(false);
+            }
+
+            var compressedPaths = new List<string>();
+            await _geminiThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                for (var i = 0; i < clipPaths.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    logAction?.Invoke("[Showcase] Nén clip cảnh " + (i + 1) + "/" + clipPaths.Count +
+                                      " (144p, giữ tốc độ gốc) — " + Path.GetFileName(clipPaths[i]));
+                    var compressed = await CompressVideoForGeminiAsync(
+                        clipPaths[i],
+                        cancellationToken,
+                        preservePlaybackSpeed: true).ConfigureAwait(false);
+                    compressedPaths.Add(compressed);
+                }
+
+                var safeModel = string.IsNullOrWhiteSpace(model) ? "gemini-2.0-flash" : model.Trim();
+                var parts = new JArray { new JObject { ["text"] = prompt } };
+                long totalBytes = 0;
+                for (var i = 0; i < compressedPaths.Count; i++)
+                {
+                    var path = compressedPaths[i];
+                    var fileInfo = new FileInfo(path);
+                    totalBytes += fileInfo.Length;
+                    if (fileInfo.Length > MaxInlineVideoBytes)
+                    {
+                        throw new InvalidOperationException(
+                            "Clip cảnh " + (i + 1) + " sau nén vẫn quá lớn (" +
+                            (fileInfo.Length / 1024d / 1024d).ToString("0.0") + " MB).");
+                    }
+
+                    parts.Add(new JObject { ["text"] = "--- CẢNH " + (i + 1) + " (clip video) ---" });
+                    var mime = GuessVideoMime(path);
+                    var bytes = await ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+                    var b64 = Convert.ToBase64String(bytes);
+                    parts.Add(new JObject
+                    {
+                        ["inline_data"] = new JObject
+                        {
+                            ["mime_type"] = mime,
+                            ["data"] = b64
+                        }
+                    });
+                }
+
+                if (totalBytes > MaxInlineVideoBytes * 2)
+                {
+                    logAction?.Invoke("[Showcase] Tổng dung lượng clip gửi Gemini: " +
+                                      (totalBytes / 1024d / 1024d).ToString("0.0") + " MB");
+                }
+
+                var body = new JObject
+                {
+                    ["contents"] = new JArray(
+                        new JObject
+                        {
+                            ["role"] = "user",
+                            ["parts"] = parts
+                        }),
+                    ["generationConfig"] = new JObject
+                    {
+                        ["responseMimeType"] = "application/json"
+                    }
+                };
+
+                var endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + safeModel + ":generateContent";
+                var apiClient = new ApiClient(endpoint, TimeSpan.FromMinutes(8));
+                var request = new RestRequest(string.Empty, Method.Post);
+                request.AddHeader("Content-Type", "application/json");
+                request.AddQueryParameter("key", apiKey);
+                request.AddStringBody(body.ToString(Newtonsoft.Json.Formatting.None), DataFormat.Json);
+
+                logAction?.Invoke("[Showcase] Đang gửi " + clipPaths.Count + " clip cho Gemini viết thoại…");
+                var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                var json = JObject.Parse(response.Content ?? "{}");
+                return json["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString()
+                       ?? string.Empty;
+            }
+            finally
+            {
+                foreach (var path in compressedPaths)
+                {
+                    if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                    {
+                        try { File.Delete(path); } catch { /* non-critical */ }
+                    }
+                }
+
+                await Task.Delay(4000, CancellationToken.None).ConfigureAwait(false);
+                _geminiThrottle.Release();
+            }
+        }
+
         private static string GuessImageMime(string path)
         {
             var ext = Path.GetExtension(path ?? string.Empty).ToLowerInvariant();
@@ -356,8 +608,8 @@ namespace tiktok_Omni.Services
             }
         }
 
-        /// <summary>Model Gemini native image generation (hook intro Video reup).</summary>
-        public const string HookSceneImageModel = "gemini-2.0-flash-preview-image-generation";
+        /// <summary>Model Gemini native image generation (hook intro Video reup) — Nano Banana / 2.5 Flash Image.</summary>
+        public const string HookSceneImageModel = "gemini-2.5-flash-image";
 
         /// <summary>
         /// Sinh ảnh hook intro: giữ identity nhân vật từ ảnh tham chiếu, biểu cảm khớp câu hook.
@@ -433,7 +685,11 @@ namespace tiktok_Omni.Services
                         }),
                     ["generationConfig"] = new JObject
                     {
-                        ["responseModalities"] = new JArray("TEXT", "IMAGE")
+                        ["responseModalities"] = new JArray("IMAGE"),
+                        ["imageConfig"] = new JObject
+                        {
+                            ["aspectRatio"] = "9:16"
+                        }
                     }
                 };
 
@@ -444,7 +700,7 @@ namespace tiktok_Omni.Services
                 request.AddQueryParameter("key", apiKey);
                 request.AddStringBody(body.ToString(Newtonsoft.Json.Formatting.None), DataFormat.Json);
 
-                log?.Invoke("[VideoReup] Gemini image gen: đang sinh ảnh hook intro…");
+                log?.Invoke("[VideoReup] Gemini image gen (" + HookSceneImageModel + "): đang sinh ảnh hook intro…");
                 var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
                 var json = JObject.Parse(response.Content ?? "{}");
                 var err = json["error"]?["message"]?.ToString();
@@ -1065,31 +1321,38 @@ namespace tiktok_Omni.Services
         }
 
         /// <summary>
-        /// Uses FFmpeg to produce a small preview clip suitable for Gemini inline upload:
-        ///   • Max 90 seconds (first 90 s of the video)
-        ///   • 360 p (scale to height=360, keep aspect ratio)
-        ///   • Video bitrate 400 kbps, audio 64 kbps
-        /// Typical output: 3–7 MB for a 60-90 s clip.
-        /// Saves the temp file next to the source with a .gemini_preview.mp4 suffix.
+        /// FFmpeg → clip nhỏ cho Gemini inline upload (144p, bitrate thấp).
+        /// preservePlaybackSpeed=true: giữ tốc độ/thời lượng gốc (Showcase thoại).
         /// </summary>
         private static async Task<string> CompressVideoForGeminiAsync(
             string sourceVideoPath,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool preservePlaybackSpeed = false)
         {
             var tmpName = Path.GetFileNameWithoutExtension(sourceVideoPath)
                           + "_gemini_" + System.Guid.NewGuid().ToString("N").Substring(0, 6) + ".mp4";
             var outPath = Path.Combine(Path.GetTempPath(), tmpName);
 
-            // 144p + 2× speed (all content preserved, half the duration) + very low bitrate
-            // setpts=0.5*PTS  → video runs at 2×
-            // atempo=2.0      → audio runs at 2× (single pass covers up to 2×)
-            var args = $"-y -i \"{sourceVideoPath}\" " +
+            string args;
+            if (preservePlaybackSpeed)
+            {
+                args = $"-y -i \"{sourceVideoPath}\" " +
+                       $"-vf \"scale=-2:144\" " +
+                       $"-c:v libx264 -preset ultrafast -crf 35 -b:v 150k " +
+                       $"-c:a aac -b:a 32k -ac 1 " +
+                       $"-map_metadata -1 " +
+                       $"\"{outPath}\"";
+            }
+            else
+            {
+                args = $"-y -i \"{sourceVideoPath}\" " +
                        $"-vf \"scale=-2:144,setpts=0.5*PTS\" " +
                        $"-af \"atempo=2.0\" " +
                        $"-c:v libx264 -preset ultrafast -crf 35 -b:v 150k " +
                        $"-c:a aac -b:a 32k -ac 1 " +
                        $"-map_metadata -1 " +
                        $"\"{outPath}\"";
+            }
 
             var ffmpeg = ResolveFfmpegPath();
             var psi    = new System.Diagnostics.ProcessStartInfo

@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using Newtonsoft.Json;
 
 namespace tiktok_Omni.Services
 {
@@ -27,6 +29,24 @@ namespace tiktok_Omni.Services
 
         /// <summary>Câu hook thoại (Gemini / chỉnh tay) trước khi voiceover — hiển thị/sửa trong bảng Video reup.</summary>
         public string ReupHookDraft { get; set; } = string.Empty;
+
+        /// <summary>Hook theo từng phong cách (boc_phot, fomo, …) — Gemini sinh 5 bản.</summary>
+        [Browsable(false)]
+        public Dictionary<string, string> ReupHookByStyle { get; set; }
+            = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Script thuyết minh theo từng phong cách.</summary>
+        [Browsable(false)]
+        public Dictionary<string, string> ReupScriptByStyle { get; set; }
+            = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Phong cách hook người dùng chọn — rỗng = ngẫu nhiên khi render.</summary>
+        [Browsable(false)]
+        public string SelectedHookStyleKey { get; set; } = string.Empty;
+
+        /// <summary>Phong cách script người dùng chọn — rỗng = theo hook khi render.</summary>
+        [Browsable(false)]
+        public string SelectedScriptStyleKey { get; set; } = string.Empty;
 
         /// <summary>Alias pipeline: hook text gửi ElevenLabs.</summary>
         [Browsable(false)]
@@ -75,6 +95,23 @@ namespace tiktok_Omni.Services
         {
             var pick = (value ?? string.Empty).Trim();
             return pick.Length > 0 && !IsNoMusicSelection(pick);
+        }
+
+        /// <summary>File SFX hook overlay đã chọn (tên file trong Assets\Audio\Sfx, hoặc <see cref="NoHookSfxSelectionLabel"/>).</summary>
+        public string ReupSelectedHookSfxFile { get; set; } = string.Empty;
+
+        /// <summary>Giá trị combo cột «SFX Hook» khi không trộn hiệu ứng.</summary>
+        public const string NoHookSfxSelectionLabel = "(Không có SFX)";
+
+        public static bool IsNoHookSfxSelection(string value)
+        {
+            return string.Equals((value ?? string.Empty).Trim(), NoHookSfxSelectionLabel, StringComparison.Ordinal);
+        }
+
+        public static bool HasHookSfxSelected(string value)
+        {
+            var pick = (value ?? string.Empty).Trim();
+            return pick.Length > 0 && !IsNoHookSfxSelection(pick);
         }
 
         /// <summary>Sau hook: nhạc nền hay giữ tiếng gốc video (chế độ phim).</summary>
@@ -134,6 +171,40 @@ namespace tiktok_Omni.Services
 
         /// <summary>Thông báo lỗi remix gần nhất (nếu có).</summary>
         public string RemixLastError { get; set; } = string.Empty;
+
+        /// <summary>Nhãn hiển thị trên lưới — gộp trạng thái và lỗi.</summary>
+        public string GetReupStatusDisplayLabel()
+        {
+            var status = (RemixStatus ?? string.Empty).Trim();
+            var error = (RemixLastError ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(status) && string.IsNullOrEmpty(error))
+            {
+                return string.Empty;
+            }
+
+            if (string.IsNullOrEmpty(error))
+            {
+                return status;
+            }
+
+            if (string.IsNullOrEmpty(status))
+            {
+                return error;
+            }
+
+            if (string.Equals(status, error, StringComparison.OrdinalIgnoreCase))
+            {
+                return status;
+            }
+
+            if (status.IndexOf("lỗi", StringComparison.OrdinalIgnoreCase) >= 0
+                || string.Equals(status, "Đã hủy", StringComparison.OrdinalIgnoreCase))
+            {
+                return status + ": " + error;
+            }
+
+            return status + " — " + error;
+        }
 
         public const string ReupRemixModeAffiliateBedLabel = "Hook + Nhạc nền";
         public const string ReupRemixModeFilmLabel = "Hook + Phim";
@@ -224,16 +295,89 @@ namespace tiktok_Omni.Services
         /// <summary>Tóm tắt hiển thị trên lưới (cập nhật sau khi chỉnh phụ đề).</summary>
         public string ReupSubtitleStyleLabel { get; set; } = string.Empty;
 
+        /// <summary>Preset chỉnh màu: default | natural | vivid | warm | cool | cinematic | custom.</summary>
+        [Browsable(false)]
+        public string ReupColorPreset { get; set; } = string.Empty;
+
+        [Browsable(false)]
+        public double ReupColorBrightness { get; set; }
+
+        [Browsable(false)]
+        public double ReupColorContrast { get; set; }
+
+        [Browsable(false)]
+        public double ReupColorSaturation { get; set; }
+
+        [Browsable(false)]
+        public double ReupColorGamma { get; set; }
+
+        /// <summary>Tóm tắt filter màu trên lưới — bấm cột «Màu» để sửa.</summary>
+        public string ReupColorGradeLabel { get; set; } = string.Empty;
+
         /// <summary>Ảnh hook AI (Gemini) lưu trong stage — hook_scene.png.</summary>
         [Browsable(false)]
         public string ReupHookIntroImagePath { get; set; } = string.Empty;
 
-        /// <summary>Video intro hook (ảnh + phụ đề + TTS) — hook_intro.mp4.</summary>
+        /// <summary>Video intro hook (ảnh/clip + phụ đề karaoke + TTS) — hook_intro.mp4.</summary>
         [Browsable(false)]
         public string ReupHookIntroVideoPath { get; set; } = string.Empty;
 
         /// <summary>Thời lượng clip hook intro (giây).</summary>
         [Browsable(false)]
         public double? ReupHookIntroDurationSec { get; set; }
+
+        /// <summary>
+        /// Phong cách hook video stock (noi_dau | boc_phot | huong_dan | fomo | ke_chuyen).
+        /// Rỗng = dùng Gemini sinh ảnh (hành vi cũ).
+        /// </summary>
+        [Browsable(false)]
+        public string HookStyleKey { get; set; } = string.Empty;
+
+        /// <summary>Nhãn "Gemini" khi HookStyleKey rỗng.</summary>
+        public const string HookStyleGeminiLabel = "Gemini (ảnh AI)";
+
+        /// <summary>Label hiển thị trên lưới — map qua lại với <see cref="HookStyleKey"/>.</summary>
+        [JsonIgnore]
+        public string HookStyleDisplay
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(HookStyleKey))
+                {
+                    return HookStyleGeminiLabel;
+                }
+
+                if (HookStyleCatalog.StyleDisplayNames.TryGetValue(HookStyleKey, out var name))
+                {
+                    return name;
+                }
+
+                return HookStyleKey;
+            }
+            set
+            {
+                if (string.IsNullOrWhiteSpace(value)
+                    || string.Equals(value, HookStyleGeminiLabel, StringComparison.Ordinal))
+                {
+                    HookStyleKey = string.Empty;
+                    return;
+                }
+
+                foreach (var kv in HookStyleCatalog.StyleDisplayNames)
+                {
+                    if (string.Equals(kv.Value, value, StringComparison.Ordinal))
+                    {
+                        HookStyleKey = kv.Key;
+                        return;
+                    }
+                }
+
+                HookStyleKey = value;
+            }
+        }
+
+        /// <summary>Đường dẫn clip stock đã chọn cho hook intro — tránh dùng lại clip cũ khi render lại.</summary>
+        [Browsable(false)]
+        public string HookStockClipPath { get; set; } = string.Empty;
     }
 }

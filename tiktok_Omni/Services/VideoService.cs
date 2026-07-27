@@ -5,12 +5,15 @@ using Newtonsoft.Json.Linq;
 using RestSharp;
 using System.Collections.Generic;
 
+using tiktok_Omni.Services.Showcase;
+
 namespace tiktok_Omni.Services
 {
     public class VideoService
     {
         private readonly FalAiVideoService _falAiVideoService = new FalAiVideoService();
         private readonly RapidApiGoogleVeoService _rapidApiGoogleVeoService = new RapidApiGoogleVeoService();
+        private readonly EdgeTtsService _edgeTtsService = new EdgeTtsService();
 
         public async Task<string> GenerateVideoAsync(
             string prompt,
@@ -200,11 +203,82 @@ namespace tiktok_Omni.Services
             AppSettings settings,
             CancellationToken cancellationToken,
             bool emphaticHook = false,
-            string voiceIdOverride = null)
+            string voiceIdOverride = null,
+            bool showcaseExpressiveBody = false)
+        {
+            return await GenerateAudioAsync(
+                text,
+                settings,
+                cancellationToken,
+                TtsEngineKind.ElevenLabs,
+                emphaticHook,
+                voiceIdOverride,
+                showcaseExpressiveBody,
+                logAction: null).ConfigureAwait(false);
+        }
+
+        public async Task<string> GenerateAudioAsync(
+            string text,
+            AppSettings settings,
+            CancellationToken cancellationToken,
+            TtsEngineKind engine,
+            ShowcaseTtsRenderOptions showcaseTts,
+            bool emphaticHook = false,
+            bool showcaseExpressiveBody = false,
+            Action<string> logAction = null)
+        {
+            var preset = showcaseTts?.Preset;
+            var voiceOverride = ShowcaseTtsHelper.ResolveElevenLabsVoiceId(preset, settings);
+            var hookFlag = emphaticHook && (preset?.ElevenLabsEmphaticHook ?? true);
+            var bodyFlag = showcaseExpressiveBody && (preset?.ElevenLabsExpressiveBody ?? true);
+            var lang = ShowcaseTtsHelper.ResolveElevenLabsLanguageCode(showcaseTts);
+
+            if (engine == TtsEngineKind.EdgeTts)
+            {
+                var edgeOpts = ShowcaseEdgeTtsVoiceResolver.Resolve(showcaseTts);
+                return await _edgeTtsService.SynthesizeToTempMp3Async(
+                    text,
+                    edgeOpts,
+                    logAction,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            return await GenerateAudioAsync(
+                text,
+                settings,
+                cancellationToken,
+                engine,
+                hookFlag,
+                voiceOverride,
+                bodyFlag,
+                logAction,
+                lang).ConfigureAwait(false);
+        }
+
+        public async Task<string> GenerateAudioAsync(
+            string text,
+            AppSettings settings,
+            CancellationToken cancellationToken,
+            TtsEngineKind engine,
+            bool emphaticHook = false,
+            string voiceIdOverride = null,
+            bool showcaseExpressiveBody = false,
+            Action<string> logAction = null,
+            string elevenLabsLanguageCode = null)
         {
             if (settings == null)
             {
                 throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (engine == TtsEngineKind.EdgeTts)
+            {
+                var edgeOpts = ShowcaseEdgeTtsVoiceResolver.ResolveFemaleSouthYoung();
+                return await _edgeTtsService.SynthesizeToTempMp3Async(
+                    text,
+                    edgeOpts,
+                    logAction,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             return await GenerateAudioAsync(
@@ -214,7 +288,9 @@ namespace tiktok_Omni.Services
                 cancellationToken,
                 emphaticHook,
                 settings,
-                voiceIdOverride).ConfigureAwait(false);
+                voiceIdOverride,
+                showcaseExpressiveBody,
+                elevenLabsLanguageCode).ConfigureAwait(false);
         }
 
         public async Task<string> GenerateAudioAsync(
@@ -232,7 +308,8 @@ namespace tiktok_Omni.Services
                 cancellationToken,
                 emphaticHook,
                 settings,
-                voiceIdOverride: null).ConfigureAwait(false);
+                voiceIdOverride: null,
+                showcaseExpressiveBody: false).ConfigureAwait(false);
         }
 
         public async Task<string> GenerateAudioAsync(
@@ -242,7 +319,9 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             bool emphaticHook,
             AppSettings settings,
-            string voiceIdOverride)
+            string voiceIdOverride,
+            bool showcaseExpressiveBody = false,
+            string elevenLabsLanguageCode = null)
         {
             // 1. NHẬN DIỆN NẾU URL LÀ CỦA ELEVENLABS
             if (IsElevenLabsEndpoint(endpoint))
@@ -256,7 +335,13 @@ namespace tiktok_Omni.Services
                     var requestUrl = string.IsNullOrEmpty(voiceId)
                         ? endpoint
                         : ElevenLabsTtsHelper.ResolveEndpointWithVoiceId(endpoint, voiceId);
-                    var payload = ElevenLabsTtsHelper.BuildPayload(text, settings, emphaticHook, voiceId);
+                    var payload = ElevenLabsTtsHelper.BuildPayload(
+                        text,
+                        settings,
+                        emphaticHook,
+                        voiceId,
+                        showcaseExpressiveBody,
+                        elevenLabsLanguageCode);
                     var json = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
                     var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
 

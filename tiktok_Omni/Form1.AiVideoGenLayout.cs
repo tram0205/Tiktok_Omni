@@ -71,6 +71,12 @@ namespace tiktok_Omni
                 }
 
                 fill?.BringToFront();
+
+                // net472: Controls.Add đè font header — áp lại khi fill là DataGridView.
+                if (fill is DataGridView fillGrid)
+                {
+                    ApplyAppGridChrome(fillGrid);
+                }
             }
             finally
             {
@@ -812,6 +818,26 @@ namespace tiktok_Omni
             DetachControlFromParent(dgvDeepDiveInput);
             dgvDeepDiveInput.Margin = Padding.Empty;
             ApplyTopFillBottomDockLayout(pnlDeepDiveGridHost, dgvDeepDiveInput, bottom: null, top: null);
+        }
+
+        /// <summary>Showcase tab: lưới ảnh chiếm full.</summary>
+        private void WireShowcaseProductGridLayout()
+        {
+            if (pnlAffiliateDeepProductGridHost == null || dgvDeepDiveInput == null)
+            {
+                return;
+            }
+
+            DetachControlFromParent(dgvDeepDiveInput);
+            dgvDeepDiveInput.Margin = Padding.Empty;
+
+            ApplyTopFillBottomDockLayout(
+                pnlAffiliateDeepProductGridHost,
+                dgvDeepDiveInput,
+                bottom: null,
+                top: null);
+
+            dgvDeepDiveInput.Visible = true;
         }
 
         private static void DetachControlFromParent(Control control)

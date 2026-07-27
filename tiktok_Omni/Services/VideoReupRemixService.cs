@@ -45,28 +45,77 @@ namespace tiktok_Omni.Services
             return !string.IsNullOrEmpty(path) && File.Exists(path);
         }
 
-        /// <summary>Thư mục thư viện .mp3: Cài đặt «Video reup thư mục nhạc» nếu có, không thì …\VideoReup\Music cạnh exe.</summary>
-        public static string GetMusicLibraryDirectory(AppSettings settings)
-        {
-            var custom = (settings?.VideoReupMusicLibraryPath ?? string.Empty).Trim();
-            if (!string.IsNullOrEmpty(custom))
-            {
-                try
-                {
-                    return Path.GetFullPath(custom);
-                }
-                catch
-                {
-                    // ignored — fall back
-                }
-            }
 
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "VideoReup", "Music");
-        }
+        public static string GetMusicLibraryDirectory(AppSettings settings) =>
+            OmniAudioLibrary.GetPrimaryMusicDirectory(settings);
 
         public static void EnsureMusicLibraryDirectoryExists(AppSettings settings)
         {
+            OmniAudioLibrary.EnsureSharedDirectoriesExist(settings);
             Directory.CreateDirectory(GetMusicLibraryDirectory(settings));
+        }
+
+        /// <summary>Thư mục quét nhạc nền — Assets\Audio\Music.</summary>
+        public static IReadOnlyList<string> GetMusicSearchDirectories(AppSettings settings) =>
+            OmniAudioLibrary.GetMusicSearchDirectories(settings);
+
+        public static List<string> ListMusicFileNames(AppSettings settings)
+        {
+            EnsureMusicLibraryDirectoryExists(settings);
+            return OmniAudioLibrary.ListMusicFileNames(settings);
+        }
+
+        public static string ResolveMusicFilePath(string fileName, AppSettings settings)
+        {
+            var pick = (fileName ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(pick) || VideoReupRowItem.IsNoMusicSelection(pick))
+            {
+                return string.Empty;
+            }
+
+            return OmniAudioLibrary.ResolveMusicFilePath(pick, settings);
+        }
+
+        /// <summary>Thư mục SFX chính: Assets\Audio\Sfx.</summary>
+        public static string GetHookSfxLibraryDirectory(AppSettings settings) =>
+            OmniAudioLibrary.GetPrimarySfxDirectory(settings);
+
+        public static void EnsureHookSfxLibraryDirectoryExists(AppSettings settings) =>
+            OmniAudioLibrary.EnsureSharedDirectoriesExist(settings);
+
+        /// <summary>Liệt kê SFX — Assets\Audio\Sfx.</summary>
+        public static List<string> ListHookSfxFileNames(AppSettings settings)
+        {
+            EnsureHookSfxLibraryDirectoryExists(settings);
+            return OmniAudioLibrary.ListSfxFileNames(settings);
+        }
+
+        public static List<string> ListHookSfxFilePaths(AppSettings settings)
+        {
+            var names = ListHookSfxFileNames(settings);
+            var paths = new List<string>();
+            foreach (var name in names)
+            {
+                var path = ResolveHookSfxFilePath(settings, name);
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    paths.Add(path);
+                }
+            }
+
+            return paths;
+        }
+
+        public static string ResolveHookSfxFilePath(AppSettings settings, string fileName)
+        {
+            var want = (fileName ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(want) || VideoReupRowItem.IsNoHookSfxSelection(want))
+            {
+                return null;
+            }
+
+            var path = OmniAudioLibrary.ResolveSfxFilePath(want, settings);
+            return string.IsNullOrWhiteSpace(path) ? null : path;
         }
 
         /// <summary>URL có vẻ là link http(s) tuyệt đối — dùng trước khi gọi TikWM tải video.</summary>
@@ -85,6 +134,41 @@ namespace tiktok_Omni.Services
 
             return string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Xóa MP4 thành phẩm cũ trước khi render lại cùng một dòng.</summary>
+        public static bool TryDeletePreviousOutput(string outputPath, string profileName, Action<string> log)
+        {
+            var path = (outputPath ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
+
+            try
+            {
+                var fullPath = Path.GetFullPath(path);
+                if (!File.Exists(fullPath))
+                {
+                    return false;
+                }
+
+                var outputRoot = Path.GetFullPath(ProfileScopedPaths.GetVideoReupOutputRoot(profileName));
+                if (!fullPath.StartsWith(outputRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    log?.Invoke("[VideoReup] Bỏ qua xóa file ngoài thư mục Reup: " + Path.GetFileName(fullPath));
+                    return false;
+                }
+
+                File.Delete(fullPath);
+                log?.Invoke("[VideoReup] Đã xóa kết quả render trước: " + Path.GetFileName(fullPath));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke("[VideoReup] Không xóa được kết quả cũ: " + ex.Message);
+                return false;
+            }
         }
 
         /// <summary>Xóa cache stage / file đã tải / WAV hook khi đổi URL hoặc làm mới nguồn.</summary>
@@ -139,6 +223,43 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>
+        /// Nếu <see cref="VideoReupRowItem.HookStyleKey"/> chưa được chọn, tự gán ngẫu nhiên một style
+        /// từ catalog (nếu catalog có ít nhất một clip).
+        /// Gọi trước render để hàng mới import cũng được gán style tự động.
+        /// </summary>
+        public static void SeedHookStyleKeyIfEmpty(VideoReupRowItem row, AppSettings settings)
+        {
+            if (row == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(row.HookStyleKey))
+            {
+                return;
+            }
+
+            // Chọn ngẫu nhiên một style có ít nhất một clip (ưu tiên clip của profile)
+            var profileName = (row.ProfileName ?? string.Empty).Trim();
+            var rng = new Random();
+            var keys = HookStyleCatalog.AllStyleKeys
+                .OrderBy(_ => rng.Next())
+                .ToArray();
+
+            foreach (var key in keys)
+            {
+                var clips = HookStyleCatalog.GetClipsForStyle(key, settings, profileName);
+                if (clips.Length > 0)
+                {
+                    row.HookStyleKey = key;
+                    return;
+                }
+            }
+
+            // Catalog rỗng → giữ nguyên (sẽ fallback sang Gemini khi render)
+        }
+
         private static string GetOrCreateStageFolder(VideoReupRowItem row)
         {
             if (row == null)
@@ -188,9 +309,9 @@ namespace tiktok_Omni.Services
             if (needsMusicLibrary && mp3Count == 0)
             {
                 errorMessage =
-                    "Cần ít nhất một file .mp3 trong thư mục nhạc Video reup (chế độ Affiliate — để Gemini gợi ý tên file):\r\n" +
+                    "Cần ít nhất một file .mp3 trong Assets\\Audio\\Music (chế độ Affiliate — để Gemini gợi ý tên file):\r\n" +
                     musicDir +
-                    "\r\nGợi ý: Cài đặt → «Video reup — thư mục nhạc» hoặc tab Video reup → «Mở thư mục nhạc».";
+                    "\r\nGợi ý: tab Video reup → «Thư mục nhạc».";
                 return false;
             }
 
@@ -278,7 +399,8 @@ namespace tiktok_Omni.Services
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace((row.ReupHookDraft ?? string.Empty).Trim()))
+            if (string.IsNullOrWhiteSpace((row.ReupHookDraft ?? string.Empty).Trim())
+                && !VideoReupStyleVariants.HasResolvableHook(row))
             {
                 errorMessage = "Chưa có câu hook — hãy tạo/chỉnh hook trước.";
                 return false;
@@ -332,7 +454,13 @@ namespace tiktok_Omni.Services
                 return true;
             }
 
-            blockerMessage = "Cần AI API Key (Gemini) hoặc ElevenLabs (TTS API Key + Endpoint elevenlabs.io) trong Cài đặt.";
+            // Nếu catalog có clip thì không cần Gemini key để render hook intro
+            if (HookStyleCatalog.CatalogHasAnyClips(settings))
+            {
+                return true;
+            }
+
+            blockerMessage = "Cần AI API Key (Gemini) hoặc ElevenLabs (TTS API Key + Endpoint elevenlabs.io) trong Cài đặt, hoặc cấu hình thư mục video stock «HookClips».";
             return false;
         }
 
@@ -357,15 +485,22 @@ namespace tiktok_Omni.Services
                 return false;
             }
 
-            if (!TryValidateHookIntroMascotStep(row, out errorMessage))
+            // Mascot + Gemini API key chỉ cần khi không có stock clip
+            var profileNameForStock = (row?.ProfileName ?? string.Empty).Trim();
+            var hasStockClip = HookStyleCatalog.CatalogHasAnyClips(settings, profileNameForStock)
+                               || !string.IsNullOrEmpty((row.HookStyleKey ?? string.Empty).Trim());
+            if (!hasStockClip)
             {
-                return false;
-            }
+                if (!TryValidateHookIntroMascotStep(row, out errorMessage))
+                {
+                    return false;
+                }
 
-            if (string.IsNullOrWhiteSpace((settings?.AiApiKey ?? string.Empty).Trim()))
-            {
-                errorMessage = "Cần AI API Key (Gemini) để sinh ảnh hook intro.";
-                return false;
+                if (string.IsNullOrWhiteSpace((settings?.AiApiKey ?? string.Empty).Trim()))
+                {
+                    errorMessage = "Cần AI API Key (Gemini) để sinh ảnh hook intro (hoặc cấu hình thư mục video stock «HookClips»).";
+                    return false;
+                }
             }
 
             if (string.IsNullOrWhiteSpace((row.ReupDownloadedVideoPath ?? string.Empty).Trim()) || !File.Exists(row.ReupDownloadedVideoPath))
@@ -408,7 +543,7 @@ namespace tiktok_Omni.Services
             {
                 if (string.IsNullOrWhiteSpace((row.ReupNarrationAudioPath ?? string.Empty).Trim()) || !File.Exists(row.ReupNarrationAudioPath))
                 {
-                    errorMessage = "Chưa có audio thuyết minh — pipeline sẽ TTS script ở bước 3b trước render.";
+                    errorMessage = "Chưa có audio thuyết minh (WAV) — «Render & Đóng gói» sẽ TTS script ở bước 3b; nếu vẫn lỗi, kiểm tra script + ElevenLabs.";
                     return false;
                 }
 
@@ -464,6 +599,18 @@ namespace tiktok_Omni.Services
             {
                 errorMessage = "File nhạc đã chọn không tồn tại trong thư mục nhạc Video reup:\r\n" + musicDir;
                 return false;
+            }
+
+            if (VideoReupRowItem.HasHookSfxSelected(row.ReupSelectedHookSfxFile)
+                && !ShouldUseVisualHookSfx(row))
+            {
+                var sfxPath = ResolveHookSfxFilePath(settings, row.ReupSelectedHookSfxFile);
+                if (string.IsNullOrWhiteSpace(sfxPath) || !File.Exists(sfxPath))
+                {
+                    errorMessage = "File SFX hook đã chọn không tồn tại trong kho SFX (Assets\\Audio\\Sfx):\r\n"
+                                   + GetHookSfxLibraryDirectory(settings);
+                    return false;
+                }
             }
 
             return true;
@@ -542,13 +689,20 @@ namespace tiktok_Omni.Services
                 lines.Add("② Tải nguồn: chưa có source.mp4 — đợi tải xong hoặc bấm «Render & Đóng gói» (tự tải).");
             }
 
-            if (!TryValidateHookIntroMascotStep(row, out var mascotErr))
+            // Mascot / Gemini chỉ cần khi không dùng stock clip
+            var profileForChecklist = (row?.ProfileName ?? string.Empty).Trim();
+            var hasStockForChecklist = HookStyleCatalog.CatalogHasAnyClips(settings, profileForChecklist)
+                                       || !string.IsNullOrEmpty((row.HookStyleKey ?? string.Empty).Trim());
+            if (!hasStockForChecklist)
             {
-                lines.Add("②b Ảnh profile: " + mascotErr.Replace("\r\n", " "));
-            }
-            else if (settings == null || string.IsNullOrWhiteSpace((settings.AiApiKey ?? string.Empty).Trim()))
-            {
-                lines.Add("②c Gemini image: cần AI API Key để sinh ảnh hook intro.");
+                if (!TryValidateHookIntroMascotStep(row, out var mascotErr))
+                {
+                    lines.Add("②b Ảnh profile: " + mascotErr.Replace("\r\n", " "));
+                }
+                else if (settings == null || string.IsNullOrWhiteSpace((settings.AiApiKey ?? string.Empty).Trim()))
+                {
+                    lines.Add("②c Gemini image: cần AI API Key để sinh ảnh hook intro (hoặc cấu hình stock «HookClips»).");
+                }
             }
 
             if (ShouldUseVisualHookSfx(row))
@@ -560,7 +714,7 @@ namespace tiktok_Omni.Services
             {
                 lines.Add("③ Hook: «SFX 3s» bật nhưng chưa có file — sẽ dùng ElevenLabs voiceover hook.");
             }
-            else if (string.IsNullOrWhiteSpace((row.ReupHookDraft ?? string.Empty).Trim()))
+            else if (!VideoReupStyleVariants.HasResolvableHook(row))
             {
                 if (settings == null || string.IsNullOrWhiteSpace(settings.AiApiKey))
                 {
@@ -589,10 +743,25 @@ namespace tiktok_Omni.Services
             {
                 lines.Add("④ Âm hook: chưa có WAV — cần «Voiceover: đọc hook» hoặc «Render & Đóng gói» (tự chạy voiceover).");
             }
+            else if (VideoReupRowItem.HasHookSfxSelected(row.ReupSelectedHookSfxFile)
+                     && !ShouldUseVisualHookSfx(row))
+            {
+                var sfxPick = ResolveHookSfxFilePath(settings, row.ReupSelectedHookSfxFile);
+                if (string.IsNullOrWhiteSpace(sfxPick))
+                {
+                    lines.Add("④b SFX hook: «" + row.ReupSelectedHookSfxFile + "» không tìm thấy — thêm .mp3/.wav vào Assets\\Audio\\Sfx.");
+                }
+                else
+                {
+                    lines.Add("④b SFX hook: «" + row.ReupSelectedHookSfxFile + "» (~"
+                              + (ReupVideoSpec.HookOverlaySfxVolume * 100d).ToString("0", CultureInfo.InvariantCulture)
+                              + "% overlay cùng giọng hook).");
+                }
+            }
 
             if (row.ReupAudioMode == VideoReupAudioMode.NarrationScript)
             {
-                if (string.IsNullOrWhiteSpace((row.ReupNarrationScript ?? string.Empty).Trim()))
+                if (!VideoReupStyleVariants.HasResolvableScript(row))
                 {
                     lines.Add("⑤ Script: trống — bấm «Tạo script» hoặc «Gemini: tạo hook» (sinh kèm script) hoặc để render tự sinh.");
                 }
@@ -699,8 +868,10 @@ namespace tiktok_Omni.Services
             public const double HookMinSec = 4d;
             public const double HookMaxSec = 7d;
             public const double MusicBedVolume = 0.22d;
-            /// <summary>Nhạc nền chế độ thuyết minh (~12% — giữa 10–15%).</summary>
-            public const double NarrationMusicBedVolume = 0.12d;
+            /// <summary>Nhạc nền chế độ thuyết minh (~10% — lót dưới giọng, không lấn át).</summary>
+            public const double NarrationMusicBedVolume = 0.10d;
+            /// <summary>SFX hook overlay (~45% — nhỏ hơn giọng hook 100%).</summary>
+            public const double HookOverlaySfxVolume = 0.45d;
             public const double MinMusicTailSec = 0.5d;
 
             /// <summary>Bật tốc độ ~+5% (setpts). Mặc định tắt để khớp mô tả «chỉ cắt/lật/màu/tiếng».</summary>
@@ -731,8 +902,11 @@ namespace tiktok_Omni.Services
                 log,
                 cancellationToken).ConfigureAwait(false);
 
-            var needHook = forceRegenerate || string.IsNullOrWhiteSpace((row.ReupHookDraft ?? string.Empty).Trim());
-            var needScript = forceRegenerate || string.IsNullOrWhiteSpace((row.ReupNarrationScript ?? string.Empty).Trim());
+            var needHook = forceRegenerate
+                           || !VideoReupStyleVariants.HasResolvableHook(row);
+            var needScript = forceRegenerate
+                             || (row.ReupAudioMode == VideoReupAudioMode.NarrationScript
+                                 && !VideoReupStyleVariants.HasResolvableScript(row));
 
             if (!needHook && !needScript)
             {
@@ -741,16 +915,61 @@ namespace tiktok_Omni.Services
 
             if (needHook)
             {
-                var bundle = await GenerateHookAndNarrationBundleFromGeminiAsync(
-                    row,
-                    settings,
-                    gemini,
-                    log,
-                    cancellationToken).ConfigureAwait(false);
-                row.ReupHookDraft = bundle.Hook;
-                row.ReupNarrationScript = bundle.NarrationScript;
-                log?.Invoke("[VideoReup] Hook: " + bundle.Hook);
-                log?.Invoke("[VideoReup] Script (cột dự phòng): " + Trim(bundle.NarrationScript, 120));
+                var includeScripts = row.ReupAudioMode == VideoReupAudioMode.NarrationScript;
+                if (includeScripts)
+                {
+                    log?.Invoke("[VideoReup] Chế độ «Hook + Thuyết minh» — 1 lần gọi Gemini: hook + script (5 phong cách).");
+                }
+                else
+                {
+                    log?.Invoke("[VideoReup] Chế độ «" + row.ReupMode + "» — 1 lần gọi Gemini: chỉ hook (5 phong cách).");
+                }
+
+                ReupHookNarrationBundle bundle;
+                try
+                {
+                    bundle = await GenerateHookAndNarrationBundleFromGeminiAsync(
+                        row,
+                        settings,
+                        gemini,
+                        log,
+                        includeScripts,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (IsGeminiQuotaError(ex))
+                {
+                    if (VideoReupStyleVariants.HasHookVariants(row))
+                    {
+                        log?.Invoke("[VideoReup] " + FormatGeminiQuotaShortMessage());
+                        log?.Invoke("[VideoReup] Giữ nguyên 5 phong cách hook/script đã có — bấm cột Hook để chọn.");
+                        return;
+                    }
+
+                    log?.Invoke("[VideoReup] " + FormatGeminiQuotaShortMessage());
+                    log?.Invoke("[VideoReup] Dùng mẫu local — mở bảng 5 phong cách để chỉnh tay trước khi render.");
+                    bundle = BuildLocalStyleFallbackBundle(row, includeScripts);
+                }
+
+                if (includeScripts)
+                {
+                    VideoReupStyleVariants.SetVariants(row, bundle.HooksByStyle, bundle.ScriptsByStyle);
+                    log?.Invoke("[VideoReup] Gemini: đã sinh hook + script cho 5 phong cách.");
+                }
+                else
+                {
+                    VideoReupStyleVariants.SetHookVariants(row, bundle.HooksByStyle);
+                    log?.Invoke("[VideoReup] Gemini: đã sinh hook cho 5 phong cách (chế độ không cần script).");
+                }
+
+                foreach (var key in HookStyleCatalog.AllStyleKeys)
+                {
+                    if (VideoReupStyleVariants.TryGetVariant(bundle.HooksByStyle, key, out var hookPreview))
+                    {
+                        log?.Invoke("  • " + HookStyleCatalog.GetDisplayName(key) + " hook: "
+                                    + Trim(hookPreview, 72));
+                    }
+                }
+
                 return;
             }
 
@@ -788,7 +1007,6 @@ namespace tiktok_Omni.Services
                 forceRegenerate,
                 cancellationToken).ConfigureAwait(false);
 
-            var musicDir = GetMusicLibraryDirectory(settings);
             EnsureMusicLibraryDirectoryExists(settings);
             List<string> musicNames;
             if (row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal)
@@ -797,35 +1015,250 @@ namespace tiktok_Omni.Services
             }
             else
             {
-                var musicFiles = Directory.GetFiles(musicDir, "*.mp3", SearchOption.TopDirectoryOnly);
-                musicNames = musicFiles.Select(Path.GetFileName).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+                musicNames = VideoReupRemixService.ListMusicFileNames(settings);
+            }
+
+            var existingMusic = (row.ReupSuggestedMusicFile ?? string.Empty).Trim();
+            if (!forceRegenerate
+                && !string.IsNullOrEmpty(existingMusic)
+                && (musicNames.Count == 0
+                    || musicNames.Any(n => string.Equals(n, existingMusic, StringComparison.OrdinalIgnoreCase))))
+            {
+                log?.Invoke("[VideoReup] Nhạc: giữ gợi ý «" + existingMusic + "» — bỏ qua Gemini.");
+                return;
             }
 
             if (row.ReupAudioMode == VideoReupAudioMode.AffiliateBed)
             {
-                row.ReupSuggestedMusicFile = await SuggestMusicFileAsync(
-                    row,
-                    musicNames,
-                    settings,
-                    gemini,
-                    log,
-                    cancellationToken).ConfigureAwait(false);
+                await TrySuggestMusicFileSafeAsync(row, musicNames, settings, gemini, log, cancellationToken)
+                    .ConfigureAwait(false);
             }
-            else if (row.ReupAudioMode == VideoReupAudioMode.NarrationScript && musicNames.Count > 0
-                     && string.IsNullOrWhiteSpace((row.ReupSelectedMusicFile ?? string.Empty).Trim()))
+            else if (row.ReupAudioMode == VideoReupAudioMode.NarrationScript)
             {
-                row.ReupSuggestedMusicFile = await SuggestMusicFileAsync(
-                    row,
-                    musicNames,
-                    settings,
-                    gemini,
-                    log,
-                    cancellationToken).ConfigureAwait(false);
+                if (musicNames.Count == 0)
+                {
+                    log?.Invoke("[VideoReup] Thuyết minh: chưa có .mp3 — có thể chọn «(Không có nhạc)» trên lưới.");
+                }
+                else
+                {
+                    log?.Invoke("[VideoReup] Thuyết minh: gợi ý nhạc nền (~10% volume khi render)…");
+                    await TrySuggestMusicFileSafeAsync(row, musicNames, settings, gemini, log, cancellationToken)
+                        .ConfigureAwait(false);
+                }
             }
             else if (row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal)
             {
                 row.ReupSuggestedMusicFile = string.Empty;
             }
+        }
+
+        private static async Task TrySuggestMusicFileSafeAsync(
+            VideoReupRowItem row,
+            List<string> musicNames,
+            AppSettings settings,
+            GeminiService gemini,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                row.ReupSuggestedMusicFile = await SuggestMusicFileAsync(
+                    row,
+                    musicNames,
+                    settings,
+                    gemini,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsGeminiQuotaError(ex))
+            {
+                log?.Invoke("[VideoReup] Nhạc: bỏ qua gợi ý Gemini — hết quota API (429). Chọn file .mp3 tay trên lưới.");
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke("[VideoReup] Nhạc: không gợi ý được — " + ex.Message);
+            }
+        }
+
+        public async Task GenerateHashtagsAsync(
+            VideoReupRowItem row,
+            AppSettings settings,
+            GeminiService gemini,
+            Action<string> log,
+            CancellationToken cancellationToken,
+            bool forceRegenerate = false)
+        {
+            if (row == null || gemini == null)
+            {
+                return;
+            }
+
+            if (!forceRegenerate && !string.IsNullOrWhiteSpace((row.Hashtags ?? string.Empty).Trim()))
+            {
+                log?.Invoke("[VideoReup] Hashtag: giữ hashtag cũ — bỏ qua Gemini.");
+                return;
+            }
+
+            var keyword = (row.SourceKeyword ?? string.Empty).Trim();
+            var product = VideoReupProductLabel.GetShortLabel(row.ProductName ?? string.Empty);
+            var hook = VideoReupProductLabel.NormalizeHookText(
+                (row.ReupHookDraft ?? string.Empty).Trim(),
+                row.ProductName ?? string.Empty,
+                product);
+
+            if (string.IsNullOrWhiteSpace(keyword) && string.IsNullOrWhiteSpace(product))
+            {
+                log?.Invoke("[VideoReup] Hashtag: bỏ qua — chưa có từ khóa săn hoặc tên sản phẩm.");
+                return;
+            }
+
+            var prompt = BuildVideoReupHashtagPrompt(keyword, product, hook);
+            if (!string.IsNullOrWhiteSpace(keyword))
+            {
+                log?.Invoke("[VideoReup] Hashtag: từ khóa săn «" + keyword + "» — Gemini tạo tag theo intent tìm kiếm…");
+            }
+            else
+            {
+                log?.Invoke("[VideoReup] Hashtag: không có từ khóa săn — dùng sản phẩm «" + product + "».");
+            }
+
+            log?.Invoke("[VideoReup] Gemini: đang tạo hashtag…");
+            try
+            {
+                var raw = await gemini.GenerateScriptAsync(
+                    prompt,
+                    settings.AiProvider,
+                    settings.AiApiKey,
+                    settings.AiModel,
+                    cancellationToken).ConfigureAwait(false);
+
+                var hashtags = NormalizeGeminiHashtagLine(raw);
+                if (!string.IsNullOrWhiteSpace(hashtags))
+                {
+                    row.Hashtags = hashtags;
+                    log?.Invoke("[VideoReup] Hashtag: " + hashtags);
+                }
+                else
+                {
+                    log?.Invoke("[VideoReup] Hashtag: Gemini trả về rỗng.");
+                }
+            }
+            catch (Exception ex) when (IsGeminiQuotaError(ex))
+            {
+                log?.Invoke("[VideoReup] Hashtag: bỏ qua Gemini — hết quota API (429).");
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke("[VideoReup] Hashtag: lỗi — " + ex.Message);
+            }
+        }
+
+        private static string BuildVideoReupHashtagPrompt(string sourceKeyword, string shortProduct, string hook)
+        {
+            var sb = new StringBuilder();
+            sb.Append("Bạn là chuyên gia TikTok SEO Việt Nam. Tạo 8–12 hashtag cho video reup/affiliate.\n\n");
+
+            if (!string.IsNullOrWhiteSpace(sourceKeyword))
+            {
+                sb.Append("TỪ KHÓA SĂN (ưu tiên cao nhất — intent người mua hay tìm): «")
+                    .Append(sourceKeyword.Trim())
+                    .Append("».\n");
+            }
+
+            if (!string.IsNullOrWhiteSpace(shortProduct)
+                && !string.Equals(shortProduct, "sản phẩm này", StringComparison.OrdinalIgnoreCase))
+            {
+                sb.Append("Sản phẩm / ngách: «").Append(shortProduct.Trim()).Append("».\n");
+            }
+
+            if (!string.IsNullOrWhiteSpace(hook))
+            {
+                sb.Append("Hook video (bổ sung ngữ cảnh): «").Append(hook.Trim()).Append("».\n");
+            }
+
+            sb.Append(
+                "\nYêu cầu:\n" +
+                "- Hashtag phải gần với TỪ KHÓA SĂN — mô phỏng cụm khách hay gõ/tìm trên TikTok (long-tail, sát nhu cầu mua/xem).\n" +
+                "- ~60% tag sát từ khóa & biến thể tìm kiếm, ~30% tag ngách liên quan, tối đa 1–2 tag reach rộng (#fyp hoặc #xuhuong).\n" +
+                "- KHÔNG dùng tag chung chung không liên quan (#learnontiktok, #goclamdep, #thoitrangnu… nếu không khớp từ khóa).\n" +
+                "- Mỗi hashtag bắt đầu #, viết liền KHÔNG DẤU tiếng Việt, không khoảng trắng trong một tag.\n" +
+                "- Trả về CHỈ các hashtag trên MỘT dòng, cách nhau bằng dấu cách — không markdown, không giải thích, không đánh số.");
+
+            return sb.ToString();
+        }
+
+        private static string NormalizeGeminiHashtagLine(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return string.Empty;
+            }
+
+            var line = raw.Trim();
+            if (line.StartsWith("```", StringComparison.Ordinal))
+            {
+                var end = line.LastIndexOf("```", StringComparison.Ordinal);
+                if (end > 3)
+                {
+                    line = line.Substring(3, end - 3).Trim();
+                }
+            }
+
+            line = line.Replace("\r\n", " ").Replace('\n', ' ').Replace('\t', ' ');
+            while (line.Contains("  "))
+            {
+                line = line.Replace("  ", " ");
+            }
+
+            return line.Trim();
+        }
+
+        public static bool IsGeminiQuotaError(Exception ex)
+        {
+            for (var cur = ex; cur != null; cur = cur.InnerException)
+            {
+                var msg = cur.Message ?? string.Empty;
+                if (msg.IndexOf("429", StringComparison.Ordinal) >= 0
+                    || msg.IndexOf("quota", StringComparison.OrdinalIgnoreCase) >= 0
+                    || msg.IndexOf("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public static string FormatGeminiQuotaUserMessage(Exception ex)
+        {
+            return FormatGeminiQuotaShortMessage()
+                   + "\r\n\r\n"
+                   + Trim(ex?.Message ?? string.Empty, 280);
+        }
+
+        public static string FormatGeminiQuotaShortMessage()
+        {
+            return "Hết quota Gemini API (429) — free tier thường ~20 lần/ngày/model. "
+                   + "Đợi reset, đổi model trong Cài đặt, hoặc bật billing Google AI Studio.";
+        }
+
+        private static ReupHookNarrationBundle BuildLocalStyleFallbackBundle(VideoReupRowItem row, bool includeScripts = true)
+        {
+            var rawProduct = (row?.ProductName ?? string.Empty).Trim();
+            var product = VideoReupProductLabel.GetShortLabel(rawProduct);
+
+            var hooks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var scripts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in HookStyleCatalog.AllStyleKeys)
+            {
+                hooks[key] = GetLocalHookForStyle(key, product);
+                if (includeScripts)
+                {
+                    scripts[key] = DefaultNarrationScriptFallbackForStyle(key, product);
+                }
+            }
+
+            return new ReupHookNarrationBundle { HooksByStyle = hooks, ScriptsByStyle = scripts };
         }
 
         /// <summary>ElevenLabs đọc script thuyết minh (giọng kể chuyện) → WAV khớp phần sau hook.</summary>
@@ -841,6 +1274,12 @@ namespace tiktok_Omni.Services
             }
 
             var script = (row.ReupNarrationScript ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(script))
+            {
+                VideoReupStyleVariants.ApplyActiveSelections(row, settings, log);
+                script = (row.ReupNarrationScript ?? string.Empty).Trim();
+            }
+
             if (string.IsNullOrEmpty(script))
             {
                 throw new InvalidOperationException("Chưa có script thuyết minh — bấm «Tạo script» trên toolbar hoặc render (Gemini sẽ sinh tự động).");
@@ -870,16 +1309,41 @@ namespace tiktok_Omni.Services
 
             // Lưu raw MP3 vào stage với tên cố định để render dùng lại (tính slowdown video)
             Directory.CreateDirectory(stage);
-            var narrMp3 = Path.Combine(stage, "narration_raw.mp3");
-
-            log?.Invoke("[VideoReup] Thuyết minh: ElevenLabs giọng kể chuyện (khác hook)…");
-            await BuildVoiceoverMp3Async(
+            var narrMp3 = Path.Combine(stage, ReupStageCacheHelper.NarrationRawMp3);
+            var narrStyleKey = (row.SelectedHookStyleKey ?? row.HookStyleKey ?? string.Empty).Trim();
+            var narrSynthText = ReupElevenLabsVoiceHelper.PrepareTextForSynthesis(
                 script,
-                narrMp3,
                 settings,
-                log,
-                cancellationToken,
-                emphaticHook: false).ConfigureAwait(false);
+                emphaticHook: false,
+                narrStyleKey,
+                log);
+            var narrTtsCacheKey = ReupStageCacheHelper.BuildElevenLabsTtsCacheKey(
+                narrSynthText,
+                settings,
+                emphaticHook: false,
+                narrStyleKey);
+
+            if (ReupStageCacheHelper.TryReuseCachedArtifacts(
+                    stage,
+                    ReupStageCacheHelper.NarrationTtsKeyFile,
+                    narrTtsCacheKey,
+                    narrMp3))
+            {
+                log?.Invoke("[VideoReup] Thuyết minh TTS: dùng cache " + ReupStageCacheHelper.NarrationRawMp3 + " (bỏ qua ElevenLabs).");
+            }
+            else
+            {
+                log?.Invoke("[VideoReup] Thuyết minh: ElevenLabs giọng kể chuyện (khác hook)…");
+                await BuildVoiceoverMp3Async(
+                    script,
+                    narrMp3,
+                    settings,
+                    log,
+                    cancellationToken,
+                    emphaticHook: false,
+                    hookStyleKey: narrStyleKey).ConfigureAwait(false);
+                ReupStageCacheHelper.WriteCacheKey(stage, ReupStageCacheHelper.NarrationTtsKeyFile, narrTtsCacheKey);
+            }
 
             // Đo thời lượng TTS tự nhiên (trước khi trim/speedup)
             var rawNarrDur = await ProbeMediaDurationSecondsAsync(ffmpeg, narrMp3, cancellationToken).ConfigureAwait(false);
@@ -1079,12 +1543,12 @@ namespace tiktok_Omni.Services
             }
 
             await EnsureVideoDownloadedAsync(row, settings, affiliateHunter, log, cancellationToken).ConfigureAwait(false);
+            VideoReupStyleVariants.ApplyActiveSelections(row, settings, log);
 
             var ffmpeg = ResolveFfmpegPath(settings);
             var stage = row.ReupStageFolder;
-            var tempDir = ProfileScopedPaths.GetTempDownloadsRoot(row.ProfileName);
-            Directory.CreateDirectory(tempDir);
-            var hookMp3 = Path.Combine(tempDir, "hook_audio_" + Guid.NewGuid().ToString("N") + ".mp3");
+            Directory.CreateDirectory(stage);
+            var hookRawMp3 = Path.Combine(stage, ReupStageCacheHelper.HookTtsRawMp3);
 
             var hookLine = (row.ReupHookDraft ?? string.Empty).Trim();
             if (VideoReupRemixService.IsElevenLabsConfigured(settings))
@@ -1105,15 +1569,43 @@ namespace tiktok_Omni.Services
                 row.ReupHookDraft = hookLine;
             }
 
-            await BuildVoiceoverHookMp3Async(
+            var hookStyleKey = (row.SelectedHookStyleKey ?? row.HookStyleKey ?? string.Empty).Trim();
+            var hookSynthText = ReupElevenLabsVoiceHelper.PrepareTextForSynthesis(
                 hookLine,
-                hookMp3,
                 settings,
-                log,
-                cancellationToken).ConfigureAwait(false);
+                emphaticHook: true,
+                hookStyleKey,
+                log);
+            var hookTtsCacheKey = ReupStageCacheHelper.BuildElevenLabsTtsCacheKey(
+                hookSynthText,
+                settings,
+                emphaticHook: true,
+                hookStyleKey);
 
-            row.HookAudioPath = hookMp3;
-            var hookRaw = hookMp3;
+            string hookRaw;
+            if (ReupStageCacheHelper.TryReuseCachedArtifacts(
+                    stage,
+                    ReupStageCacheHelper.HookTtsKeyFile,
+                    hookTtsCacheKey,
+                    hookRawMp3))
+            {
+                log?.Invoke("[VideoReup] Hook TTS: dùng cache " + ReupStageCacheHelper.HookTtsRawMp3 + " (bỏ qua ElevenLabs).");
+                hookRaw = hookRawMp3;
+            }
+            else
+            {
+                await BuildVoiceoverHookMp3Async(
+                    row,
+                    hookLine,
+                    hookRawMp3,
+                    settings,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+                ReupStageCacheHelper.WriteCacheKey(stage, ReupStageCacheHelper.HookTtsKeyFile, hookTtsCacheKey);
+                hookRaw = hookRawMp3;
+            }
+
+            row.HookAudioPath = hookRaw;
 
             var totalDur = row.LastSourceVideoDurationSec ?? 0d;
             var trimContentSeconds = totalDur - ReupVideoSpec.TrimHeadSeconds - ReupVideoSpec.TrimTailSeconds;
@@ -1140,6 +1632,16 @@ namespace tiktok_Omni.Services
 
             row.ReupHookAudioPath = hookNormWav;
             row.LastHookDurationUsedSec = hookUsed;
+
+            row.ReupHookAudioPath = await ApplyHookOverlaySfxIfSelectedAsync(
+                ffmpeg,
+                row,
+                settings,
+                hookNormWav,
+                stage,
+                log,
+                cancellationToken).ConfigureAwait(false);
+
             log?.Invoke("[VideoReup] Hook âm thanh (WAV) sẵn sàng cho bước render.");
         }
 
@@ -1155,6 +1657,10 @@ namespace tiktok_Omni.Services
             {
                 throw new InvalidOperationException(preErr);
             }
+
+            // Auto-gán style hook nếu chưa chọn và catalog có clip
+            VideoReupStyleVariants.ApplyActiveSelections(row, settings, log);
+            SeedHookStyleKeyIfEmpty(row, settings);
 
             var ffmpeg = ResolveFfmpegPath(settings);
             var isFilm = row.ReupAudioMode == VideoReupAudioMode.FilmKeepOriginal;
@@ -1172,17 +1678,9 @@ namespace tiktok_Omni.Services
             var downloadedPath = row.ReupDownloadedVideoPath;
             var hookNormWav = row.ReupHookAudioPath;
 
-            var stageEarly = row.ReupStageFolder;
+            // Dùng thẳng nguồn gốc — không pre-scramble encode để tránh generation loss lần 1.
+            // Toàn bộ filter (crop, hflip, color, speed, noise) được gộp 1 lần duy nhất ở bước body encode.
             var videoSourcePath = downloadedPath;
-            if (!string.IsNullOrWhiteSpace(stageEarly) && Directory.Exists(stageEarly))
-            {
-                videoSourcePath = await RemixScramblerService.PrepareScrambledSourceAsync(
-                    ffmpeg,
-                    downloadedPath,
-                    stageEarly,
-                    log,
-                    cancellationToken).ConfigureAwait(false);
-            }
 
             var totalDur = await ProbeMediaDurationSecondsAsync(ffmpeg, videoSourcePath, cancellationToken).ConfigureAwait(false);
             if (totalDur < ReupVideoSpec.TrimHeadSeconds + ReupVideoSpec.TrimTailSeconds + 1.5d)
@@ -1347,24 +1845,27 @@ namespace tiktok_Omni.Services
                 setptsExpr = null;
             }
 
-            // Color grading nhẹ: chỉnh brightness/contrast/saturation/gamma — bỏ vignette để tránh tối góc
-            const string ColorEq = "eq=brightness=0.015:contrast=1.04:saturation=0.95:gamma=1.02";
+            // Color grading — preset/tùy chỉnh trên từng dòng (FFmpeg eq)
+            var colorEq = ReupColorGradeHelper.BuildEqFilterChain(row, settings);
             string baseVfCore;
             if (skipHflip)
             {
-                baseVfCore = setptsExpr != null ? setptsExpr + "," + ColorEq : ColorEq;
+                baseVfCore = setptsExpr != null ? setptsExpr + "," + colorEq : colorEq;
                 log?.Invoke("[VideoReup] Video có chữ → BỎ QUA hflip, giữ nguyên chiều.");
             }
             else
             {
                 baseVfCore = setptsExpr != null
-                    ? setptsExpr + ",hflip," + ColorEq
-                    : "hflip," + ColorEq;
+                    ? setptsExpr + ",hflip," + colorEq
+                    : "hflip," + colorEq;
             }
+
+            log?.Invoke("[VideoReup] Color grade: «" + ReupColorGradeHelper.FormatStyleSummary(row) + "» → " + colorEq);
 
             var baseVf = RemixScramblerService.AppendVideoAntiDetectionFilters(baseVfCore);
 
-            var crf = NextCrf();
+            // CRF 17 cố định — chất lượng HD, không ngẫu nhiên để output nhất quán
+            const int BodyCrf = 17;
             var metaArgs = RemixScramblerService.BuildFakeMetadataArgs();
             var encodeOutDur = bodyVideoOutSeconds.ToString("0.#####", CultureInfo.InvariantCulture);
             var ssTrim = ReupVideoSpec.TrimHeadSeconds.ToString("0.#####", CultureInfo.InvariantCulture);
@@ -1381,16 +1882,16 @@ namespace tiktok_Omni.Services
                         " -stream_loop -1 -i \"" + bgVideoPath + "\"" +
                         " -t " + encodeOutDur +
                         " -filter_complex \"" + filterComplex + "\"" +
-                        " -map \"[vout]\" -an -c:v libx264 -preset medium -crf " + crf.ToString(CultureInfo.InvariantCulture) +
-                        " -pix_fmt yuv420p" + metaArgs +
+                        " -map \"[vout]\" -an -c:v libx264 -preset slow -crf " + BodyCrf.ToString(CultureInfo.InvariantCulture) +
+                        " -profile:v high -pix_fmt yuv420p" + metaArgs +
                         " \"" + bodyNoAudio + "\"";
             }
             else
             {
                 bodyVArgs = "-y -ss " + ssTrim +
                         " -i \"" + videoSourcePath + "\" -t " + encodeOutDur +
-                        " -vf \"" + baseVf + "\" -an -c:v libx264 -preset medium -crf " + crf.ToString(CultureInfo.InvariantCulture) +
-                        " -pix_fmt yuv420p" + metaArgs +
+                        " -vf \"" + baseVf + "\" -an -c:v libx264 -preset slow -crf " + BodyCrf.ToString(CultureInfo.InvariantCulture) +
+                        " -profile:v high -pix_fmt yuv420p" + metaArgs +
                         " \"" + bodyNoAudio + "\"";
             }
 
@@ -1498,6 +1999,62 @@ namespace tiktok_Omni.Services
             return outWav;
         }
 
+        /// <summary>Trộn SFX overlay (~45%) lên giọng hook nếu cột «SFX Hook» có chọn file.</summary>
+        public static async Task<string> ApplyHookOverlaySfxIfSelectedAsync(
+            string ffmpegExe,
+            VideoReupRowItem row,
+            AppSettings settings,
+            string hookNormWav,
+            string workRoot,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            if (row == null || ShouldUseVisualHookSfx(row)
+                || !VideoReupRowItem.HasHookSfxSelected(row.ReupSelectedHookSfxFile))
+            {
+                return hookNormWav;
+            }
+
+            var sfxPath = ResolveHookSfxFilePath(settings, row.ReupSelectedHookSfxFile);
+            if (string.IsNullOrWhiteSpace(sfxPath) || !File.Exists(sfxPath))
+            {
+                log?.Invoke("[VideoReup] Hook SFX: file «" + row.ReupSelectedHookSfxFile + "» không tồn tại — bỏ qua overlay.");
+                return hookNormWav;
+            }
+
+            var outWav = Path.Combine(workRoot, "hook_with_sfx.wav");
+            await MixHookOverlaySfxAsync(
+                ffmpegExe,
+                hookNormWav,
+                sfxPath,
+                outWav,
+                log,
+                cancellationToken).ConfigureAwait(false);
+            return outWav;
+        }
+
+        private static async Task MixHookOverlaySfxAsync(
+            string ffmpegExe,
+            string hookWavPath,
+            string sfxPath,
+            string outputWav,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            var volStr = ReupVideoSpec.HookOverlaySfxVolume.ToString("0.###", CultureInfo.InvariantCulture);
+            var filter =
+                "[0:a]aresample=48000,volume=1.0[vo];" +
+                "[1:a]aresample=48000,volume=" + volStr + "[sfx];" +
+                "[vo][sfx]amix=inputs=2:duration=first:dropout_transition=0[aout]";
+            var args = "-y -i \"" + hookWavPath + "\" -i \"" + sfxPath + "\"" +
+                       " -filter_complex \"" + filter + "\"" +
+                       " -map \"[aout]\" -c:a pcm_s16le \"" + outputWav + "\"";
+            log?.Invoke("[VideoReup] FFmpeg: trộn SFX hook «" + Path.GetFileName(sfxPath) + "» (~"
+                        + (ReupVideoSpec.HookOverlaySfxVolume * 100d).ToString("0", CultureInfo.InvariantCulture)
+                        + "%) cùng giọng hook…");
+            await RunFfmpegAsync(ffmpegExe, args, log, cancellationToken).ConfigureAwait(false);
+        }
+
         /// <summary>
         /// Tính hệ số làm chậm video (setpts = factor*PTS) để video nền đủ dài chứa hook + script.
         /// Trả về (slowFactor, newVideoOutSeconds). slowFactor = 1.0 nếu không cần làm chậm.
@@ -1518,7 +2075,16 @@ namespace tiktok_Omni.Services
             var rawMp3 = (row.ReupNarrationRawMp3Path ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(rawMp3) || !File.Exists(rawMp3))
             {
-                return (1.0d, videoOutSeconds);
+                var stageFallback = Path.Combine(row.ReupStageFolder ?? string.Empty, ReupStageCacheHelper.NarrationRawMp3);
+                if (File.Exists(stageFallback))
+                {
+                    rawMp3 = stageFallback;
+                    row.ReupNarrationRawMp3Path = stageFallback;
+                }
+                else
+                {
+                    return (1.0d, videoOutSeconds);
+                }
             }
 
             // Thời lượng TTS tự nhiên (đã lưu khi voiceover, probe lại nếu thiếu)
@@ -1605,8 +2171,11 @@ namespace tiktok_Omni.Services
 
         private sealed class ReupHookNarrationBundle
         {
-            public string Hook { get; set; } = string.Empty;
-            public string NarrationScript { get; set; } = string.Empty;
+            public Dictionary<string, string> HooksByStyle { get; set; }
+                = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            public Dictionary<string, string> ScriptsByStyle { get; set; }
+                = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         private static int ComputeNarrationWordTarget(VideoReupRowItem row, out double bodySec)
@@ -1620,15 +2189,47 @@ namespace tiktok_Omni.Services
         private static string DefaultReupHookFallback() =>
             "Sản phẩm này khiến mình phải nói thật luôn.";
 
-        private static string DefaultNarrationScriptFallback(string productName)
-        {
-            var name = (productName ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(name))
-            {
-                name = "sản phẩm này";
-            }
+        private static string DefaultNarrationScriptFallback(string productName) =>
+            DefaultNarrationScriptFallbackForStyle(HookStyleCatalog.StyleHuongdan, productName);
 
-            return "Mình thấy " + name + " khá đáng thử — nhìn chất lượng và dùng thực tế. Bạn xem kỹ trong video và thử nếu hợp nhu cầu nhé.";
+        private static string GetLocalHookForStyle(string styleKey, string productName)
+        {
+            var product = string.IsNullOrWhiteSpace(productName) ? "sản phẩm này" : productName.Trim();
+            switch (styleKey)
+            {
+                case HookStyleCatalog.StyleBocphot:
+                    return "Thật ra " + product + " có điểm mà ít ai nói thẳng — coi hết clip.";
+                case HookStyleCatalog.StyleFomo:
+                    return "Loại " + product + " hay hết hàng lắm — xem nhanh kẻo lỡ.";
+                case HookStyleCatalog.StyleKechuyen:
+                    return "Mình từng bỏ qua " + product + " — đến khi thử mới thấy khác.";
+                case HookStyleCatalog.StyleNoidau:
+                    return "Ai hay gặp nỗi này với " + product + " thì xem clip này cho rõ.";
+                default:
+                    return "Cách chọn " + product + " cho người mới — 3 giây đầu quan trọng lắm.";
+            }
+        }
+
+        private static string DefaultNarrationScriptFallbackForStyle(string styleKey, string productName)
+        {
+            var name = string.IsNullOrWhiteSpace(productName) ? "sản phẩm này" : productName.Trim();
+            switch (styleKey)
+            {
+                case HookStyleCatalog.StyleNoidau:
+                    return "Nếu bạn đang vướng khi chọn " + name
+                           + ", mình chia sẻ cách mình đã thử trong video — xem kỹ từng bước nhé.";
+                case HookStyleCatalog.StyleBocphot:
+                    return "Nhiều người mua " + name
+                           + " mà chưa biết điểm này — mình nói thẳng trong clip để bạn tránh tiếc tiền.";
+                case HookStyleCatalog.StyleFomo:
+                    return name + " đang được nhiều người săn — mình tóm lại trong video để bạn quyết nhanh, đỡ lỡ.";
+                case HookStyleCatalog.StyleKechuyen:
+                    return "Mình từng nghi ngờ " + name
+                           + " cho đến khi xem kỹ clip này — phần thực tế mình thấy nằm ở giữa video.";
+                default:
+                    return "Trong clip này mình chỉ cách chọn và dùng " + name
+                           + " cho người mới — bạn xem kỹ và thử nếu hợp nhu cầu nhé.";
+            }
         }
 
         private static async Task<ReupHookNarrationBundle> GenerateHookAndNarrationBundleFromGeminiAsync(
@@ -1636,24 +2237,64 @@ namespace tiktok_Omni.Services
             AppSettings settings,
             GeminiService gemini,
             Action<string> log,
+            bool includeScripts,
             CancellationToken cancellationToken)
         {
             var videoScript = Trim((row.VideoScript ?? string.Empty).Trim(), 2000);
-            var productName = (row.ProductName ?? string.Empty).Trim();
+            var rawProductName = (row.ProductName ?? string.Empty).Trim();
+            var productName = VideoReupProductLabel.GetShortLabel(rawProductName);
             var wordTarget = ComputeNarrationWordTarget(row, out var bodySec);
+            var reupRules =
+                "QUY TẮC REUP (bắt buộc):\r\n" +
+                "- Tên sản phẩm NGẮN (đã làm sạch): «" + productName + "» — KHÔNG copy tiêu đề TikTok gốc.\r\n" +
+                "- KHÔNG nhắc tên shop/kênh/creator, «created by», «nhạc nền», branding video gốc.\r\n" +
+                "- Hook chỉ mô tả sản phẩm ngắn gọn, tự nhiên, không emoji.\r\n\r\n";
 
-            var prompt =
-                "Bạn là chuyên gia Reup TikTok affiliate tiếng Việt.\r\n" +
-                "Dựa vào PHÂN TÍCH VIDEO:\r\n[" + videoScript + "]\r\n" +
-                "SẢN PHẨM: [" + productName + "]\r\n\r\n" +
-                "Viết ĐÚNG HAI phần trong MỘT phản hồi JSON (không markdown, không giải thích):\r\n" +
-                "1) \"hook\": CHỈ 1 câu hook (thả thính) 15–20 từ tiếng Việt — đọc voiceover 4–7 giây đầu, tự nhiên, tò mò hoặc gây tranh cãi nhẹ.\r\n" +
-                "2) \"narrationScript\": kịch bản thuyết minh cho TOÀN BỘ phần video reup body (~" + wordTarget + " từ, ~" +
-                bodySec.ToString("0", CultureInfo.InvariantCulture) + " giây đọc — KHÔNG gồm hook intro). Giọng kể chuyện tin cậy — KHÁC hẳn hook (không lặp, không paraphrase hook). Mô tả video/sản phẩm, lợi ích, CTA nhẹ cuối.\r\n\r\n" +
-                "NGÔN NGỮ: tiếng Việt có dấu chuẩn; không emoji.\r\n" +
-                "Trả về DUY NHẤT JSON: {\"hook\":\"...\",\"narrationScript\":\"...\"}";
+            string prompt;
+            if (includeScripts)
+            {
+                prompt =
+                    "Bạn là chuyên gia Reup TikTok affiliate tiếng Việt.\r\n" +
+                    "Dựa vào PHÂN TÍCH VIDEO:\r\n[" + videoScript + "]\r\n\r\n" +
+                    reupRules +
+                    "Viết hook + script thuyết minh cho ĐÚNG 5 PHONG CÁCH sau (mỗi style một cặp hook/script KHÁC NHAU):\r\n" +
+                    "• boc_phot — Bóc phốt: chỉ ra sự thật, gây tranh cãi nhẹ, tò mò\r\n" +
+                    "• fomo — FOMO: khan hiếm, sợ bỏ lỡ, urgency\r\n" +
+                    "• huong_dan — Hướng dẫn: mẹo, cách dùng, tutorial ngắn\r\n" +
+                    "• ke_chuyen — Kể chuyện: trải nghiệm, narrative tự nhiên\r\n" +
+                    "• noi_dau — Nỗi đau: pain point, nỗi đau khách hàng\r\n\r\n" +
+                    "Mỗi \"hook\": CHỈ 1 câu 15–20 từ tiếng Việt — đọc voiceover 4–7 giây, tự nhiên.\r\n" +
+                    "Mỗi \"script\": kịch bản thuyết minh TOÀN BỘ phần body (~" + wordTarget + " từ, ~" +
+                    bodySec.ToString("0", CultureInfo.InvariantCulture) +
+                    " giây đọc — KHÔNG gồm hook intro). Giọng kể chuyện tin cậy — KHÁC hẳn hook cùng style.\r\n\r\n" +
+                    "NGÔN NGỮ: tiếng Việt có dấu chuẩn; không emoji.\r\n" +
+                    "Trả về DUY NHẤT JSON (không markdown):\r\n" +
+                    "{\"styles\":{\"boc_phot\":{\"hook\":\"...\",\"script\":\"...\"},\"fomo\":{\"hook\":\"...\",\"script\":\"...\"}," +
+                    "\"huong_dan\":{\"hook\":\"...\",\"script\":\"...\"},\"ke_chuyen\":{\"hook\":\"...\",\"script\":\"...\"}," +
+                    "\"noi_dau\":{\"hook\":\"...\",\"script\":\"...\"}}}";
+                log?.Invoke("[VideoReup] Gemini: đang viết hook + script (5 phong cách)…");
+            }
+            else
+            {
+                prompt =
+                    "Bạn là chuyên gia Reup TikTok affiliate tiếng Việt.\r\n" +
+                    "Dựa vào PHÂN TÍCH VIDEO:\r\n[" + videoScript + "]\r\n\r\n" +
+                    reupRules +
+                    "Viết hook cho ĐÚNG 5 PHONG CÁCH sau (mỗi style một hook KHÁC NHAU — KHÔNG cần script):\r\n" +
+                    "• boc_phot — Bóc phốt: chỉ ra sự thật, gây tranh cãi nhẹ, tò mò\r\n" +
+                    "• fomo — FOMO: khan hiếm, sợ bỏ lỡ, urgency\r\n" +
+                    "• huong_dan — Hướng dẫn: mẹo, cách dùng, tutorial ngắn\r\n" +
+                    "• ke_chuyen — Kể chuyện: trải nghiệm, narrative tự nhiên\r\n" +
+                    "• noi_dau — Nỗi đau: pain point, nỗi đau khách hàng\r\n\r\n" +
+                    "Mỗi \"hook\": CHỈ 1 câu 15–20 từ tiếng Việt — đọc voiceover 4–7 giây, tự nhiên.\r\n\r\n" +
+                    "NGÔN NGỮ: tiếng Việt có dấu chuẩn; không emoji.\r\n" +
+                    "Trả về DUY NHẤT JSON (không markdown):\r\n" +
+                    "{\"styles\":{\"boc_phot\":{\"hook\":\"...\"},\"fomo\":{\"hook\":\"...\"}," +
+                    "\"huong_dan\":{\"hook\":\"...\"},\"ke_chuyen\":{\"hook\":\"...\"}," +
+                    "\"noi_dau\":{\"hook\":\"...\"}}}";
+                log?.Invoke("[VideoReup] Gemini: đang viết hook (5 phong cách — không script)…");
+            }
 
-            log?.Invoke("[VideoReup] Gemini: đang viết hook + script (một lần gọi)…");
             var raw = await gemini.GenerateScriptAsync(
                 prompt,
                 settings.AiProvider,
@@ -1661,31 +2302,92 @@ namespace tiktok_Omni.Services
                 settings.AiModel,
                 cancellationToken).ConfigureAwait(false);
 
-            return ParseHookNarrationBundle(raw, productName);
+            return ParseHookNarrationBundle(raw, rawProductName, productName);
         }
 
-        private static ReupHookNarrationBundle ParseHookNarrationBundle(string raw, string productName)
+        private static ReupHookNarrationBundle ParseHookNarrationBundle(
+            string raw,
+            string rawProductName,
+            string shortProductLabel = null)
         {
+            var label = shortProductLabel ?? VideoReupProductLabel.GetShortLabel(rawProductName);
             var json = ExtractJsonObject(raw);
             if (!string.IsNullOrWhiteSpace(json))
             {
                 try
                 {
                     var o = JObject.Parse(json);
-                    var hook = SanitizeHookLine((o["hook"] ?? o["Hook"])?.ToString());
-                    var script = SanitizeNarrationScript(
-                        (o["narrationScript"] ?? o["narration"] ?? o["script"] ?? o["NarrationScript"])?.ToString());
-                    if (string.IsNullOrWhiteSpace(hook))
+                    var stylesNode = o["styles"] ?? o["Styles"];
+                    if (stylesNode is JObject stylesObj)
                     {
-                        hook = DefaultReupHookFallback();
+                        var hooks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        var scripts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var key in HookStyleCatalog.AllStyleKeys)
+                        {
+                            if (!(stylesObj[key] is JObject styleObj))
+                            {
+                                continue;
+                            }
+
+                            var hook = VideoReupProductLabel.NormalizeHookText(
+                                SanitizeHookLine((styleObj["hook"] ?? styleObj["Hook"])?.ToString()),
+                                rawProductName,
+                                label);
+                            var script = VideoReupProductLabel.NormalizeScriptText(
+                                SanitizeNarrationScript(
+                                    (styleObj["script"] ?? styleObj["narrationScript"] ?? styleObj["narration"])?.ToString()),
+                                rawProductName,
+                                label);
+                            if (!string.IsNullOrWhiteSpace(hook))
+                            {
+                                hooks[key] = hook;
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(script))
+                            {
+                                scripts[key] = script;
+                            }
+                        }
+
+                        if (hooks.Count > 0)
+                        {
+                            FillMissingStyleVariants(hooks, scripts, label);
+                            return new ReupHookNarrationBundle
+                            {
+                                HooksByStyle = hooks,
+                                ScriptsByStyle = scripts
+                            };
+                        }
                     }
 
-                    if (string.IsNullOrWhiteSpace(script))
+                    // Legacy JSON: single hook + narrationScript
+                    var legacyHook = VideoReupProductLabel.NormalizeHookText(
+                        SanitizeHookLine((o["hook"] ?? o["Hook"])?.ToString()),
+                        rawProductName,
+                        label);
+                    var legacyScript = VideoReupProductLabel.NormalizeScriptText(
+                        SanitizeNarrationScript(
+                            (o["narrationScript"] ?? o["narration"] ?? o["script"] ?? o["NarrationScript"])?.ToString()),
+                        rawProductName,
+                        label);
+                    if (!string.IsNullOrWhiteSpace(legacyHook))
                     {
-                        script = DefaultNarrationScriptFallback(productName);
-                    }
+                        var hooks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        var scripts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var key in HookStyleCatalog.AllStyleKeys)
+                        {
+                            hooks[key] = legacyHook;
+                            scripts[key] = string.IsNullOrWhiteSpace(legacyScript)
+                                ? DefaultNarrationScriptFallbackForStyle(key, label)
+                                : legacyScript;
+                        }
 
-                    return new ReupHookNarrationBundle { Hook = hook, NarrationScript = script };
+                        return new ReupHookNarrationBundle
+                        {
+                            HooksByStyle = hooks,
+                            ScriptsByStyle = scripts
+                        };
+                    }
                 }
                 catch
                 {
@@ -1693,12 +2395,43 @@ namespace tiktok_Omni.Services
                 }
             }
 
-            var hookOnly = SanitizeHookLine(raw);
+            var hookOnly = VideoReupProductLabel.NormalizeHookText(
+                SanitizeHookLine(raw),
+                rawProductName,
+                label);
+            var fallbackHook = string.IsNullOrWhiteSpace(hookOnly) ? DefaultReupHookFallback() : hookOnly;
+            var hooksFallback = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var scriptsFallback = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in HookStyleCatalog.AllStyleKeys)
+            {
+                hooksFallback[key] = fallbackHook;
+                scriptsFallback[key] = DefaultNarrationScriptFallbackForStyle(key, label);
+            }
+
             return new ReupHookNarrationBundle
             {
-                Hook = string.IsNullOrWhiteSpace(hookOnly) ? DefaultReupHookFallback() : hookOnly,
-                NarrationScript = DefaultNarrationScriptFallback(productName)
+                HooksByStyle = hooksFallback,
+                ScriptsByStyle = scriptsFallback
             };
+        }
+
+        private static void FillMissingStyleVariants(
+            Dictionary<string, string> hooks,
+            Dictionary<string, string> scripts,
+            string productName)
+        {
+            foreach (var key in HookStyleCatalog.AllStyleKeys)
+            {
+                if (!hooks.TryGetValue(key, out var hook) || string.IsNullOrWhiteSpace(hook))
+                {
+                    hooks[key] = GetLocalHookForStyle(key, productName);
+                }
+
+                if (!scripts.TryGetValue(key, out var script) || string.IsNullOrWhiteSpace(script))
+                {
+                    scripts[key] = DefaultNarrationScriptFallbackForStyle(key, productName);
+                }
+            }
         }
 
         private static async Task<string> GenerateNarrationScriptAsync(
@@ -1709,15 +2442,17 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken)
         {
             var videoScript = Trim((row.VideoScript ?? string.Empty).Trim(), 2000);
-            var productName = (row.ProductName ?? string.Empty).Trim();
+            var rawProductName = (row.ProductName ?? string.Empty).Trim();
+            var productName = VideoReupProductLabel.GetShortLabel(rawProductName);
             var hook = (row.ReupHookDraft ?? string.Empty).Trim();
             var wordTarget = ComputeNarrationWordTarget(row, out var bodySec);
 
             var prompt =
                 "Bạn là biên kịch video TikTok affiliate tiếng Việt.\r\n" +
                 "Dựa vào PHÂN TÍCH VIDEO:\r\n[" + videoScript + "]\r\n" +
-                "SẢN PHẨM: [" + productName + "]\r\n" +
+                "SẢN PHẨM (tên ngắn, không shop gốc): [" + productName + "]\r\n" +
                 "HOOK ĐÃ CÓ (KHÔNG lặp lại, KHÔNG paraphrase hook): [" + hook + "]\r\n\r\n" +
+                "KHÔNG nhắc tên shop/kênh/creator, «created by», branding video gốc.\r\n" +
                 "Viết KỊCH BẢN THUYẾT MINH cho TOÀN BỘ phần video reup body (~" + wordTarget + " từ, ~" +
                 bodySec.ToString("0", CultureInfo.InvariantCulture) + " giây đọc — KHÔNG gồm hook intro).\r\n" +
                 "Giọng điệu: kể chuyện tự nhiên, tin cậy, mạch lạc — KHÁC hẳn hook (không hô hào, không câu hỏi gài).\r\n" +
@@ -1917,19 +2652,22 @@ namespace tiktok_Omni.Services
         }
 
         private static async Task BuildVoiceoverHookMp3Async(
+            VideoReupRowItem row,
             string hookLine,
             string outputAudioFile,
             AppSettings settings,
             Action<string> log,
             CancellationToken cancellationToken)
         {
+            var styleKey = (row?.SelectedHookStyleKey ?? row?.HookStyleKey ?? string.Empty).Trim();
             await BuildVoiceoverMp3Async(
                 hookLine,
                 outputAudioFile,
                 settings,
                 log,
                 cancellationToken,
-                emphaticHook: true).ConfigureAwait(false);
+                emphaticHook: true,
+                hookStyleKey: styleKey).ConfigureAwait(false);
         }
 
         private static async Task BuildVoiceoverMp3Async(
@@ -1938,7 +2676,8 @@ namespace tiktok_Omni.Services
             AppSettings settings,
             Action<string> log,
             CancellationToken cancellationToken,
-            bool emphaticHook)
+            bool emphaticHook,
+            string hookStyleKey = null)
         {
             var line = (textLine ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(line))
@@ -1960,31 +2699,46 @@ namespace tiktok_Omni.Services
 
             if (IsElevenLabsConfigured(settings))
             {
-                if (!ElevenLabsTtsHelper.EndpointIncludesVoiceId(settings.TtsEndpoint))
+                if (!ElevenLabsTtsHelper.EndpointIncludesVoiceId(settings.TtsEndpoint)
+                    && string.IsNullOrWhiteSpace(settings.VoiceId_ReupHook)
+                    && string.IsNullOrWhiteSpace(settings.VoiceId_ReupNarration)
+                    && string.IsNullOrWhiteSpace(settings.VoiceId_Intense)
+                    && string.IsNullOrWhiteSpace(settings.VoiceId_Calm))
                 {
                     log?.Invoke(
-                        "[VideoReup] Cảnh báo: TTS Endpoint chưa có Voice ID — dùng URL …/text-to-speech/{voice_id} của voice bạn tạo trên ElevenLabs.");
+                        "[VideoReup] Cảnh báo: chưa có Voice ID — thêm «Voice Reup hook/thuyết minh» trong Cài đặt hoặc URL …/text-to-speech/{voice_id}.");
                 }
 
                 var role = emphaticHook ? "hook (nhấn mạnh)" : "thuyết minh (kể chuyện)";
                 log?.Invoke(
-                    "[VideoReup] Voiceover " + role + ": ElevenLabs model=" + ElevenLabsTtsHelper.ResolveModelId(settings) +
-                    ", lang=" + ElevenLabsTtsHelper.ResolveLanguageCode(settings) + ".");
-                var tempMp3 = await ReupHookTtsService.GenerateAudioAsync(
+                    "[VideoReup] Voiceover " + role + ": ElevenLabs model="
+                    + ElevenLabsTtsHelper.ResolveModelId(settings)
+                    + ", lang=" + ElevenLabsTtsHelper.ResolveLanguageCode(settings) + ".");
+
+                line = ReupElevenLabsVoiceHelper.PrepareTextForSynthesis(
                     line,
                     settings,
-                    cancellationToken,
-                    emphaticHook: emphaticHook).ConfigureAwait(false);
+                    emphaticHook,
+                    hookStyleKey,
+                    log);
+
+                var tempMp3 = await ReupElevenLabsVoiceHelper.GenerateAudioWithFallbackAsync(
+                    ReupHookTtsService,
+                    line,
+                    settings,
+                    emphaticHook,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
 
                 CopyHookMp3ToOutput(tempMp3, outputAudioFile);
             }
             else
             {
-                log?.Invoke("[VideoReup] Voiceover: chưa có ElevenLabs — fallback Google TTS vi-VN.");
-                await GoogleCloudTextToSpeechService.SynthesizeVietnameseFemaleToMp3Async(
+                log?.Invoke("[VideoReup] Voiceover: chưa có ElevenLabs — fallback Edge TTS vi-VN.");
+                var edge = new EdgeTtsService();
+                await edge.SynthesizeVietnameseFemaleToMp3Async(
                     line,
                     outputAudioFile,
-                    settings?.AiApiKey ?? string.Empty,
                     log,
                     cancellationToken).ConfigureAwait(false);
             }

@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
+using tiktok_Omni.Helpers;
 using tiktok_Omni.Services;
 
 namespace tiktok_Omni
@@ -123,11 +124,41 @@ namespace tiktok_Omni
         {
             try
             {
+                var count = GetActiveGridRowCountForClear();
+                if (count <= 0)
+                {
+                    return;
+                }
+
+                if (!UiConfirmHelper.ConfirmDeleteRows(this, count))
+                {
+                    return;
+                }
+
                 ClearActiveAiVideoGenModeBuffer();
             }
             catch (Exception ex)
             {
                 Log("[Grid] Làm sạch buffer lỗi: " + ex.Message);
+            }
+        }
+
+        private int GetActiveGridRowCountForClear()
+        {
+            switch (_selectedAiVideoGenMode)
+            {
+                case AiVideoGenMode.Slideshow:
+                    return GetSlideshowBuffer()?.Count ?? 0;
+                case AiVideoGenMode.AffiliateDeep:
+                    return GetShowcaseVideoBuffer()?.Count ?? 0;
+                case AiVideoGenMode.Mascot:
+                    return _mascotPreviewSceneScripts?.Count ?? 0;
+                case AiVideoGenMode.Philosophy:
+                    return string.IsNullOrWhiteSpace(txtPhilosophyTopic?.Text) ? 0 : 1;
+                case AiVideoGenMode.VideoReup:
+                    return _videoReupBindingList?.Count ?? 0;
+                default:
+                    return 0;
             }
         }
 
@@ -147,9 +178,12 @@ namespace tiktok_Omni
                     Log("[Grid] Đã làm sạch buffer Slideshow.");
                     break;
                 case AiVideoGenMode.AffiliateDeep:
-                    GetDeepDiveBuffer().Clear();
+                    GetShowcaseVideoBuffer().Clear();
+                    _activeShowcaseVideoId = null;
+                    _showcaseSession = null;
+                    NotifyShowcaseDraftDirty();
                     RefreshAffiliateDeepStoryboard();
-                    Log("[Grid] Đã làm sạch storyboard Affiliate Deep.");
+                    Log("[Grid] Đã làm sạch lưới video Showcase.");
                     break;
                 case AiVideoGenMode.Mascot:
                     _mascotPreviewSceneScripts?.Clear();

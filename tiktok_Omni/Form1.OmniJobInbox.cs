@@ -1,4 +1,3 @@
-using System.IO;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
 
@@ -14,35 +13,9 @@ namespace tiktok_Omni
             return _aiVideoGenControls?.GetSelectedGeminiStyleTemplate() ?? GeminiStyleTemplate.Storytelling;
         }
 
-        private string GetReupVisualHookSfxPath()
-        {
-            return (txtReupVisualHookSfx?.Text ?? string.Empty).Trim();
-        }
-
-        private bool IsReupVisualHookSfxEnabled()
-        {
-            return chkReupUseVisualHookSfx?.Checked == true
-                   && !string.IsNullOrWhiteSpace(GetReupVisualHookSfxPath())
-                   && File.Exists(GetReupVisualHookSfxPath());
-        }
-
         private void ApplyReupVisualHookSettingsToRow(VideoReupRowItem row)
         {
-            if (row == null)
-            {
-                return;
-            }
-
-            if (!row.UseVisualHookSfx)
-            {
-                return;
-            }
-
-            var path = GetReupVisualHookSfxPath();
-            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            {
-                row.VisualHookSfxPath = path;
-            }
+            // SFX hook chọn theo cột «SFX Hook» trên lưới — không còn preset/đường dẫn global trên toolbar.
         }
 
         private void SetAutoPostInboxFromJob(OmniJob source, string affiliateLink, string productId)

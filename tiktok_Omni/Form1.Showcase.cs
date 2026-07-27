@@ -1,0 +1,2356 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using tiktok_Omni.Controls;
+using tiktok_Omni.Services;
+using tiktok_Omni.Services.Jobs;
+using tiktok_Omni.Services.Showcase;
+
+namespace tiktok_Omni
+{
+    /// <summary>
+    /// Showcase sản phẩm (tab "Affiliate chuyên sâu" cải tạo lại): ảnh/storyboard → Gemini kịch bản theo cảnh →
+    /// xuất Excel prompt Veo → người dùng tạo clip Veo I2V thủ công → Render ghép hook + voiceover + CTA.
+    /// </summary>
+    public partial class Form1
+    {
+        private ShowcaseSessionState _showcaseSession;
+        private string _showcaseSessionRestoreLogKey = string.Empty;
+
+        private string GetShowcaseThemeInput()
+        {
+            var video = GetActiveShowcaseVideo();
+            if (video != null)
+            {
+                return (video.ShowcaseTheme ?? string.Empty).Trim();
+            }
+
+            var source = GetShowcaseSettingsSourceScene();
+            return (source?.ShowcaseTheme ?? string.Empty).Trim();
+        }
+
+        async Task IAiVideoGenControlsHost.GenerateShowcaseSceneScriptAsync()
+        {
+            if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                    "Chọn ít nhất một dòng video trên lưới (Ctrl+click để chọn nhiều dòng) rồi bấm «Tạo kịch bản»."))
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            if (string.IsNullOrWhiteSpace(settings.AiApiKey))
+            {
+                MessageBox.Show(this, "Cần cấu hình AI API Key trong tab Cài đặt.", "Tạo kịch bản",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+
+            if (btnDeepGenerateScript != null)
+            {
+                btnDeepGenerateScript.Enabled = false;
+            }
+
+            try
+            {
+                for (var i = 0; i < videos.Count; i++)
+                {
+                    ThrowIfShowcaseTabCancelled();
+                    var video = videos[i];
+                    ActivateShowcaseVideo(video, refreshStoryboard: false);
+                    var label = "«" + (video.ProductName ?? string.Empty).Trim() + "»";
+                    if (videos.Count > 1)
+                    {
+                        LogShowcase("[Showcase] Gemini (" + (i + 1) + "/" + videos.Count + ") — " + label);
+                    }
+
+                    var ok = await GenerateShowcaseSceneScriptForVideoAsync(video, settings, profile).ConfigureAwait(true);
+                    if (!ok && videos.Count > 1)
+                    {
+                        LogShowcase("[Showcase] Bỏ qua " + label + " — tiếp tục dòng kế tiếp.");
+                    }
+                }
+
+                ActivateShowcaseVideo(videos[videos.Count - 1]);
+                SyncBuffersToGrids();
+            }
+            finally
+            {
+                if (btnDeepGenerateScript != null && !btnDeepGenerateScript.IsDisposed)
+                {
+                    btnDeepGenerateScript.Enabled = true;
+                }
+            }
+        }
+
+        private async Task<bool> GenerateShowcaseSceneScriptForVideoAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            if (scenes.Count < ShowcaseWorkflowConstants.MinScenes)
+            {
+                MessageBox.Show(this,
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» cần ít nhất 1 ảnh trên storyboard (hiện có " + scenes.Count + ").",
+                    "Tạo kịch bản",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return false;
+            }
+
+            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+
+            try
+            {
+                var session = EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+                LogShowcase("[Showcase] Đang tải " + scenes.Count + " ảnh về phiên làm việc…");
+                await ShowcaseSessionService.DownloadSceneImagesAsync(session, scenes, LogShowcase, ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true);
+
+                LogShowcase("[Showcase] Gemini đang xem ảnh và viết kịch bản ("
+                            + (scenes.Count >= 5 ? "AIDA" : scenes.Count >= 4 ? "PAS" : scenes.Count + " cảnh") + ")…");
+                var scriptService = new ShowcaseGeminiScriptService();
+                var result = await scriptService.GenerateAsync(
+                    scenes,
+                    GetShowcaseThemeForVideo(video),
+                    GetShowcaseProductTypeForVideo(video),
+                    GetShowcaseClipModeForVideo(video),
+                    GetShowcaseOutputAspectIdForVideo(video),
+                    settings,
+                    ShowcaseTabCancellationToken).ConfigureAwait(true);
+
+                ApplyShowcaseSceneOrder(result.OrderedScenes);
+                session.Theme = result.Theme;
+                session.HookText = result.HookText;
+                session.CtaText = result.CtaText;
+                video.ShowcaseTheme = result.Theme ?? video.ShowcaseTheme ?? string.Empty;
+                video.ShowcaseHookText = result.HookText ?? string.Empty;
+                video.ShowcaseCtaText = result.CtaText ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(result.CtaSfxFile))
+                {
+                    video.ShowcaseCtaSfxFile = result.CtaSfxFile;
+                    video.ShowcaseCtaSfxEnabled = true;
+                    video.ShowcaseCtaSfxGeminiHint = result.CtaSfxGeminiHint ?? string.Empty;
+                    if (video.ShowcaseCtaSfxVolumePercent <= 0)
+                    {
+                        video.ShowcaseCtaSfxVolumePercent = ShowcaseSfxCatalog.DefaultVolumePercent;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(result.HookSfxFile))
+                {
+                    video.ShowcaseHookSfxFile = result.HookSfxFile;
+                    video.ShowcaseHookSfxEnabled = true;
+                    video.ShowcaseHookSfxGeminiHint = result.HookSfxGeminiHint ?? string.Empty;
+                    if (video.ShowcaseHookSfxVolumePercent <= 0)
+                    {
+                        video.ShowcaseHookSfxVolumePercent = ShowcaseSfxCatalog.DefaultVolumePercent;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(result.BackgroundMusicFile))
+                {
+                    video.ShowcaseBackgroundMusicFile = result.BackgroundMusicFile.Trim();
+                }
+
+                video.ShowcaseVoiceoverClipFingerprint = 0;
+                foreach (var scene in result.OrderedScenes)
+                {
+                    if (scene != null)
+                    {
+                        scene.ShowcaseTheme = result.Theme ?? string.Empty;
+                    }
+                }
+
+                video.ApplySettingsToScenes();
+                video.RefreshDisplayFields();
+                LogShowcase("[Showcase] Chủ đề: " + result.Theme);
+                LogShowcase("[Showcase] Hook: " + result.HookText);
+                LogShowcase("[Showcase] CTA: " + result.CtaText);
+                if (!string.IsNullOrWhiteSpace(result.BackgroundMusicFile))
+                {
+                    LogShowcase("[Showcase] Nhạc nền (Gemini): " + result.BackgroundMusicFile
+                                + (string.IsNullOrWhiteSpace(result.BackgroundMusicGeminiHint)
+                                    ? string.Empty
+                                    : " — " + result.BackgroundMusicGeminiHint));
+                }
+
+                LogShowcase("[Showcase] Đã sinh kịch bản cho " + result.OrderedScenes.Count + " cảnh — kéo thả storyboard hoặc bấm cột «Kịch bản» để sửa.");
+                LogShowcase("[Showcase] Thoại + Hook/CTA lúc này là bản nháp theo ảnh. Có clip trong veo_clips → «Tạo lời thoại» (không cần đủ tất cả cảnh).");
+                NotifyShowcaseDraftDirty();
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                LogShowcase("[Showcase] Đã dừng tạo kịch bản («" + productName + "»).");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                LogShowcase("[Showcase] Sinh kịch bản lỗi («" + productName + "»): " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Tạo kịch bản", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+        }
+
+        async Task IAiVideoGenControlsHost.ExportShowcaseExcelAsync()
+        {
+            if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                    "Chọn ít nhất một dòng video trên lưới rồi bấm «Tải excel prompt» (trong bảng Prompt)."))
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+
+            for (var i = 0; i < videos.Count; i++)
+            {
+                ThrowIfShowcaseTabCancelled();
+                var video = videos[i];
+                ActivateShowcaseVideo(video, refreshStoryboard: false);
+                if (videos.Count > 1)
+                {
+                    LogShowcase("[Showcase] Xuất Excel (" + (i + 1) + "/" + videos.Count + ") — «" + video.ProductName + "»");
+                }
+
+                await ExportShowcaseExcelForVideoAsync(video, settings, profile).ConfigureAwait(true);
+            }
+
+            ActivateShowcaseVideo(videos[videos.Count - 1]);
+            SyncBuffersToGrids();
+        }
+
+        private async Task ExportShowcaseExcelForVideoAsync(ShowcaseVideoItem video, AppSettings settings, string profile)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            if (scenes.Count < ShowcaseWorkflowConstants.MinScenes)
+            {
+                MessageBox.Show(this,
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» cần ít nhất 1 ảnh trên storyboard trước khi xuất Excel.",
+                    "Tải excel prompt", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var hasScript = scenes.Any(s =>
+                !string.IsNullOrWhiteSpace(s?.SceneVoiceover) ||
+                ShowcaseClipToolHelper.SceneHasClipPrompt(s));
+            if (!hasScript)
+            {
+                var proceed = MessageBox.Show(this,
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» chưa sinh kịch bản. Bấm «Tạo kịch bản» trước sẽ cho kết quả tốt hơn.\r\n\r\nVẫn xuất Excel trống để tự điền tay?",
+                    "Tải excel prompt",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+                if (proceed != DialogResult.Yes)
+                {
+                    return;
+                }
+            }
+
+            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            var session = EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+            SyncShowcaseSessionFromVideo(session, video);
+
+            try
+            {
+                await ShowcaseSessionService.DownloadSceneImagesAsync(session, scenes, LogShowcase, ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true);
+
+                var targetPath = Path.Combine(
+                    session.BaseDir,
+                    ShowcaseExcelHelper.BuildExcelFileName(profile, productName));
+
+                var savedPath = ShowcaseExcelHelper.Export(
+                    targetPath,
+                    session.Theme,
+                    session.HookText,
+                    session.CtaText,
+                    scenes);
+                session.ExcelPath = savedPath;
+                NotifyShowcaseDraftDirty();
+
+                if (!string.Equals(savedPath, targetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    LogShowcase("[Showcase] File Excel cũ đang mở — đã lưu bản mới: " + savedPath);
+                }
+                else
+                {
+                    LogShowcase("[Showcase] Đã xuất Excel prompt Veo: " + savedPath);
+                }
+
+                try
+                {
+                    Process.Start(new ProcessStartInfo { FileName = savedPath, UseShellExecute = true });
+                }
+                catch
+                {
+                    // Không mở được ứng dụng đọc Excel — bỏ qua, file vẫn đã lưu.
+                }
+            }
+            catch (Exception ex)
+            {
+                LogShowcase("[Showcase] Xuất Excel lỗi («" + productName + "»): " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Tải excel prompt", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        async Task IAiVideoGenControlsHost.OpenShowcaseClipsFolderAsync()
+        {
+            if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                    "Chọn dòng video trên lưới, bấm cột «Cảnh» để mở thư mục clip Veo/Kling."))
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+
+            for (var i = 0; i < videos.Count; i++)
+            {
+                await OpenShowcaseClipsFolderForVideoAsync(videos[i], settings, profile).ConfigureAwait(true);
+            }
+
+            if (videos.Count > 0)
+            {
+                LogShowcase("[Showcase] Đặt tên clip theo cảnh: scene_01.mp4, scene_02.mp4, ... rồi bấm «Tạo lời thoại».");
+                ActivateShowcaseVideo(videos[videos.Count - 1]);
+            }
+
+            await Task.CompletedTask;
+        }
+
+        private async Task OpenShowcaseClipsFolderForVideoAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            ActivateShowcaseVideo(video, refreshStoryboard: false);
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(productName))
+            {
+                MessageBox.Show(this,
+                    "Dòng này chưa có tên sản phẩm — đặt tên trước khi mở thư mục clip.",
+                    "Thư mục clip",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            if (settings != null)
+            {
+                ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            }
+
+            var session = EnsureShowcaseSession(profile, productName, settings?.StorageRootPath, video);
+            if (session == null || string.IsNullOrWhiteSpace(session.ClipsDir))
+            {
+                MessageBox.Show(this,
+                    "Không tạo được thư mục clip — kiểm tra «Storage root» trong Cài đặt.",
+                    "Thư mục clip",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(session.ClipsDir);
+                Process.Start("explorer.exe", session.ClipsDir);
+                LogShowcase("[Showcase] Đã mở thư mục clip («" + productName + "»): " + session.ClipsDir);
+                var scenes = GetShowcaseVideoScenes(video);
+                var missing = ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, scenes, LogShowcase);
+                video.RefreshDisplayFields();
+                SyncBuffersToGrids();
+                NotifyShowcaseDraftDirty();
+                LogShowcase(missing.Count == 0
+                    ? "[Showcase] ✓ «" + productName + "» — đủ clip cho " + scenes.Count + " cảnh."
+                    : "[Showcase] «" + productName + "» — còn thiếu clip cảnh " + string.Join(", ", missing));
+            }
+            catch (Exception ex)
+            {
+                LogShowcase("[Showcase] Không mở được thư mục clip («" + productName + "»): " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Thư mục clip", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
+            await Task.CompletedTask;
+        }
+
+        private async Task OpenShowcaseOutputFolderForVideoAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            ActivateShowcaseVideo(video, refreshStoryboard: false);
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            var outputPath = (video.OutputVideoPath ?? string.Empty).Trim();
+
+            string targetDir = null;
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                try
+                {
+                    targetDir = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+                }
+                catch
+                {
+                    targetDir = Path.GetDirectoryName(outputPath);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(targetDir) && !string.IsNullOrWhiteSpace(video.ShowcaseSessionBaseDir))
+            {
+                targetDir = Path.Combine(video.ShowcaseSessionBaseDir.Trim(), "output");
+            }
+
+            if (string.IsNullOrWhiteSpace(targetDir) && !string.IsNullOrWhiteSpace(productName))
+            {
+                ProfileScopedPaths.SetConfiguredStorageRoot(settings?.StorageRootPath);
+                var session = EnsureShowcaseSession(profile, productName, settings?.StorageRootPath, video);
+                if (!string.IsNullOrWhiteSpace(session?.OutputDir))
+                {
+                    targetDir = session.OutputDir;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(targetDir))
+            {
+                MessageBox.Show(this,
+                    "Chưa có thư mục output — render xong hoặc thêm ảnh để tạo phiên Showcase.",
+                    "Output",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(targetDir);
+                Process.Start("explorer.exe", targetDir);
+                LogShowcase("[Showcase] Đã mở thư mục output («" + productName + "»): " + targetDir);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Output", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
+            await Task.CompletedTask;
+        }
+
+        async Task IAiVideoGenControlsHost.RefreshShowcaseClipStatusAsync()
+        {
+            if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                    "Chọn ít nhất một dòng video trên lưới để kiểm tra clip."))
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+
+            for (var i = 0; i < videos.Count; i++)
+            {
+                var video = videos[i];
+                ActivateShowcaseVideo(video, refreshStoryboard: false);
+                await RefreshShowcaseClipStatusForVideoAsync(video, settings, profile).ConfigureAwait(true);
+            }
+
+            ActivateShowcaseVideo(videos[videos.Count - 1]);
+            SyncBuffersToGrids();
+        }
+
+        private async Task RefreshShowcaseClipStatusForVideoAsync(ShowcaseVideoItem video, AppSettings settings, string profile)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            if (scenes.Count == 0)
+            {
+                LogShowcase("[Showcase] «" + video.ProductName + "» chưa có cảnh nào để kiểm tra clip.");
+                return;
+            }
+
+            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+
+            var missing = ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, LogShowcase);
+            video.RefreshDisplayFields();
+
+            LogShowcase(missing.Count == 0
+                ? "[Showcase] ✓ «" + productName + "» — đủ clip cho " + scenes.Count + " cảnh."
+                : "[Showcase] «" + productName + "» — còn thiếu clip cảnh " + string.Join(", ", missing));
+
+            await Task.CompletedTask;
+        }
+
+        async Task IAiVideoGenControlsHost.GenerateShowcaseVoiceoverAsync()
+        {
+            if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                    "Chọn ít nhất một dòng video trên lưới rồi bấm «Tạo lời thoại»."))
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            if (string.IsNullOrWhiteSpace(settings.AiApiKey))
+            {
+                MessageBox.Show(this, "Cần cấu hình AI API Key trong tab Cài đặt.", "Tạo lời thoại",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+
+            if (btnShowcaseGenerateVoiceover != null)
+            {
+                btnShowcaseGenerateVoiceover.Enabled = false;
+            }
+
+            try
+            {
+                for (var i = 0; i < videos.Count; i++)
+                {
+                    ThrowIfShowcaseTabCancelled();
+                    var video = videos[i];
+                    ActivateShowcaseVideo(video, refreshStoryboard: false);
+                    if (videos.Count > 1)
+                    {
+                        LogShowcase("[Showcase] Tạo thoại (" + (i + 1) + "/" + videos.Count + ") — «" + video.ProductName + "»");
+                    }
+
+                    await GenerateShowcaseVoiceoverForVideoAsync(video, settings, profile).ConfigureAwait(true);
+                }
+
+                ActivateShowcaseVideo(videos[videos.Count - 1]);
+                SyncBuffersToGrids();
+                RefreshAiVideoGenModeReadinessLabels();
+            }
+            finally
+            {
+                if (btnShowcaseGenerateVoiceover != null && !btnShowcaseGenerateVoiceover.IsDisposed)
+                {
+                    btnShowcaseGenerateVoiceover.Enabled = true;
+                }
+            }
+        }
+
+        async Task IAiVideoGenControlsHost.BuildShowcaseNarrationAsync()
+        {
+            await RunShowcaseNarrationActionAsync(btnShowcasePreviewNarration).ConfigureAwait(true);
+        }
+
+        async Task IAiVideoGenControlsHost.ListenShowcaseNarrationAsync()
+        {
+            if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                    "Chọn ít nhất một dòng video trên lưới rồi bấm «🔊 Nghe audio»."))
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+
+            if (btnShowcaseListenNarration != null)
+            {
+                btnShowcaseListenNarration.Enabled = false;
+            }
+
+            try
+            {
+                for (var i = 0; i < videos.Count; i++)
+                {
+                    ThrowIfShowcaseTabCancelled();
+                    var video = videos[i];
+                    ActivateShowcaseVideo(video, refreshStoryboard: false);
+                    await ListenShowcaseNarrationForVideoAsync(video, settings, profile).ConfigureAwait(true);
+                }
+
+                ActivateShowcaseVideo(videos[videos.Count - 1]);
+            }
+            finally
+            {
+                UpdateShowcaseNarrationButtonState();
+            }
+        }
+
+        private async Task ListenShowcaseNarrationForVideoAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            var productName = (video.ProductName ?? scenes.FirstOrDefault()?.ProductName ?? string.Empty).Trim();
+            EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+            var sessionBase = _showcaseSession?.BaseDir;
+            if (string.IsNullOrWhiteSpace(sessionBase))
+            {
+                sessionBase = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(scenes);
+            }
+
+            if (string.IsNullOrWhiteSpace(sessionBase) ||
+                !ShowcaseNarrationCacheHelper.HasNarrationFile(sessionBase))
+            {
+                MessageBox.Show(this,
+                    "«" + productName + "» chưa có file narration.mp3.\r\n\r\nBấm «🎙 Tạo audio» trước.",
+                    "Nghe audio",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var path = Path.Combine(ShowcaseNarrationCacheHelper.GetAudioDirectory(sessionBase),
+                ShowcaseNarrationCacheHelper.NarrationFileName);
+            try
+            {
+                PlayShowcaseNarrationFile(path);
+                LogShowcase("[Showcase] Nghe audio → " + path);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Nghe audio", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
+            await Task.CompletedTask.ConfigureAwait(true);
+        }
+
+        private async Task RunShowcaseNarrationActionAsync(
+            Button actionButton,
+            IReadOnlyList<ShowcaseVideoItem> videosOverride = null)
+        {
+            IReadOnlyList<ShowcaseVideoItem> videos;
+            if (videosOverride != null && videosOverride.Count > 0)
+            {
+                videos = videosOverride;
+            }
+            else if (!TryGetShowcaseSelectedVideosOrdered(out var selected,
+                         "Chọn ít nhất một dòng video trên lưới rồi bấm «Tạo audio»."))
+            {
+                return;
+            }
+            else
+            {
+                videos = selected;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+
+            if (!TtsAvailabilityHelper.IsAnyShowcaseTtsConfigured(settings))
+            {
+                MessageBox.Show(this,
+                    "Cần Windows + mạng (Edge TTS miễn phí) hoặc cấu hình ElevenLabs trong tab Cài đặt.",
+                    "Tạo audio",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                await FfmpegToolkitService.EnsureAvailableAsync(settings, LogShowcase, ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Tạo audio", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            TtsEngineKind? batchAskEngine = null;
+
+            if (actionButton != null)
+            {
+                actionButton.Enabled = false;
+            }
+
+            try
+            {
+                for (var i = 0; i < videos.Count; i++)
+                {
+                    ThrowIfShowcaseTabCancelled();
+                    var video = videos[i];
+                    ShowcaseTtsHelper.EnsureVideoDefaults(video, settings);
+                    var ttsOptions = ShowcaseTtsRenderOptions.FromVideo(video, settings);
+                    video.ShowcaseVoicePresetId = ttsOptions.VoicePresetId;
+                    video.ShowcaseVoiceLanguageId = ttsOptions.VoiceLanguageId;
+                    video.ShowcaseVoiceAgeId = ttsOptions.VoiceAgeId;
+                    if (ShowcaseTtsHelper.UsesAskOnCreateEngine(video))
+                    {
+                        if (batchAskEngine == null)
+                        {
+                            using (var picker = new ShowcaseTtsEngineChoiceForm(
+                                       settings,
+                                       TtsEngineChoiceHelper.ParseStoredChoice(settings.ShowcaseLastTtsEngine)))
+                            {
+                                if (picker.ShowDialog(this) != DialogResult.OK)
+                                {
+                                    return;
+                                }
+
+                                batchAskEngine = picker.SelectedEngine;
+                            }
+
+                            settings.ShowcaseLastTtsEngine = batchAskEngine.Value.ToString();
+                            try
+                            {
+                                await _configManager.SaveAsync(settings).ConfigureAwait(true);
+                            }
+                            catch
+                            {
+                                // non-critical
+                            }
+                        }
+
+                        ttsOptions.Engine = batchAskEngine.Value;
+                    }
+
+                    try
+                    {
+                        TtsAvailabilityHelper.ValidateEngine(settings, ttsOptions.Engine);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(this,
+                            "«" + (video.ProductName ?? string.Empty).Trim() + "»: " + ex.Message,
+                            "Tạo audio",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        continue;
+                    }
+
+                    ActivateShowcaseVideo(video, refreshStoryboard: false);
+                    if (videos.Count > 1)
+                    {
+                        LogShowcase("[Showcase] Tạo audio (" + (i + 1) + "/" + videos.Count + ") — «" + video.ProductName + "»");
+                    }
+
+                    await BuildShowcaseNarrationForVideoAsync(video, settings, profile, ttsOptions).ConfigureAwait(true);
+                }
+
+                ActivateShowcaseVideo(videos[videos.Count - 1]);
+                UpdateShowcaseNarrationButtonState();
+            }
+            finally
+            {
+                if (actionButton != null && !actionButton.IsDisposed)
+                {
+                    actionButton.Enabled = true;
+                }
+            }
+        }
+
+        private async Task BuildShowcaseNarrationForVideoAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile,
+            ShowcaseTtsRenderOptions ttsOptions)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            if (scenes.Count < ShowcaseWorkflowConstants.MinScenes)
+            {
+                MessageBox.Show(this,
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» cần ít nhất 1 cảnh.",
+                    "Tạo audio",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(video, scenes))
+            {
+                var detail = ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes)
+                    && !ShowcaseVoiceoverHelper.IsVoiceoverSyncedToClips(video, scenes)
+                    ? "Thoại chưa khớp clip (hoặc clip đã đổi — cắt/lỗi file).\r\n\r\nBấm «Tạo lời thoại» lại, rồi «🎙 Tạo audio»."
+                    : "Bấm «Tạo lời thoại» trước (hoặc sửa kịch bản trong hub «Kịch bản · Prompt»).";
+                MessageBox.Show(this,
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» chưa có thoại khớp clip.\r\n\r\n" + detail,
+                    "Tạo audio",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+            if (_showcaseSession == null)
+            {
+                MessageBox.Show(this,
+                    "«" + productName + "» chưa có phiên Showcase.",
+                    "Tạo audio",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var missingClips = ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, LogShowcase);
+            video.RefreshDisplayFields();
+            if (missingClips.Count > 0)
+            {
+                MessageBox.Show(this,
+                    "«" + productName + "» còn thiếu clip cảnh: " + string.Join(", ", missingClips) + ".",
+                    "Thiếu clip",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            var hookText = video.ShowcaseHookText ?? _showcaseSession.HookText ?? string.Empty;
+            var ctaText = video.ShowcaseCtaText ?? _showcaseSession.CtaText ?? string.Empty;
+            var sessionBase = _showcaseSession.BaseDir;
+            if (string.IsNullOrWhiteSpace(sessionBase))
+            {
+                sessionBase = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(scenes);
+            }
+
+            if (string.IsNullOrWhiteSpace(sessionBase))
+            {
+                MessageBox.Show(this, "Không xác định được thư mục phiên audio.", "Tạo audio",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var forceRegenerate = ShowcaseNarrationCacheHelper.HasNarrationFile(sessionBase);
+            var dialogTitle = forceRegenerate ? "Tạo lại audio" : "Tạo audio";
+
+            try
+            {
+                if (forceRegenerate)
+                {
+                    ShowcaseNarrationCacheHelper.ClearCachedNarration(sessionBase);
+                    LogShowcase("[Showcase] Đã xóa cache narration — gọi TTS lại cho «" + productName + "»…");
+                }
+                else
+                {
+                    LogShowcase("[Showcase] Đang tạo narration.mp3 cho «" + productName + "» — " +
+                                ttsOptions.Preset.Label + " (" + ttsOptions.Engine + ")…");
+                }
+
+                var build = await _videoProcessingService.EnsureShowcaseNarrationAsync(
+                    scenes,
+                    hookText,
+                    ctaText,
+                    settings,
+                    sessionBase,
+                    LogShowcase,
+                    ShowcaseTabCancellationToken,
+                    ttsOptions).ConfigureAwait(true);
+
+                if (string.IsNullOrWhiteSpace(build?.NarrationFilePath) || !File.Exists(build.NarrationFilePath))
+                {
+                    throw new InvalidOperationException("Không tạo được file narration.mp3.");
+                }
+
+                var cacheNote = forceRegenerate || !build.ReusedFromCache
+                    ? " (TTS mới)"
+                    : " (dùng cache)";
+                var durNote = build.DurationSeconds > 0
+                    ? build.DurationSeconds.ToString("0.#") + "s"
+                    : "?";
+                LogShowcase("[Showcase] narration.mp3" + cacheNote + " — ~" + durNote + " → " + build.NarrationFilePath);
+                LogShowcase("[Showcase] Bấm «🔊 Nghe audio» để nghe thử trước khi render.");
+            }
+            catch (Exception ex)
+            {
+                LogShowcase("[Showcase] " + dialogTitle + " lỗi («" + productName + "»): " + ex.Message);
+                MessageBox.Show(this, ex.Message, dialogTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void PlayShowcaseNarrationFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                LogShowcase("[Showcase] Nghe audio: file không tồn tại.");
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = path,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("Không mở được trình phát audio: " + ex.Message, ex);
+            }
+        }
+
+        private async Task GenerateShowcaseVoiceoverForVideoAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            if (scenes.Count < ShowcaseWorkflowConstants.MinScenes)
+            {
+                MessageBox.Show(this,
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» cần ít nhất 1 cảnh trên storyboard.",
+                    "Tạo lời thoại",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+            if (_showcaseSession == null)
+            {
+                MessageBox.Show(this,
+                    "«" + productName + "» chưa có phiên Showcase — hãy thêm ảnh và tạo clip trước.",
+                    "Tạo lời thoại",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var missingClips = ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, LogShowcase);
+            video.RefreshDisplayFields();
+            if (ShowcaseClipStatusHelper.CountScenesWithClip(scenes) == 0)
+            {
+                MessageBox.Show(this,
+                    "«" + productName + "» chưa có clip nào trong veo_clips.\r\n\r\nBỏ ít nhất một file scene_XX.mp4 rồi bấm «Tạo lời thoại».",
+                    "Chưa có clip",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (missingClips.Count > 0)
+            {
+                LogShowcase("[Showcase] Thiếu clip cảnh " + string.Join(", ", missingClips) + " — vẫn tạo thoại cho "
+                            + ShowcaseClipStatusHelper.CountScenesWithClip(scenes) + "/" + scenes.Count + " cảnh có clip.");
+            }
+
+            try
+            {
+                var themeForGemini = GetShowcaseThemeForVideo(video);
+                var voiceoverService = new ShowcaseGeminiVoiceoverService();
+                var result = await voiceoverService.GenerateAsync(
+                    scenes,
+                    themeForGemini,
+                    settings,
+                    LogShowcase,
+                    ShowcaseTabCancellationToken).ConfigureAwait(true);
+
+                _showcaseSession.Theme = result.Theme;
+                _showcaseSession.HookText = result.HookText;
+                _showcaseSession.CtaText = result.CtaText;
+                video.ShowcaseTheme = result.Theme ?? video.ShowcaseTheme ?? string.Empty;
+                video.ShowcaseHookText = result.HookText ?? string.Empty;
+                video.ShowcaseCtaText = result.CtaText ?? string.Empty;
+                foreach (var scene in scenes)
+                {
+                    if (scene != null)
+                    {
+                        scene.ShowcaseTheme = video.ShowcaseTheme;
+                    }
+                }
+
+                video.ApplySettingsToScenes();
+                video.RefreshDisplayFields();
+                video.ShowcaseVoiceoverClipFingerprint = ShowcaseVoiceoverHelper.ComputeClipFingerprint(scenes);
+                ShowcaseNarrationCacheHelper.ClearCachedNarration(_showcaseSession.BaseDir);
+                NotifyShowcaseDraftDirty();
+
+                LogShowcase("[Showcase] Chủ đề: " + result.Theme);
+                LogShowcase("[Showcase] Hook: " + result.HookText);
+                LogShowcase("[Showcase] CTA: " + result.CtaText);
+                LogShowcase("[Showcase] Đã sinh thoại timeline — " +
+                            ShowcaseVoiceoverHelper.CountVoicedScenes(scenes) + " cảnh có lời, " +
+                            ShowcaseVoiceoverHelper.CountSilentScenes(scenes) + " cảnh im — sửa trong hub «Kịch bản · Prompt» rồi «🎙 Tạo audio».");
+                LogShowcase("[Showcase] Đổi/replace clip (scene_XX.mp4) → bấm «Tạo lời thoại» lại rồi «Tạo audio».");
+                UpdateShowcaseNarrationButtonState();
+            }
+            catch (Exception ex)
+            {
+                LogShowcase("[Showcase] Tạo thoại lỗi («" + productName + "»): " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Tạo lời thoại", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        async Task IAiVideoGenControlsHost.AddShowcaseImagesFromFilesAsync()
+        {
+            if (TryGetShowcaseSelectedVideosOrdered(out var selectedVideos, null) && selectedVideos.Count > 0)
+            {
+                await AddShowcaseImagesForVideoAsync(selectedVideos[0]).ConfigureAwait(true);
+                return;
+            }
+
+            var created = EnsureActiveShowcaseVideoForImages();
+            if (created != null)
+            {
+                await AddShowcaseImagesForVideoAsync(created).ConfigureAwait(true);
+            }
+        }
+
+        private async Task AddShowcaseImagesForVideoAsync(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            ActivateShowcaseVideo(video);
+
+            var existingCount = video.Scenes.Count;
+
+            using (var dlg = new OpenFileDialog
+            {
+                Title = "Chọn ảnh sản phẩm (có thể chọn nhiều file)",
+                Filter = "Ảnh (*.jpg;*.jpeg;*.png;*.webp;*.bmp)|*.jpg;*.jpeg;*.png;*.webp;*.bmp|Tất cả file|*.*",
+                Multiselect = true
+            })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK || dlg.FileNames.Length == 0)
+                {
+                    return;
+                }
+
+                var files = dlg.FileNames.ToList();
+                var productName = (video.ProductName ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(productName) || productName.StartsWith("Video ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var prompted = PromptForShowcaseProductName();
+                    if (string.IsNullOrWhiteSpace(prompted))
+                    {
+                        LogShowcase("[Showcase] Đã hủy — cần đặt tên sản phẩm trước khi thêm ảnh.");
+                        return;
+                    }
+
+                    productName = prompted;
+                    video.ProductName = productName;
+                }
+
+                var profile = GetRunningProfileName();
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+                var session = EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+                if (session == null || string.IsNullOrWhiteSpace(session.SourceImagesDir))
+                {
+                    MessageBox.Show(this,
+                        "Không tạo được thư mục phiên Showcase — kiểm tra «Storage root» trong Cài đặt.",
+                        "Thêm ảnh",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var settingsTemplate = video.Scenes.FirstOrDefault();
+                var nextIndex = existingCount + 1;
+                var addedCount = 0;
+                var skippedCount = 0;
+                var picksThisBatch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (var i = 0; i < files.Count; i++)
+                {
+                    var file = files[i];
+                    string pickFullPath;
+                    try
+                    {
+                        pickFullPath = Path.GetFullPath(file);
+                    }
+                    catch
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    var isDuplicateInBatch = picksThisBatch.Contains(pickFullPath);
+                    var isDuplicateOnStoryboard = ShowcaseSessionService.TryFindSceneIndexWithSameShowcasePickSource(
+                        video.Scenes,
+                        file,
+                        out var duplicateSceneIndex);
+                    if (isDuplicateInBatch || isDuplicateOnStoryboard)
+                    {
+                        if (isDuplicateInBatch && !isDuplicateOnStoryboard)
+                        {
+                            duplicateSceneIndex = 0;
+                        }
+
+                        var choice = PromptShowcaseDuplicateSameOriginImage(
+                            Path.GetFileName(file),
+                            Path.GetDirectoryName(pickFullPath),
+                            duplicateSceneIndex);
+                        if (choice == ShowcaseDuplicateImageChoice.Skip)
+                        {
+                            skippedCount++;
+                            continue;
+                        }
+
+                        if (choice == ShowcaseDuplicateImageChoice.Cancel)
+                        {
+                            break;
+                        }
+                    }
+
+                    while (true)
+                    {
+                        if (ShowcaseSessionService.TryGetExistingSourceImageAtIndex(session, nextIndex, out var existingFile))
+                        {
+                            var choice = PromptShowcaseDuplicateSlotFile(
+                                Path.GetFileName(existingFile),
+                                Path.GetFileName(file));
+                            if (choice == ShowcaseDuplicateImageChoice.Skip)
+                            {
+                                skippedCount++;
+                                break;
+                            }
+
+                            if (choice == ShowcaseDuplicateImageChoice.Cancel)
+                            {
+                                i = files.Count;
+                                break;
+                            }
+
+                            var localPath = ShowcaseSessionService.CopyLocalSceneImage(session, nextIndex, file, overwriteExisting: true);
+                            if (string.IsNullOrWhiteSpace(localPath))
+                            {
+                                skippedCount++;
+                                break;
+                            }
+
+                            AppendShowcaseSceneFromImageFile(video, localPath, file, productName, profile, settingsTemplate);
+                            picksThisBatch.Add(pickFullPath);
+                            nextIndex++;
+                            addedCount++;
+                            break;
+                        }
+
+                        var copiedPath = ShowcaseSessionService.CopyLocalSceneImage(session, nextIndex, file, overwriteExisting: true);
+                        if (string.IsNullOrWhiteSpace(copiedPath))
+                        {
+                            skippedCount++;
+                            break;
+                        }
+
+                        AppendShowcaseSceneFromImageFile(video, copiedPath, file, productName, profile, settingsTemplate);
+                        picksThisBatch.Add(pickFullPath);
+                        nextIndex++;
+                        addedCount++;
+                        break;
+                    }
+                }
+
+                video.ApplySettingsToScenes();
+                video.RefreshDisplayFields();
+
+                ShowcaseSessionService.ImportScenesIntoSessionSourceImages(session, video.Scenes);
+
+                RefreshAffiliateDeepStoryboard();
+                SyncBuffersToGrids();
+                RefreshAiVideoGenModeReadinessLabels();
+                LogShowcase("[Showcase] Đã thêm " + addedCount + " ảnh cho «" + productName + "» → "
+                            + session.SourceImagesDir
+                            + (skippedCount > 0 ? " (bỏ qua " + skippedCount + " trùng)." : ".")
+                            + " Tổng " + video.Scenes.Count + " cảnh.");
+                NotifyShowcaseDraftDirty();
+            }
+
+            await Task.CompletedTask;
+        }
+
+        private async Task AddShowcaseClipsForVideoAsync(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            ActivateShowcaseVideo(video, refreshStoryboard: false);
+
+            using (var dlg = new OpenFileDialog
+            {
+                Title = "Chọn clip cảnh (scene_01.mp4, scene_02.mp4, … — có thể chọn nhiều file)",
+                Filter = "Video (*.mp4;*.mov;*.webm;*.mkv)|*.mp4;*.mov;*.webm;*.mkv|Tất cả file|*.*",
+                Multiselect = true
+            })
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK || dlg.FileNames.Length == 0)
+                {
+                    return;
+                }
+
+                var productName = (video.ProductName ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(productName) || productName.StartsWith("Video ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var prompted = PromptForShowcaseProductName();
+                    if (string.IsNullOrWhiteSpace(prompted))
+                    {
+                        LogShowcase("[Showcase] Đã hủy — cần đặt tên sản phẩm trước khi thêm clip.");
+                        return;
+                    }
+
+                    productName = prompted;
+                    video.ProductName = productName;
+                }
+
+                var profile = GetRunningProfileName();
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+                var session = EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+                if (session == null || string.IsNullOrWhiteSpace(session.ClipsDir))
+                {
+                    MessageBox.Show(this,
+                        "Không tạo được thư mục phiên Showcase — kiểm tra «Storage root» trong Cài đặt.",
+                        "Thêm clip",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var scenes = GetShowcaseVideoScenes(video);
+                var nextIndex = 1;
+                var addedCount = 0;
+                var skippedCount = 0;
+
+                for (var i = 0; i < dlg.FileNames.Length; i++)
+                {
+                    var file = dlg.FileNames[i];
+                    if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    while (true)
+                    {
+                        var existingAtSlot = ShowcaseSessionService.DetectClipForOrder(session.ClipsDir, nextIndex);
+                        if (!string.IsNullOrWhiteSpace(existingAtSlot))
+                        {
+                            var choice = PromptShowcaseDuplicateSlotFile(
+                                Path.GetFileName(existingAtSlot),
+                                Path.GetFileName(file));
+                            if (choice == ShowcaseDuplicateImageChoice.Skip)
+                            {
+                                skippedCount++;
+                                break;
+                            }
+
+                            if (choice == ShowcaseDuplicateImageChoice.Cancel)
+                            {
+                                i = dlg.FileNames.Length;
+                                break;
+                            }
+
+                            var overwritePath = ShowcaseSessionService.CopyLocalSceneClip(
+                                session,
+                                nextIndex,
+                                file,
+                                overwriteExisting: true);
+                            if (string.IsNullOrWhiteSpace(overwritePath))
+                            {
+                                skippedCount++;
+                                break;
+                            }
+
+                            nextIndex++;
+                            addedCount++;
+                            break;
+                        }
+
+                        var copiedPath = ShowcaseSessionService.CopyLocalSceneClip(session, nextIndex, file, overwriteExisting: true);
+                        if (string.IsNullOrWhiteSpace(copiedPath))
+                        {
+                            skippedCount++;
+                            break;
+                        }
+
+                        nextIndex++;
+                        addedCount++;
+                        break;
+                    }
+                }
+
+                var missing = ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, scenes, LogShowcase);
+                video.RefreshDisplayFields();
+                SyncBuffersToGrids();
+                RefreshAiVideoGenModeReadinessLabels();
+                NotifyShowcaseDraftDirty();
+                LogShowcase("[Showcase] Đã thêm " + addedCount + " clip cho «" + productName + "» → "
+                            + session.ClipsDir
+                            + (skippedCount > 0 ? " (bỏ qua " + skippedCount + ")." : ".")
+                            + (missing.Count == 0 && scenes.Count > 0
+                                ? " ✓ đủ clip cho " + scenes.Count + " cảnh."
+                                : missing.Count > 0
+                                    ? " Còn thiếu cảnh " + string.Join(", ", missing) + "."
+                                    : string.Empty));
+            }
+
+            await Task.CompletedTask;
+        }
+
+        private enum ShowcaseDuplicateImageChoice
+        {
+            Overwrite,
+            Skip,
+            Cancel
+        }
+
+        private ShowcaseDuplicateImageChoice PromptShowcaseDuplicateSameOriginImage(
+            string fileName,
+            string sourceDirectory,
+            int existingSceneIndex)
+        {
+            var where = string.IsNullOrWhiteSpace(sourceDirectory) ? "?" : sourceDirectory;
+            var sceneHint = existingSceneIndex > 0
+                ? " (đã có ở cảnh " + existingSceneIndex + " trên storyboard)"
+                : " (đã chọn trong cùng lần thêm này)";
+
+            var message =
+                "Ảnh «" + fileName + "» từ thư mục:\r\n  " + where + "\r\n"
+                + "đã được thêm trước đó" + sceneHint + ".\r\n\r\n"
+                + "• Có — vẫn thêm bản sao\r\n"
+                + "• Không — bỏ qua, không thêm ảnh này\r\n"
+                + "• Hủy — dừng thêm các ảnh còn lại";
+
+            return ShowShowcaseDuplicateImageChoiceDialog(message, "Trùng ảnh gốc");
+        }
+
+        private ShowcaseDuplicateImageChoice PromptShowcaseDuplicateSlotFile(string existingFileName, string newFileName)
+        {
+            var message =
+                "Trong thư mục source_images đã có file:\r\n  «" + existingFileName + "»\r\n\r\n"
+                + "Ảnh bạn chọn: «" + newFileName + "»\r\n\r\n"
+                + "• Có — đè lên file cũ\r\n"
+                + "• Không — bỏ qua, không thêm ảnh này\r\n"
+                + "• Hủy — dừng thêm các ảnh còn lại";
+
+            return ShowShowcaseDuplicateImageChoiceDialog(message, "Trùng tên file trong thư mục");
+        }
+
+        private ShowcaseDuplicateImageChoice ShowShowcaseDuplicateImageChoiceDialog(string message, string title)
+        {
+            var result = MessageBox.Show(
+                this,
+                message,
+                title,
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+
+            switch (result)
+            {
+                case DialogResult.Yes:
+                    return ShowcaseDuplicateImageChoice.Overwrite;
+                case DialogResult.No:
+                    return ShowcaseDuplicateImageChoice.Skip;
+                default:
+                    return ShowcaseDuplicateImageChoice.Cancel;
+            }
+        }
+
+        private void AppendShowcaseSceneFromImageFile(
+            ShowcaseVideoItem video,
+            string localPath,
+            string localPickPath,
+            string productName,
+            string profile,
+            AiVideoGenInputItem settingsTemplate)
+        {
+            string storedPick = localPickPath;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(localPickPath))
+                {
+                    storedPick = Path.GetFullPath(localPickPath);
+                }
+            }
+            catch
+            {
+                storedPick = localPickPath ?? string.Empty;
+            }
+
+            var item = new AiVideoGenInputItem
+            {
+                ProfileName = profile ?? string.Empty,
+                ProductName = productName,
+                ImageUrl = localPath,
+                ThumbnailPath = localPath,
+                ShowcaseLocalPickPath = storedPick ?? string.Empty,
+                PipelineStatus = "Chờ"
+            };
+            ApplyShowcaseSettingsTemplate(item, settingsTemplate);
+            video.Scenes.Add(item);
+        }
+
+        private string ResolveShowcaseSourceImagesDirForVideo(ShowcaseVideoItem video, AppSettings settings)
+        {
+            if (video == null)
+            {
+                return null;
+            }
+
+            var scenes = GetShowcaseVideoScenes(video);
+            var fromScenes = ShowcaseSessionService.ResolveSceneImagesDirectory(scenes);
+            if (!string.IsNullOrWhiteSpace(fromScenes))
+            {
+                var inferred = ShowcaseSessionService.TryBuildSessionFromSceneImagesDirectory(
+                    GetRunningProfileName(),
+                    video.ProductName,
+                    fromScenes);
+                if (inferred != null)
+                {
+                    BindShowcaseSessionToVideo(inferred, video);
+                }
+
+                return fromScenes;
+            }
+
+            var sessionBase = (video.ShowcaseSessionBaseDir ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(sessionBase))
+            {
+                var sessionImagesDir = Path.Combine(sessionBase, "source_images");
+                if (ShowcaseSessionService.DirectoryHasImageFiles(sessionImagesDir))
+                {
+                    return sessionImagesDir;
+                }
+            }
+
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(productName))
+            {
+                return null;
+            }
+
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings?.StorageRootPath);
+            var profile = GetRunningProfileName();
+            var session = EnsureShowcaseSession(profile, productName, settings?.StorageRootPath, video);
+            return session?.SourceImagesDir;
+        }
+
+        private async Task OpenShowcaseSourceImagesFolderForVideoAsync(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            ActivateShowcaseVideo(video, refreshStoryboard: false);
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            var targetDir = ResolveShowcaseSourceImagesDirForVideo(video, settings);
+
+            if (string.IsNullOrWhiteSpace(targetDir))
+            {
+                MessageBox.Show(this,
+                    "Chưa có thư mục ảnh cho dòng này — đặt tên sản phẩm rồi bấm «➕» để thêm ảnh (app tạo phiên trong Storage root).",
+                    "Thư mục ảnh",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(targetDir);
+                Process.Start("explorer.exe", targetDir);
+                LogShowcase("[Showcase] Đã mở thư mục ảnh dòng «" + productName + "»: " + targetDir);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Thư mục ảnh", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
+            await Task.CompletedTask;
+        }
+
+        /// <summary>Hộp nhập nhanh tên sản phẩm khi thêm ảnh đầu tiên từ máy (chưa có cảnh nào để suy ra tên).</summary>
+        private string PromptForShowcaseProductName()
+        {
+            const int dialogWidth = 900;
+            const int dialogHeight = 480;
+
+            using (var dlg = new Form
+            {
+                Text = "Tên sản phẩm",
+                StartPosition = FormStartPosition.CenterParent,
+                ClientSize = new Size(dialogWidth, dialogHeight),
+                MinimumSize = new Size(dialogWidth, dialogHeight),
+                MaximumSize = new Size(dialogWidth, dialogHeight),
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MinimizeBox = false,
+                MaximizeBox = false,
+                BackColor = Color.FromArgb(31, 34, 42),
+                ForeColor = Color.Gainsboro,
+                Padding = new Padding(24)
+            })
+            {
+                var root = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 1,
+                    RowCount = 4,
+                    BackColor = dlg.BackColor
+                };
+                root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+                root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+                root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+
+                var lbl = new Label
+                {
+                    Text = "Nhập tên sản phẩm (dùng để đặt tên phiên/thư mục Showcase):",
+                    AutoSize = false,
+                    Dock = DockStyle.Fill,
+                    MaximumSize = new Size(dialogWidth - 48, 0),
+                    ForeColor = Color.FromArgb(200, 204, 214),
+                    Font = new Font(Font.FontFamily, 11f),
+                    Margin = new Padding(0, 0, 0, 12)
+                };
+
+                var txt = new TextBox
+                {
+                    Dock = DockStyle.Fill,
+                    BackColor = Color.FromArgb(45, 49, 60),
+                    ForeColor = Color.WhiteSmoke,
+                    BorderStyle = BorderStyle.FixedSingle,
+                    Font = new Font(Font.FontFamily, 12f),
+                    Margin = new Padding(0, 0, 0, 16)
+                };
+
+                var flpButtons = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    WrapContents = false,
+                    BackColor = dlg.BackColor,
+                    Padding = new Padding(0),
+                    Margin = new Padding(0)
+                };
+
+                var btnOk = new Button
+                {
+                    Text = "OK",
+                    DialogResult = DialogResult.OK,
+                    Width = 120,
+                    Height = 44,
+                    Font = new Font(Font.FontFamily, 11f),
+                    Margin = new Padding(8, 0, 0, 0)
+                };
+                var btnCancel = new Button
+                {
+                    Text = "Hủy",
+                    DialogResult = DialogResult.Cancel,
+                    Width = 120,
+                    Height = 44,
+                    Font = new Font(Font.FontFamily, 11f),
+                    Margin = new Padding(0)
+                };
+
+                flpButtons.Controls.Add(btnOk);
+                flpButtons.Controls.Add(btnCancel);
+
+                root.Controls.Add(lbl, 0, 0);
+                root.Controls.Add(txt, 0, 1);
+                root.Controls.Add(flpButtons, 0, 3);
+
+                dlg.Controls.Add(root);
+                dlg.AcceptButton = btnOk;
+                dlg.CancelButton = btnCancel;
+
+                return dlg.ShowDialog(this) == DialogResult.OK ? txt.Text.Trim() : null;
+            }
+        }
+
+        /// <summary>Trạng thái workflow Showcase hiện tại (dùng cho dòng cảnh báo readiness) — trả về text + đã sẵn sàng render hay chưa.</summary>
+        private (string Text, bool Ready) GetShowcaseWorkflowStatus()
+        {
+            var videos = GetShowcaseSelectedVideosOrdered();
+            if (videos.Count > 1)
+            {
+                var parts = new List<string>();
+                var allReady = true;
+                foreach (var video in videos)
+                {
+                    var st = GetShowcaseWorkflowStatusForVideo(video);
+                    if (!st.Ready)
+                    {
+                        allReady = false;
+                    }
+
+                    parts.Add("«" + (video.ProductName ?? "?") + "»: " + st.Text);
+                }
+
+                return (allReady
+                    ? "Đủ clip + thoại cho " + videos.Count + " video đã chọn — «🎙 Tạo audio» rồi «Render video»."
+                    : string.Join("  |  ", parts), allReady);
+            }
+
+            var target = videos.Count == 1 ? videos[0] : GetActiveShowcaseVideo();
+            return GetShowcaseWorkflowStatusForVideo(target);
+        }
+
+        private (string Text, bool Ready) GetShowcaseWorkflowStatusForVideo(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return ("Chọn dòng video trên lưới, thêm ảnh qua cột «Ảnh» (➕ Thêm ảnh) để bắt đầu.", false);
+            }
+
+            var scenes = GetShowcaseVideoScenes(video);
+            if (scenes.Count < ShowcaseWorkflowConstants.MinScenes)
+            {
+                return ("«" + (video.ProductName ?? "?") + "» cần ít nhất 1 ảnh trên storyboard.", false);
+            }
+
+            var hasScript = scenes.Any(s => ShowcaseClipToolHelper.SceneHasClipPrompt(s));
+            if (!hasScript)
+            {
+                return ("«" + (video.ProductName ?? "?") + "» — bấm «Tạo kịch bản».", false);
+            }
+
+            var profile = GetRunningProfileName();
+            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            ShowcaseSessionState session = null;
+            if (!string.IsNullOrWhiteSpace(productName))
+            {
+                session = EnsureShowcaseSession(profile, productName, null, video);
+            }
+
+            if (session == null)
+            {
+                return ("«" + (video.ProductName ?? "?") + "» — «Tải excel prompt» (bảng Prompt) rồi bỏ file Veo/Kling vào veo_clips (cột «Cảnh»).", false);
+            }
+
+            var clipsDir = !string.IsNullOrWhiteSpace(video.ShowcaseClipsDir)
+                ? video.ShowcaseClipsDir
+                : session.ClipsDir;
+            ShowcaseSessionService.RefreshClipStatus(clipsDir, scenes, null);
+            video.RefreshDisplayFields();
+
+            var missing = scenes.Count(s => string.IsNullOrWhiteSpace(s?.ClipPath) || !File.Exists(s.ClipPath));
+            var withClip = scenes.Count - missing;
+
+            if (withClip == 0)
+            {
+                var zoomPending = scenes.Count(s =>
+                    string.Equals(s?.ShowcaseClipTool, ShowcaseClipToolHelper.ToolZoom, StringComparison.Ordinal) &&
+                    (string.IsNullOrWhiteSpace(s?.ClipPath) || !File.Exists(s.ClipPath)));
+                var hint = zoomPending > 0
+                    ? " (có " + zoomPending + " cảnh Zoom — «Tạo clip Zoom»)"
+                    : string.Empty;
+                return ("«" + (video.ProductName ?? "?") + "» — bỏ ít nhất 1 clip vào veo_clips (cột «Cảnh»)" + hint + ".", false);
+            }
+
+            if (!ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(video, scenes))
+            {
+                if (ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes)
+                    && !ShowcaseVoiceoverHelper.IsVoiceoverSyncedToClips(video, scenes))
+                {
+                    return ("«" + (video.ProductName ?? "?") + "» — clip đã đổi hoặc thoại chỉ từ «Tạo kịch bản». Bấm «Tạo lời thoại» lại.", false);
+                }
+
+                var partial = missing > 0
+                    ? " (đã có " + withClip + "/" + scenes.Count + " clip — cảnh thiếu giữ thoại nháp)"
+                    : string.Empty;
+                return ("«" + (video.ProductName ?? "?") + "» — bấm «Tạo lời thoại»" + partial + ".", false);
+            }
+
+            if (missing > 0)
+            {
+                var zoomPending = scenes.Count(s =>
+                    string.Equals(s?.ShowcaseClipTool, ShowcaseClipToolHelper.ToolZoom, StringComparison.Ordinal) &&
+                    (string.IsNullOrWhiteSpace(s?.ClipPath) || !File.Exists(s.ClipPath)));
+                var hint = zoomPending > 0
+                    ? " (có " + zoomPending + " cảnh Zoom — «Tạo clip Zoom»)"
+                    : string.Empty;
+                return ("«" + (video.ProductName ?? "?") + "» thiếu clip " + missing + "/" + scenes.Count + " cảnh trước render" + hint + ".", false);
+            }
+
+            return ("«" + (video.ProductName ?? "?") + "» sẵn sàng render.", true);
+        }
+
+        private bool HasActiveShowcaseRenderJobs()
+        {
+            if (_globalJobQueue == null)
+            {
+                return false;
+            }
+
+            return _globalJobQueue.AllJobs.Any(j =>
+                j != null &&
+                j.Kind == OmniJobKind.AffiliateDeepRender &&
+                (j.Status == OmniJobStatus.Pending ||
+                 j.Status == OmniJobStatus.RetryPending ||
+                 j.Status == OmniJobStatus.Running ||
+                 j.Status == OmniJobStatus.Processing));
+        }
+
+        private static string BuildShowcaseApprovalScriptText(ShowcaseVideoItem video, IList<AiVideoGenInputItem> scenes)
+        {
+            var sb = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(video?.ShowcaseTheme))
+            {
+                sb.AppendLine("Theme: " + video.ShowcaseTheme.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(video?.ShowcaseHookText))
+            {
+                sb.AppendLine("Hook: " + video.ShowcaseHookText.Trim());
+            }
+
+            if (scenes != null)
+            {
+                for (var i = 0; i < scenes.Count; i++)
+                {
+                    var voice = scenes[i]?.SceneVoiceover?.Trim();
+                    if (string.IsNullOrWhiteSpace(voice))
+                    {
+                        continue;
+                    }
+
+                    sb.AppendLine("Scene " + (i + 1) + ": " + voice);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(video?.ShowcaseCtaText))
+            {
+                sb.AppendLine("CTA: " + video.ShowcaseCtaText.Trim());
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        private void UpdateShowcaseNarrationButtonState()
+        {
+            var hasNarration = TryResolveActiveShowcaseSessionBase(out var sessionBase)
+                && ShowcaseNarrationCacheHelper.HasNarrationFile(sessionBase);
+            _aiVideoGenControls?.SetShowcaseNarrationButtonMode(hasNarration);
+            _aiVideoGenControls?.SetShowcaseListenNarrationEnabled(hasNarration);
+        }
+
+        private bool TryResolveActiveShowcaseSessionBase(out string sessionBase)
+        {
+            sessionBase = null;
+            var video = GetActiveShowcaseVideo();
+            if (video == null)
+            {
+                return false;
+            }
+
+            var scenes = GetShowcaseVideoScenes(video);
+            sessionBase = _showcaseSession?.BaseDir;
+            if (string.IsNullOrWhiteSpace(sessionBase))
+            {
+                sessionBase = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(scenes);
+            }
+
+            return !string.IsNullOrWhiteSpace(sessionBase);
+        }
+
+        async Task IAiVideoGenControlsHost.GenerateShowcaseZoomClipsAsync()
+        {
+            if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                    "Chọn ít nhất một dòng video trên lưới rồi bấm «Tạo clip Zoom»."))
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+            string ffmpeg;
+            try
+            {
+                ffmpeg = await FfmpegToolkitService.EnsureAvailableAsync(settings, LogShowcase, ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Tạo clip Zoom", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg))
+            {
+                MessageBox.Show(this,
+                    "Không tìm thấy ffmpeg.exe — bấm «⬇ Tải FFmpeg» trong tab Cài đặt rồi thử lại.",
+                    "Tạo clip Zoom",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            for (var i = 0; i < videos.Count; i++)
+            {
+                ThrowIfShowcaseTabCancelled();
+                var video = videos[i];
+                ActivateShowcaseVideo(video, refreshStoryboard: false);
+                if (videos.Count > 1)
+                {
+                    LogShowcase("[Showcase] Zoom clip (" + (i + 1) + "/" + videos.Count + ") — «" + video.ProductName + "»");
+                }
+
+                await GenerateShowcaseZoomClipsForVideoAsync(video, settings, profile, ffmpeg).ConfigureAwait(true);
+            }
+
+            ActivateShowcaseVideo(videos[videos.Count - 1]);
+            SyncBuffersToGrids();
+        }
+
+        private async Task GenerateShowcaseZoomClipsForVideoAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile,
+            string ffmpegExecutable)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            if (scenes.Count == 0)
+            {
+                return;
+            }
+
+            var clipModeId = GetShowcaseClipModeForVideo(video);
+            if (!ShowcaseClipModePresets.ModeAllowsInAppZoom(clipModeId))
+            {
+                var modeLabel = ShowcaseClipModePresets.GetDisplayLabel(clipModeId);
+                MessageBox.Show(this,
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» — cột «Công cụ Video» đang là «" + modeLabel
+                    + "» (không có Zoom trong app).\r\n\r\n"
+                    + "Đổi sang chế độ có Zoom trong app (Veo + Zoom, Zoom + Kling, Chỉ Zoom, Gemini gợi ý…) rồi bấm «Tạo kịch bản» trước khi «Tạo clip Zoom».",
+                    "Tạo clip Zoom",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            var zoomScenes = scenes
+                .Select((scene, index) => new { scene, index })
+                .Where(x => x.scene != null &&
+                            string.Equals(x.scene.ShowcaseClipTool, ShowcaseClipToolHelper.ToolZoom, StringComparison.Ordinal))
+                .ToList();
+            if (zoomScenes.Count == 0)
+            {
+                MessageBox.Show(this,
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» không có cảnh gán công cụ Zoom.\r\n\r\n"
+                    + "Chạy «Tạo kịch bản» (hoặc sửa từng cảnh trong cột Prompt) để có cảnh clip_tool = Zoom, rồi thử lại.",
+                    "Tạo clip Zoom",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            var session = EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+            if (session == null || string.IsNullOrWhiteSpace(session.ClipsDir))
+            {
+                MessageBox.Show(this,
+                    "Không tạo được thư mục phiên Showcase (veo_clips) — kiểm tra «Storage root» trong Cài đặt.",
+                    "Tạo clip Zoom",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            BindShowcaseSessionToVideo(session, video);
+
+            try
+            {
+                await ShowcaseSessionService.DownloadSceneImagesAsync(session, scenes, LogShowcase, ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true);
+                Directory.CreateDirectory(session.ClipsDir);
+
+                var outputCanvas = GetShowcaseOutputCanvasForVideo(video, settings);
+                LogShowcase("[Showcase] Khung Zoom/render: " + outputCanvas.DisplayLabel);
+
+                var created = 0;
+                for (var i = 0; i < zoomScenes.Count; i++)
+                {
+                    ThrowIfShowcaseTabCancelled();
+                    var entry = zoomScenes[i];
+                    var scene = entry.scene;
+                    var sceneOrder = entry.index + 1;
+                    var imagePath = scene.ThumbnailPath;
+                    if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+                    {
+                        LogShowcase("[Showcase] Bỏ qua cảnh " + sceneOrder + " — chưa có ảnh local.");
+                        continue;
+                    }
+
+                    var zoomStyle = scene.ShowcaseZoomStyleId;
+                    if (string.IsNullOrWhiteSpace(zoomStyle))
+                    {
+                        zoomStyle = ShowcaseZoomStyleCatalog.ResolveStyleId(
+                            null,
+                            scene.ZoomHint,
+                            scene.ShowcaseImageKind,
+                            entry.index);
+                    }
+
+                    var tempOutput = Path.Combine(
+                        Path.GetTempPath(),
+                        "showcase_zoom_" + session.ProfileName + "_s" + sceneOrder.ToString("D2") + "_" + Guid.NewGuid().ToString("N") + ".mp4");
+                    var clipDuration = ShowcaseSceneDurationHelper.ResolveZoomClipDuration(scene);
+                    try
+                    {
+                        await ShowcaseZoomClipService.GenerateAsync(
+                            imagePath,
+                            tempOutput,
+                            entry.index,
+                            zoomStyle,
+                            ffmpegExecutable,
+                            LogShowcase,
+                            ShowcaseTabCancellationToken,
+                            clipDuration,
+                            outputCanvas).ConfigureAwait(true);
+
+                        var destPath = ShowcaseSessionService.CopyLocalSceneClip(
+                            session,
+                            sceneOrder,
+                            tempOutput,
+                            overwriteExisting: true);
+                        if (string.IsNullOrWhiteSpace(destPath))
+                        {
+                            LogShowcase("[Showcase] Không ghi được clip Zoom cảnh " + sceneOrder + " vào veo_clips.");
+                            continue;
+                        }
+
+                        scene.ClipPath = destPath;
+                        created++;
+                        LogShowcase("[Showcase] Clip Zoom cảnh " + sceneOrder + " ("
+                                    + ShowcaseSceneDurationHelper.FormatSecondsLog(clipDuration) + ") → "
+                                    + Path.GetFileName(destPath));
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (File.Exists(tempOutput))
+                            {
+                                File.Delete(tempOutput);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore temp cleanup
+                        }
+                    }
+                }
+
+                ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, scenes, LogShowcase);
+                video.RefreshDisplayFields();
+                RefreshAffiliateDeepStoryboard();
+                SyncBuffersToGrids();
+                NotifyShowcaseDraftDirty();
+                LogShowcase("[Showcase] Đã tạo " + created + " clip Zoom trong veo_clips: " + session.ClipsDir);
+            }
+            catch (Exception ex)
+            {
+                LogShowcase("[Showcase] Tạo clip Zoom lỗi («" + productName + "»): " + ex.Message);
+                MessageBox.Show(this, ex.Message, "Tạo clip Zoom", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private static void SyncShowcaseSessionFromVideo(ShowcaseSessionState session, ShowcaseVideoItem video)
+        {
+            if (session == null || video == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(video.ShowcaseTheme))
+            {
+                session.Theme = video.ShowcaseTheme.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(video.ShowcaseHookText))
+            {
+                session.HookText = video.ShowcaseHookText.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(video.ShowcaseCtaText))
+            {
+                session.CtaText = video.ShowcaseCtaText.Trim();
+            }
+        }
+
+        /// <summary>Tạo phiên mới nếu chưa có hoặc sản phẩm đã đổi — khôi phục từ dòng video/draft trước khi tạo folder mới.</summary>
+        private void LogShowcaseSessionRestoreOnce(string message, string baseDir)
+        {
+            var key = (baseDir ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(key))
+            {
+                LogShowcase(message);
+                return;
+            }
+
+            if (string.Equals(_showcaseSessionRestoreLogKey, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _showcaseSessionRestoreLogKey = key;
+            LogShowcase(message);
+        }
+
+        private ShowcaseSessionState EnsureShowcaseSession(string profile, string productName, string storageRoot, ShowcaseVideoItem video = null)
+        {
+            var resolvedProfile = ProfileScopedPaths.ResolveProfileName(profile);
+            var trimmedProduct = (productName ?? string.Empty).Trim();
+
+            if (video != null)
+            {
+                var fromVideo = ShowcaseSessionService.RestoreSession(
+                    resolvedProfile,
+                    trimmedProduct,
+                    video.ShowcaseSessionBaseDir,
+                    video.ShowcaseClipsDir);
+                if (fromVideo != null)
+                {
+                    SyncShowcaseSessionFromVideo(fromVideo, video);
+                    _showcaseSession = fromVideo;
+                    BindShowcaseSessionToVideo(_showcaseSession, video);
+                    LogShowcaseSessionRestoreOnce("[Showcase] Khôi phục phiên từ dòng video: " + _showcaseSession.BaseDir, _showcaseSession.BaseDir);
+                    return _showcaseSession;
+                }
+
+                if (!string.IsNullOrWhiteSpace(video.ShowcaseSessionBaseDir))
+                {
+                    var fromBase = ShowcaseSessionService.TryRestoreSessionFromBaseDir(
+                        resolvedProfile,
+                        trimmedProduct,
+                        video.ShowcaseSessionBaseDir);
+                    if (fromBase != null)
+                    {
+                        SyncShowcaseSessionFromVideo(fromBase, video);
+                        _showcaseSession = fromBase;
+                        BindShowcaseSessionToVideo(_showcaseSession, video);
+                        LogShowcaseSessionRestoreOnce(
+                            "[Showcase] Khôi phục phiên từ BaseDir dòng video: " + _showcaseSession.BaseDir,
+                            _showcaseSession.BaseDir);
+                        return _showcaseSession;
+                    }
+                }
+
+                if (video.Scenes.Count > 0)
+                {
+                    var imagesDir = ShowcaseSessionService.ResolveSceneImagesDirectory(GetShowcaseVideoScenes(video));
+                    var fromImages = ShowcaseSessionService.TryBuildSessionFromSceneImagesDirectory(
+                        resolvedProfile,
+                        trimmedProduct,
+                        imagesDir);
+                    if (fromImages != null)
+                    {
+                        SyncShowcaseSessionFromVideo(fromImages, video);
+                        _showcaseSession = fromImages;
+                        BindShowcaseSessionToVideo(_showcaseSession, video);
+                        LogShowcaseSessionRestoreOnce(
+                            "[Showcase] Khôi phục phiên từ thư mục ảnh storyboard: " + _showcaseSession.BaseDir,
+                            _showcaseSession.BaseDir);
+                        return _showcaseSession;
+                    }
+                }
+            }
+
+            if (_showcaseSession != null &&
+                string.Equals(_showcaseSession.ProductName, trimmedProduct, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(_showcaseSession.ProfileName, resolvedProfile, StringComparison.OrdinalIgnoreCase) &&
+                SessionMatchesVideoClipsDir(_showcaseSession, video))
+            {
+                SyncShowcaseSessionFromVideo(_showcaseSession, video);
+                BindShowcaseSessionToVideo(_showcaseSession, video);
+                return _showcaseSession;
+            }
+
+            var draftSession = ShowcaseDraftStore.ToSession(_showcaseDraftStore.Load().Session);
+            if (draftSession != null &&
+                string.Equals(draftSession.ProductName, trimmedProduct, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(draftSession.ProfileName, resolvedProfile, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(draftSession.ClipsDir) &&
+                Directory.Exists(draftSession.ClipsDir))
+            {
+                SyncShowcaseSessionFromVideo(draftSession, video);
+                _showcaseSession = draftSession;
+                BindShowcaseSessionToVideo(_showcaseSession, video);
+                LogShowcaseSessionRestoreOnce("[Showcase] Khôi phục phiên từ draft: " + _showcaseSession.BaseDir, _showcaseSession.BaseDir);
+                return _showcaseSession;
+            }
+
+            var sceneCount = video?.SceneCount ?? 0;
+            if (ShowcaseWorkflowConstants.HasEnoughScenes(sceneCount))
+            {
+                var recentSession = ShowcaseSessionService.TryFindRecentSessionWithClips(resolvedProfile, trimmedProduct, sceneCount);
+                if (recentSession != null)
+                {
+                    SyncShowcaseSessionFromVideo(recentSession, video);
+                    _showcaseSession = recentSession;
+                    BindShowcaseSessionToVideo(_showcaseSession, video);
+                    LogShowcase("[Showcase] Tìm thấy phiên có đủ clip: " + _showcaseSession.BaseDir);
+                    NotifyShowcaseDraftDirty();
+                    return _showcaseSession;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(storageRoot))
+            {
+                ProfileScopedPaths.SetConfiguredStorageRoot(storageRoot);
+            }
+
+            _showcaseSession = ShowcaseSessionService.CreateSession(profile, productName, storageRoot);
+            _showcaseSessionRestoreLogKey = string.Empty;
+            SyncShowcaseSessionFromVideo(_showcaseSession, video);
+            BindShowcaseSessionToVideo(_showcaseSession, video);
+            LogShowcase("[Showcase] Phiên làm việc mới: " + _showcaseSession.BaseDir);
+            NotifyShowcaseDraftDirty();
+            return _showcaseSession;
+        }
+
+        private static void BindShowcaseSessionToVideo(ShowcaseSessionState session, ShowcaseVideoItem video)
+        {
+            if (session == null || video == null)
+            {
+                return;
+            }
+
+            video.ShowcaseSessionBaseDir = session.BaseDir ?? string.Empty;
+            video.ShowcaseClipsDir = session.ClipsDir ?? string.Empty;
+        }
+
+        private static bool SessionMatchesVideoClipsDir(ShowcaseSessionState session, ShowcaseVideoItem video)
+        {
+            if (session == null)
+            {
+                return false;
+            }
+
+            var videoClipsDir = (video?.ShowcaseClipsDir ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(videoClipsDir))
+            {
+                return true;
+            }
+
+            return string.Equals(session.ClipsDir ?? string.Empty, videoClipsDir, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ApplyShowcaseSceneOrder(System.Collections.Generic.List<AiVideoGenInputItem> orderedScenes)
+        {
+            var video = GetActiveShowcaseVideo();
+            if (video == null || orderedScenes == null || orderedScenes.Count == 0)
+            {
+                return;
+            }
+
+            video.Scenes.Clear();
+            video.Scenes.AddRange(orderedScenes);
+            video.ApplySettingsToScenes();
+            video.RefreshDisplayFields();
+            NotifyShowcaseDraftDirty();
+        }
+
+        private void ShowShowcaseSceneEditDialog(AiVideoGenInputItem item)
+        {
+            if (item == null)
+            {
+                return;
+            }
+
+            var profile = GetRunningProfileName();
+            var productName = (item.ProductName ?? string.Empty).Trim();
+            var session = EnsureShowcaseSession(profile, productName, null, GetActiveShowcaseVideo());
+
+            using (var dlg = new Form
+            {
+                Text = "Sửa kịch bản Showcase",
+                StartPosition = FormStartPosition.CenterParent,
+                Size = new Size(760, 620),
+                BackColor = Color.FromArgb(31, 34, 42),
+                ForeColor = Color.Gainsboro,
+                MinimizeBox = false,
+                MaximizeBox = false
+            })
+            {
+                var layout = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 1,
+                    Padding = new Padding(12),
+                    RowCount = 9
+                };
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.Percent, 40F));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.Percent, 40F));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+                Label MakeLabel(string text) => new Label { Text = text, AutoSize = true, Margin = new Padding(0, 6, 0, 2), ForeColor = Color.FromArgb(200, 204, 214) };
+                TextBox MakeBox(string text, bool multiline = false) => new TextBox
+                {
+                    Text = text ?? string.Empty,
+                    Multiline = multiline,
+                    Dock = DockStyle.Fill,
+                    ScrollBars = multiline ? ScrollBars.Vertical : ScrollBars.None,
+                    BackColor = Color.FromArgb(45, 49, 60),
+                    ForeColor = Color.WhiteSmoke,
+                    BorderStyle = BorderStyle.FixedSingle
+                };
+
+                layout.Controls.Add(MakeLabel("Chủ đề video (cả session):"));
+                var txtTheme = MakeBox(session.Theme);
+                layout.Controls.Add(txtTheme);
+
+                layout.Controls.Add(MakeLabel("Hook mở đầu:"));
+                var txtHook = MakeBox(session.HookText);
+                layout.Controls.Add(txtHook);
+
+                layout.Controls.Add(MakeLabel("CTA kết thúc:"));
+                var txtCta = MakeBox(session.CtaText);
+                layout.Controls.Add(txtCta);
+
+                layout.Controls.Add(MakeLabel("Tên cảnh (vd. \"Chất vải cận cảnh\") — vai trò: " + (string.IsNullOrWhiteSpace(item.SceneRole) ? "(chưa có)" : item.SceneRole) + ":"));
+                var txtTitle = MakeBox(item.SceneTitle);
+                layout.Controls.Add(txtTitle);
+
+                layout.Controls.Add(MakeLabel("Voiceover cảnh này:"));
+                var txtVoiceover = MakeBox(item.SceneVoiceover, multiline: true);
+                layout.Controls.Add(txtVoiceover);
+
+                layout.Controls.Add(MakeLabel("Prompt Veo (I2V, tiếng Anh):"));
+                var txtVeoPrompt = MakeBox(item.VeoPrompt, multiline: true);
+                layout.Controls.Add(txtVeoPrompt);
+
+                var buttonPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true };
+                var btnCancel = new Button { Text = "Hủy", DialogResult = DialogResult.Cancel, Width = 100, Height = 30 };
+                var btnOk = new Button { Text = "Lưu", DialogResult = DialogResult.OK, Width = 100, Height = 30 };
+                buttonPanel.Controls.Add(btnCancel);
+                buttonPanel.Controls.Add(btnOk);
+                layout.Controls.Add(buttonPanel);
+
+                dlg.Controls.Add(layout);
+                dlg.AcceptButton = btnOk;
+                dlg.CancelButton = btnCancel;
+
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    session.Theme = txtTheme.Text.Trim();
+                    session.HookText = txtHook.Text.Trim();
+                    session.CtaText = txtCta.Text.Trim();
+                    item.SceneTitle = txtTitle.Text.Trim();
+                    item.SceneVoiceover = txtVoiceover.Text.Trim();
+                    item.VeoPrompt = txtVeoPrompt.Text.Trim();
+                    item.ShowcaseTheme = session.Theme;
+                    SyncShowcaseSessionSettingsAcrossScenes(item);
+
+                    RefreshAffiliateDeepStoryboard();
+                    SyncBuffersToGrids();
+                    RefreshAiVideoGenModeReadinessLabels();
+                    LogShowcase("[Showcase] Đã lưu chỉnh sửa kịch bản cảnh «" + (item.SceneTitle.Length > 0 ? item.SceneTitle : productName) + "».");
+                    NotifyShowcaseDraftDirty();
+                }
+            }
+        }
+
+        private AppSettings LoadShowcaseSettingsSnapshot()
+        {
+            try
+            {
+                return _configManager.LoadAsync().ConfigureAwait(true).GetAwaiter().GetResult() ?? new AppSettings();
+            }
+            catch
+            {
+                return new AppSettings();
+            }
+        }
+
+        private List<string> ResolveShowcaseRenderKeyBlockers(AppSettings settings = null)
+        {
+            settings = settings ?? LoadShowcaseSettingsSnapshot();
+            var blockers = new List<string>();
+            if (string.IsNullOrWhiteSpace(settings?.AiApiKey))
+            {
+                blockers.Add("AI API Key (Cài đặt — Whisper/phụ đề khi render)");
+            }
+
+            if (!TtsAvailabilityHelper.IsAnyShowcaseTtsConfigured(settings))
+            {
+                blockers.Add("TTS (Edge miễn phí hoặc ElevenLabs — tab Cài đặt)");
+            }
+
+            return blockers;
+        }
+
+        private bool ResolveShowcaseInfraReady(bool? ffmpegOk = null, bool? storageOk = null)
+        {
+            bool Ok(string key) => _systemHealth != null && _systemHealth.TryGetValue(key, out var value) && value;
+            if (ffmpegOk == null)
+            {
+                ffmpegOk = Ok("ffmpeg");
+            }
+
+            if (storageOk == null)
+            {
+                storageOk = Ok("storage");
+            }
+
+            return ffmpegOk.Value && storageOk.Value;
+        }
+
+        private bool ResolveShowcaseRenderButtonEnabled(bool? ffmpegOk = null, bool? storageOk = null)
+        {
+            if (!ResolveShowcaseInfraReady(ffmpegOk, storageOk))
+            {
+                return false;
+            }
+
+            if (ResolveShowcaseRenderKeyBlockers().Count > 0)
+            {
+                return false;
+            }
+
+            var videos = GetShowcaseSelectedVideosOrdered();
+            if (videos.Count == 0)
+            {
+                return GetShowcaseWorkflowStatus().Ready;
+            }
+
+            return videos.All(v => GetShowcaseWorkflowStatusForVideo(v).Ready);
+        }
+
+        private void UpdateShowcaseRenderButtonState(bool? ffmpegOk = null, bool? storageOk = null)
+        {
+            RefreshShowcaseStopButtonState();
+
+            if (_activeAffiliateDeepRenderJobId.HasValue || HasActiveShowcaseRenderJobs())
+            {
+                return;
+            }
+
+            if (btnRunAffiliateDeepVideo == null || btnRunAffiliateDeepVideo.IsDisposed)
+            {
+                return;
+            }
+
+            btnRunAffiliateDeepVideo.Enabled = ResolveShowcaseRenderButtonEnabled(ffmpegOk, storageOk);
+            UpdateShowcaseNarrationButtonState();
+        }
+    }
+}

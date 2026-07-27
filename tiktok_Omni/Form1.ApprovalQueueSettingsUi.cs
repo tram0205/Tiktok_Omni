@@ -10,8 +10,8 @@ namespace tiktok_Omni
         private static readonly Font ApprovalQueueBodyFont = AppInputFont;
         private static readonly Font ApprovalQueueTitleFont = AppGridHeaderFont;
         private static readonly Font ApprovalQueueButtonFont = new Font("Segoe UI", 12.5F, FontStyle.Bold);
-        private const int ApprovalQueueInputHeight = AppInputMinHeight;
-        private const int ApprovalQueueGridRowHeight = 30;
+        private const int ApprovalQueueInputHeight = AppDefaultInputHeight;
+        private const int ApprovalQueueGridRowHeight = AppDefaultRowHeight;
 
         private Panel pnlApprovalBehaviorHost;
         private bool _approvalBehaviorControlsInitialized;
@@ -198,14 +198,14 @@ namespace tiktok_Omni
             }
             else if (root is DataGridView grid)
             {
+                // Font control trước chrome — net472 OnFontChanged sau Controls.Add sẽ đè header nếu set Font sau.
                 grid.Font = ApprovalQueueBodyFont;
-                grid.RowTemplate.Height = ApprovalQueueGridRowHeight;
-                grid.ColumnHeadersHeight = AppGridHeaderHeight;
-                grid.ColumnHeadersDefaultCellStyle.Font = AppGridHeaderFont;
-                grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(6, 8, 6, 8);
-                grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-                grid.DefaultCellStyle.Font = ApprovalQueueBodyFont;
-                grid.DefaultCellStyle.Padding = new Padding(4, 2, 4, 2);
+                grid.DefaultCellStyle = new DataGridViewCellStyle(grid.DefaultCellStyle)
+                {
+                    Font = ApprovalQueueBodyFont,
+                    Padding = new Padding(4, 2, 4, 2)
+                };
+                ApplyAppGridChrome(grid);
             }
             else if (root is GroupBox groupBox)
             {

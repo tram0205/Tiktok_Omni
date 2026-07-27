@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services.Jobs
 {
@@ -164,6 +165,9 @@ namespace tiktok_Omni.Services.Jobs
 
     public sealed class AffiliateDeepRenderJobPayload
     {
+        /// <summary>Dòng lưới Showcase tương ứng job render (một video = một job).</summary>
+        public Guid ShowcaseVideoId { get; set; }
+
         public string ProfileName { get; set; } = "default";
         public string ProductName { get; set; } = string.Empty;
         public string Category { get; set; } = string.Empty;
@@ -173,5 +177,17 @@ namespace tiktok_Omni.Services.Jobs
         public bool UseMultiVoiceNarration { get; set; }
         public string AffiliateLink { get; set; } = string.Empty;
         public string ProductId { get; set; } = string.Empty;
+
+        /// <summary>Showcase: chủ đề (do người dùng nhập hoặc Gemini tự suy) — chỉ để log/hiển thị.</summary>
+        public string Theme { get; set; } = string.Empty;
+
+        /// <summary>Showcase: câu hook mở đầu (đọc + burn chữ 3s đầu).</summary>
+        public string HookText { get; set; } = string.Empty;
+
+        /// <summary>Showcase: câu CTA kết thúc (đọc + burn chữ 3s cuối).</summary>
+        public string CtaText { get; set; } = string.Empty;
+
+        /// <summary>Cài đặt render theo dòng video (phụ đề, nhạc, chuyển cảnh).</summary>
+        public ShowcasePerVideoRenderSettings RenderSettings { get; set; }
     }
 }

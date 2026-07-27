@@ -59,6 +59,9 @@ namespace tiktok_Omni
                     continue;
                 }
 
+                EnsureProfileComboIncludes(plan.Profile);
+                ApplyAutoPostScheduleProfileComboColumns();
+
                 if (!appliedUi)
                 {
                     ApplyVideoReupPlanToAutoPostUi(plan, published);
@@ -73,7 +76,8 @@ namespace tiktok_Omni
                     link:       plan.AffiliateLink ?? string.Empty,
                     profile:    plan.Profile ?? "default",
                     ytTitle:    plan.YouTubeTitle,
-                    ytDesc:     plan.YouTubeDescription);
+                    ytDesc:     StripHashtagsFromCaptionBody(plan.YouTubeDescription, plan.TikTokHashtags),
+                    hashtag:    plan.TikTokHashtags);
                 scheduleAdded += 3;
 
                 pushed++;
@@ -125,7 +129,7 @@ namespace tiktok_Omni
                 return string.Empty;
             }
 
-            var profile = ProfileScopedPaths.ResolveProfileName(row.ProfileName);
+            var profile = ResolveVideoReupRowProfileForAutoPost(row);
             ProfileScopedPaths.SetConfiguredStorageRoot(_storageRootPathCache);
 
             if (ProfileScopedPaths.IsUnderPublishingRoot(_storageRootPathCache, source))
@@ -163,7 +167,7 @@ namespace tiktok_Omni
                 return false;
             }
 
-            var profile = ProfileScopedPaths.ResolveProfileName(row.ProfileName);
+            var profile = ResolveVideoReupRowProfileForAutoPost(row);
             var folder = Path.GetDirectoryName(publishedVideoPath) ?? string.Empty;
             if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
             {
@@ -185,28 +189,26 @@ namespace tiktok_Omni
                 return false;
             }
 
-            var product = (row.ProductName ?? string.Empty).Trim();
-            var hook = (row.ReupHookDraft ?? string.Empty).Trim();
+            var rawProduct = (row.ProductName ?? string.Empty).Trim();
+            var shortLabel = VideoReupProductLabel.GetShortLabel(rawProduct);
+            var hook = VideoReupProductLabel.NormalizeHookText(
+                (row.ReupHookDraft ?? string.Empty).Trim(),
+                rawProduct,
+                shortLabel);
             var hashtags = (row.Hashtags ?? string.Empty).Trim();
-            var captionBody = string.IsNullOrWhiteSpace(hook)
-                ? product
-                : (string.IsNullOrWhiteSpace(product) ? hook : product + Environment.NewLine + Environment.NewLine + hook).Trim();
+            var captionBody = BuildVideoReupAutoPostCaptionBody(row, rawProduct, shortLabel, hook);
 
             if (string.IsNullOrWhiteSpace(captionBody))
             {
-                captionBody = product;
-            }
-
-            if (string.IsNullOrWhiteSpace(captionBody))
-            {
-                error = "«" + (row.ProductName ?? "?") + "»: thiếu tên sản phẩm / hook để tạo caption đăng.";
+                error = "«" + (row.ProductName ?? "?") + "»: thiếu hook / script để tạo caption đăng.";
                 return false;
             }
 
             var tikTokCaption = BuildFinalAutoPostCaptionBody(captionBody, hashtags);
             var facebookCaption = BuildFinalAutoPostCaptionBody(captionBody, hashtags);
-            var youtubeTitle = product;
-            if (string.IsNullOrWhiteSpace(youtubeTitle))
+            var youtubeTitle = shortLabel;
+            if (string.IsNullOrWhiteSpace(youtubeTitle) ||
+                string.Equals(youtubeTitle, "sản phẩm này", StringComparison.OrdinalIgnoreCase))
             {
                 youtubeTitle = hook;
             }
@@ -214,6 +216,11 @@ namespace tiktok_Omni
             if (youtubeTitle.Length > 60)
             {
                 youtubeTitle = youtubeTitle.Substring(0, 60).Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(youtubeTitle))
+            {
+                youtubeTitle = TruncateAutoPostTitle(captionBody, 60);
             }
 
             if (string.IsNullOrWhiteSpace(youtubeTitle))
@@ -365,6 +372,17 @@ namespace tiktok_Omni
             }
         }
 
+        private string ResolveVideoReupRowProfileForAutoPost(VideoReupRowItem row)
+        {
+            var fromRow = (row?.ProfileName ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(fromRow))
+            {
+                return ProfileScopedPaths.ResolveProfileName(fromRow);
+            }
+
+            return ProfileScopedPaths.ResolveProfileName(GetRunningProfileName());
+        }
+
         private static string StripHashtagsFromCaptionBody(string caption, string hashtags)
         {
             var body = (caption ?? string.Empty).Trim();
@@ -380,6 +398,53 @@ namespace tiktok_Omni
             }
 
             return body;
+        }
+
+        /// <summary>Caption đăng từ reup: ưu tiên hook/script, không dùng tiêu đề TikTok dài.</summary>
+        private static string BuildVideoReupAutoPostCaptionBody(
+            VideoReupRowItem row,
+            string rawProduct,
+            string shortLabel,
+            string hook)
+        {
+            if (row == null)
+            {
+                return string.Empty;
+            }
+
+            if (row.IsNarrationScriptMode)
+            {
+                var script = VideoReupProductLabel.NormalizeScriptText(
+                    (row.ReupNarrationScript ?? string.Empty).Trim(),
+                    rawProduct,
+                    shortLabel);
+                if (!string.IsNullOrWhiteSpace(script))
+                {
+                    if (!string.IsNullOrWhiteSpace(hook))
+                    {
+                        return hook + Environment.NewLine + Environment.NewLine + script;
+                    }
+
+                    return script;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(hook))
+            {
+                return hook;
+            }
+
+            return shortLabel;
+        }
+
+        private static string TruncateAutoPostTitle(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s))
+            {
+                return string.Empty;
+            }
+
+            return s.Length <= max ? s : s.Substring(0, max).TrimEnd();
         }
     }
 }

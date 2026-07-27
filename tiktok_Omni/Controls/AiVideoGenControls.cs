@@ -13,12 +13,30 @@ namespace tiktok_Omni.Controls
         private static readonly Font JellyFont = new Font("Segoe UI", 10.25F, FontStyle.Bold);
         private const int JellyMinHeight = 32;
 
+        private static readonly Color ShowcaseTintNeutral = Color.FromArgb(68, 72, 86);
+        private static readonly Color ShowcaseTintAddRow = Color.FromArgb(52, 92, 158);
+        private static readonly Color ShowcaseTintScript = Color.FromArgb(108, 78, 192);
+        private static readonly Color ShowcaseTintZoom = Color.FromArgb(168, 118, 42);
+        private static readonly Color ShowcaseTintVoiceover = Color.FromArgb(36, 128, 138);
+        private static readonly Color ShowcaseTintAudio = Color.FromArgb(138, 58, 118);
+        private static readonly Color ShowcaseTintGemini = Color.FromArgb(78, 120, 166);
+        private static readonly Color ShowcaseTintExcel = Color.FromArgb(52, 158, 178);
+        private static readonly Color ShowcaseTintRender = Color.FromArgb(50, 110, 68);
+        private static readonly Color ShowcaseTintDanger = Color.FromArgb(168, 52, 52);
+        private static readonly Color ShowcaseTintStop = Color.FromArgb(192, 48, 48);
+        private static readonly Color ShowcaseTintContinue = Color.FromArgb(210, 118, 38);
+        private static readonly Padding ShowcaseJellyMargin = new Padding(4, 2, 4, 2);
+
         private IAiVideoGenControlsHost _host;
 
         private FlowLayoutPanel _flpSlideshowData;
         private FlowLayoutPanel _flpSlideshowExecute;
         private Panel _pnlSlideshowActionBar;
-        private FlowLayoutPanel _flpAffiliateDeepHeaderActions;
+        private Panel _pnlAffiliateDeepHeaderActions;
+        private FlowLayoutPanel _flpShowcaseRowManage;
+        private FlowLayoutPanel _flpShowcaseWorkflow;
+        private Panel _pnlAffiliateDeepExecuteActions;
+        private FlowLayoutPanel _flpSharedRenderParams;
 
         private Button _btnGenerateGeminiPrompt;
         private Button _btnReviewScriptBeforeRender;
@@ -32,10 +50,16 @@ namespace tiktok_Omni.Controls
         private Button _btnOpenOutputFolder;
         private Button _btnSlideshowOpenApproval;
         private Button _btnDeepGenerateScript;
-        private Button _btnDeepEditScript;
         private Button _btnRunAffiliateDeepVideo;
-        private Button _btnAffiliateDeepOpenOutput;
         private Button _btnDeepClearGrid;
+        private Button _btnShowcaseExportExcel;
+        private Button _btnShowcaseGenerateZoomClips;
+        private Button _btnShowcaseGenerateVoiceover;
+        private Button _btnShowcasePreviewNarration;
+        private Button _btnShowcaseListenNarration;
+        private ToolTip _showcaseToolTip;
+        private Button _btnShowcaseAddVideoRow;
+        private Button _btnShowcaseStop;
         private ComboBox _cbGeminiStyleTemplate;
         private CheckBox _chkUseMultiVoiceNarration;
         private NumericUpDown _numAiTextSize;
@@ -57,7 +81,11 @@ namespace tiktok_Omni.Controls
 
         public FlowLayoutPanel SlideshowExecuteFlow => _flpSlideshowExecute;
 
-        public FlowLayoutPanel AffiliateDeepHeaderActions => _flpAffiliateDeepHeaderActions;
+        public Panel AffiliateDeepHeaderActions => _pnlAffiliateDeepHeaderActions;
+
+        public Panel AffiliateDeepExecuteActions => _pnlAffiliateDeepExecuteActions;
+
+        public FlowLayoutPanel SharedRenderParamsPanel => _flpSharedRenderParams;
 
         public Button GenerateGeminiPromptButton => _btnGenerateGeminiPrompt;
 
@@ -83,9 +111,63 @@ namespace tiktok_Omni.Controls
 
         public Button DeepGenerateScriptButton => _btnDeepGenerateScript;
 
-        public Button DeepEditScriptButton => _btnDeepEditScript;
+        public Button DeepEditScriptButton => null;
 
-        public Button AffiliateDeepOpenOutputButton => _btnAffiliateDeepOpenOutput;
+        public Button AffiliateDeepOpenOutputButton => null;
+
+        public Button ShowcaseExportExcelButton => _btnShowcaseExportExcel;
+
+        public Button ShowcaseOpenClipsFolderButton => null;
+
+        public Button ShowcaseRefreshClipsButton => null;
+
+        public Button ShowcaseGenerateVoiceoverButton => _btnShowcaseGenerateVoiceover;
+
+        public Button ShowcasePreviewNarrationButton => _btnShowcasePreviewNarration;
+
+        public Button ShowcaseListenNarrationButton => _btnShowcaseListenNarration;
+
+        public Button ShowcaseAddLocalImagesButton => null;
+
+        public Button ShowcaseAddVideoRowButton => _btnShowcaseAddVideoRow;
+
+        public Button ShowcaseStopButton => _btnShowcaseStop;
+
+        public void ApplyShowcaseStopButtonUi(bool continueMode, bool enabled)
+        {
+            if (_btnShowcaseStop == null || _btnShowcaseStop.IsDisposed)
+            {
+                return;
+            }
+
+            _btnShowcaseStop.Text = continueMode ? "Tiếp tục" : "Dừng";
+            _btnShowcaseStop.Enabled = enabled;
+            if (_btnShowcaseStop is JellyButton jelly)
+            {
+                jelly.JellyTint = continueMode ? ShowcaseTintContinue : ShowcaseTintStop;
+                jelly.Invalidate();
+            }
+        }
+
+        public void SetShowcaseWorkflowButtonsEnabled(bool enabled)
+        {
+            SetButtonEnabled(_btnShowcaseAddVideoRow, enabled);
+            SetButtonEnabled(_btnDeepClearGrid, enabled);
+            SetButtonEnabled(_btnDeepGenerateScript, enabled);
+            SetButtonEnabled(_btnShowcaseExportExcel, enabled);
+            SetButtonEnabled(_btnShowcaseGenerateZoomClips, enabled);
+            SetButtonEnabled(_btnShowcaseGenerateVoiceover, enabled);
+            SetButtonEnabled(_btnShowcasePreviewNarration, enabled);
+            SetButtonEnabled(_btnShowcaseListenNarration, enabled);
+        }
+
+        private static void SetButtonEnabled(Button button, bool enabled)
+        {
+            if (button != null && !button.IsDisposed)
+            {
+                button.Enabled = enabled;
+            }
+        }
 
         public ComboBox GeminiStyleTemplateCombo => _cbGeminiStyleTemplate;
 
@@ -120,6 +202,37 @@ namespace tiktok_Omni.Controls
             }
 
             _cbGeminiStyleTemplate.SelectedItem = template;
+        }
+
+        public void SetShowcaseListenNarrationEnabled(bool enabled)
+        {
+            if (_btnShowcaseListenNarration == null || _btnShowcaseListenNarration.IsDisposed)
+            {
+                return;
+            }
+
+            _btnShowcaseListenNarration.Enabled = enabled;
+        }
+
+        public void SetShowcaseNarrationButtonMode(bool hasExistingNarration)
+        {
+            if (_btnShowcasePreviewNarration == null || _btnShowcasePreviewNarration.IsDisposed)
+            {
+                return;
+            }
+
+            if (hasExistingNarration)
+            {
+                _btnShowcasePreviewNarration.Text = "🔁 Tạo lại audio";
+                _showcaseToolTip?.SetToolTip(_btnShowcasePreviewNarration,
+                    "Xóa cache và gọi ElevenLabs lại từ kịch bản hiện tại — không qua Gemini. Dùng sau «✎ Sửa kịch bản» hoặc khi giọng đọc không ổn.");
+            }
+            else
+            {
+                _btnShowcasePreviewNarration.Text = "🎙 Tạo audio";
+                _showcaseToolTip?.SetToolTip(_btnShowcasePreviewNarration,
+                    "Tạo narration.mp3 — Edge TTS (miễn phí) hoặc ElevenLabs khi bấm.");
+            }
         }
 
         private void InitializeControls()
@@ -160,7 +273,7 @@ namespace tiktok_Omni.Controls
             _btnSaveAiVideoPrompt.Name = "btnSaveAiVideoPrompt";
             _btnSaveAiVideoPrompt.Click += (_, __) => _host?.SaveAiVideoPrompt();
 
-            _btnClearSlideshowGrid = CreateThemedUtilityButton("btnClearAiGenGrid", "🗑 Làm sạch", ButtonRole.Danger);
+            _btnClearSlideshowGrid = CreateThemedUtilityButton("btnClearAiGenGrid", "Xoá dòng", ButtonRole.Danger);
             _btnClearSlideshowGrid.Click += (_, __) => _host?.ClearActiveGrid();
 
             _btnProcessVideo = CreateProcessVideoButton();
@@ -234,40 +347,137 @@ namespace tiktok_Omni.Controls
                 Text = "Đa giọng đọc (Multi-voice)",
                 AutoSize = true,
                 ForeColor = Color.FromArgb(200, 204, 214),
-                Margin = new Padding(8, 8, 0, 0)
+                Margin = new Padding(0, 8, 0, 0)
             };
-            _flpSlideshowData.Controls.Add(_chkUseMultiVoiceNarration);
 
             _numAiTextSize = CreateNumeric("numAiTextSize", 24, 96, 50);
             _numAiMusicVolume = CreateNumeric("numAiMusicVolume", 0, 100, 14);
             _numAiTransitionDuration = CreateNumericDecimal("numAiTransitionDuration", 0.2M, 2.0M, 0.6M);
 
+            // Nhóm tham số render dùng chung — được gắn (remount) vào hàng Execute của Slideshow hoặc Showcase
+            // tuỳ theo tab đang chọn, để giá trị luôn hiển thị/chỉnh được ở cả hai nơi dùng chung 1 bộ settings.
+            _flpSharedRenderParams = CreateActionFlowPanel();
+            _flpSharedRenderParams.WrapContents = false;
+            _flpSharedRenderParams.Margin = new Padding(0);
+            _flpSharedRenderParams.Controls.Add(_chkUseMultiVoiceNarration);
+            _flpSharedRenderParams.Controls.Add(CreateMetricLabel("Cỡ chữ", leftPad: 10));
+            _flpSharedRenderParams.Controls.Add(_numAiTextSize);
+            _flpSharedRenderParams.Controls.Add(CreateMetricLabel("Âm lượng nhạc", leftPad: 8));
+            _flpSharedRenderParams.Controls.Add(_numAiMusicVolume);
+            _flpSharedRenderParams.Controls.Add(CreateMetricLabel("Chuyển cảnh (s)", leftPad: 8));
+            _flpSharedRenderParams.Controls.Add(_numAiTransitionDuration);
+
             _flpSlideshowExecute.Controls.Add(_btnAffiliateBatchPipeline);
             _flpSlideshowExecute.Controls.Add(_btnProcessVideo);
             _flpSlideshowExecute.Controls.Add(_btnOpenOutputFolder);
             _flpSlideshowExecute.Controls.Add(_btnSlideshowOpenApproval);
-            _flpSlideshowExecute.Controls.Add(CreateMetricLabel("Cỡ chữ"));
-            _flpSlideshowExecute.Controls.Add(_numAiTextSize);
-            _flpSlideshowExecute.Controls.Add(CreateMetricLabel("Âm lượng nhạc", leftPad: 8));
-            _flpSlideshowExecute.Controls.Add(_numAiMusicVolume);
-            _flpSlideshowExecute.Controls.Add(CreateMetricLabel("Chuyển cảnh (s)", leftPad: 8));
-            _flpSlideshowExecute.Controls.Add(_numAiTransitionDuration);
+            _flpSlideshowExecute.Controls.Add(_flpSharedRenderParams);
 
             _pnlSlideshowActionBar = BuildModeActionPanel(_flpSlideshowData, _flpSlideshowExecute);
 
-            _flpAffiliateDeepHeaderActions = CreateActionFlowPanel();
-            _btnDeepGenerateScript = CreateToolbarButton("Sinh Script", false, 110);
-            _btnDeepGenerateScript.Name = "btnDeepGenerateScript";
-            _btnDeepGenerateScript.BackColor = Color.FromArgb(78, 120, 166);
-            _btnDeepGenerateScript.Click += async (_, __) => await RunHostAsync(_btnDeepGenerateScript, h => h.GenerateAffiliateScriptAsync()).ConfigureAwait(true);
+            _pnlAffiliateDeepHeaderActions = new Panel
+            {
+                Name = "pnlAffiliateDeepHeaderActions",
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                MinimumSize = new Size(0, Form1.AppJellyButtonHeight + 8),
+                BackColor = Color.Transparent
+            };
+            _pnlAffiliateDeepHeaderActions.Resize += (_, __) => LayoutShowcaseHeaderToolbar();
+            _pnlAffiliateDeepExecuteActions = new Panel
+            {
+                Name = "pnlAffiliateDeepExecuteActions",
+                AutoSize = true,
+                MinimumSize = new Size(0, 104),
+                BackColor = Color.Transparent,
+                Padding = new Padding(0, 10, 0, 12)
+            };
 
-            _btnDeepEditScript = CreateToolbarButton("Sửa Script", false, 100);
-            _btnDeepEditScript.Name = "btnDeepEditScript";
-            _btnDeepEditScript.BackColor = Color.FromArgb(60, 64, 77);
-            _btnDeepEditScript.Click += async (_, __) => await RunHostAsync(_btnDeepEditScript, h => h.EditAffiliateScriptAsync()).ConfigureAwait(true);
+            _btnShowcaseAddVideoRow = CreateShowcaseSolidRectButton(
+                "btnShowcaseAddVideoRow",
+                "+ Thêm dòng",
+                ShowcaseTintAddRow,
+                118);
+            _btnShowcaseAddVideoRow.Click += (_, __) => _host?.AddShowcaseVideoRow();
 
-            _btnRunAffiliateDeepVideo = CreateToolbarButton("Render Affiliate chuyên sâu", true, 200);
-            _btnRunAffiliateDeepVideo.Name = "btnRunAffiliateDeepVideo";
+            _btnDeepClearGrid = CreateShowcaseSolidRectButton(
+                "btnDeepClearAiGenGrid",
+                "🗑 Xoá dòng",
+                ShowcaseTintDanger,
+                108);
+            _btnDeepClearGrid.Click += (_, __) => _host?.ClearActiveGrid();
+
+            _btnDeepGenerateScript = CreateShowcaseJellyButton("btnDeepGenerateScript", "📝 Tạo kịch bản", ShowcaseTintScript, 148);
+            _btnDeepGenerateScript.Click += async (_, __) => await RunHostAsync(_btnDeepGenerateScript, h => h.GenerateShowcaseSceneScriptAsync()).ConfigureAwait(true);
+
+            _btnShowcaseExportExcel = CreateShowcaseJellyButton("btnShowcaseExportExcel", "Tải excel prompt", ShowcaseTintExcel, 148);
+            _btnShowcaseExportExcel.Click += async (_, __) => await RunHostAsync(_btnShowcaseExportExcel, h => h.ExportShowcaseExcelAsync()).ConfigureAwait(true);
+
+            _btnShowcaseGenerateZoomClips = CreateShowcaseJellyButton("btnShowcaseGenerateZoomClips", "⚡ Tạo clip Zoom", ShowcaseTintZoom, 156);
+            _btnShowcaseGenerateZoomClips.Click += async (_, __) => await RunHostAsync(_btnShowcaseGenerateZoomClips, h => h.GenerateShowcaseZoomClipsAsync()).ConfigureAwait(true);
+
+            _btnShowcaseGenerateVoiceover = CreateShowcaseJellyButton(
+                "btnShowcaseGenerateVoiceover",
+                "💬 Tạo lời thoại",
+                ShowcaseTintVoiceover,
+                152);
+            _btnShowcaseGenerateVoiceover.Click += async (_, __) =>
+                await RunHostAsync(_btnShowcaseGenerateVoiceover, h => h.GenerateShowcaseVoiceoverAsync()).ConfigureAwait(true);
+
+            _btnShowcasePreviewNarration = CreateShowcaseJellyButton(
+                "btnShowcasePreviewNarration",
+                "🎙 Tạo audio",
+                ShowcaseTintAudio,
+                132);
+            _btnShowcasePreviewNarration.Click += async (_, __) =>
+                await RunHostAsync(_btnShowcasePreviewNarration, h => h.BuildShowcaseNarrationAsync()).ConfigureAwait(true);
+
+            _btnShowcaseListenNarration = CreateShowcaseJellyButton(
+                "btnShowcaseListenNarration",
+                "🔊 Nghe audio",
+                ShowcaseTintNeutral,
+                132);
+            _btnShowcaseListenNarration.Enabled = false;
+            _btnShowcaseListenNarration.Click += async (_, __) =>
+                await RunHostAsync(_btnShowcaseListenNarration, h => h.ListenShowcaseNarrationAsync()).ConfigureAwait(true);
+
+            _btnShowcaseStop = CreateShowcaseJellyButton("btnShowcaseStop", "Dừng", ShowcaseTintStop, 96);
+            _btnShowcaseStop.Enabled = false;
+            _btnShowcaseStop.Click += async (_, __) =>
+            {
+                if (_host == null)
+                {
+                    return;
+                }
+
+                _btnShowcaseStop.Enabled = false;
+                try
+                {
+                    await _host.HandleShowcaseStopResumeAsync().ConfigureAwait(true);
+                }
+                finally
+                {
+                    if (_btnShowcaseStop != null && !_btnShowcaseStop.IsDisposed)
+                    {
+                        _btnShowcaseStop.Enabled = true;
+                    }
+                }
+            };
+
+            _btnRunAffiliateDeepVideo = Form1.CreateAppPrimaryJellyButton(
+                "btnRunAffiliateDeepVideo",
+                "▶ Render video",
+                Color.FromArgb(22, 168, 86),
+                minWidth: 520,
+                margin: new Padding(0));
+            if (_btnRunAffiliateDeepVideo is JellyButton renderJelly)
+            {
+                renderJelly.JellyFillOpacity = 0.92f;
+                renderJelly.ForeColor = Color.FromArgb(255, 252, 240);
+            }
+
             _btnRunAffiliateDeepVideo.Click += async (_, __) =>
             {
                 if (_host == null)
@@ -275,21 +485,82 @@ namespace tiktok_Omni.Controls
                     return;
                 }
 
+                if (!_host.TryBeginShowcaseTabWork())
+                {
+                    return;
+                }
+
                 _btnRunAffiliateDeepVideo.Enabled = false;
-                await _host.RunAffiliateDeepVideoAsync().ConfigureAwait(true);
+                try
+                {
+                    await _host.RunAffiliateDeepVideoAsync().ConfigureAwait(true);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                finally
+                {
+                    _host.EndShowcaseTabWork();
+                }
             };
 
-            _btnAffiliateDeepOpenOutput = CreateThemedUtilityButton("btnAffiliateDeepOpenOutput", "📂 Output", ButtonRole.Neutral);
-            _btnAffiliateDeepOpenOutput.Click += async (_, __) => await RunHostAsync(_btnAffiliateDeepOpenOutput, h => h.OpenAffiliateDeepOutputFolderAsync()).ConfigureAwait(true);
+            _showcaseToolTip = new ToolTip { AutoPopDelay = 12000, InitialDelay = 300, ShowAlways = true };
+            _showcaseToolTip.SetToolTip(_btnDeepGenerateScript,
+                "Cần ít nhất 1 ảnh trên storyboard. Chọn «Công cụ Video» + «Loại SP · Chủ đề» — Gemini viết Hook/CTA, thoại nháp và prompt clip từ ảnh. "
+                + "Thoại chính thức: sau khi có clip → «Tạo lời thoại».");
+            _showcaseToolTip.SetToolTip(_btnShowcaseExportExcel,
+                "Xuất Excel (sheet «Clip Prompts»: loại ảnh, công cụ, prompt Veo/Kling, zoom gợi ý) — dùng tạo clip bên ngoài app.");
+            _showcaseToolTip.SetToolTip(_btnShowcaseGenerateZoomClips,
+                "Tạo clip Ken Burns trong app — thời lượng từng cảnh theo clip_duration_seconds (Gemini) / thoại cảnh, không cố định 6s.");
+            _showcaseToolTip.SetToolTip(_btnShowcaseGenerateVoiceover,
+                "Cần ít nhất 1 clip trong veo_clips (không bắt đủ mọi cảnh). Gemini xem clip có sẵn → viết lại Hook/thoại/CTA khớp hình. "
+                + "Bấm lại khi replace clip hoặc bổ sung cảnh thiếu.");
+            SetShowcaseNarrationButtonMode(hasExistingNarration: false);
+            _showcaseToolTip.SetToolTip(_btnShowcaseListenNarration,
+                "Mở file narration.mp3 đã tạo — nghe thử trước khi render (không gọi ElevenLabs lại).");
+            _showcaseToolTip.SetToolTip(_btnShowcaseAddVideoRow,
+                "Thêm một dòng video mới trên lưới — thêm ảnh bằng cột «Ảnh» (➕ Thêm ảnh) trên từng dòng.");
+            _showcaseToolTip.SetToolTip(_btnRunAffiliateDeepVideo,
+                "Cần đủ clip + thoại + audio (tab Âm thanh → «Audio thoại» → Tạo audio). Nghe thử ngay trên tab đó.");
+            _showcaseToolTip.SetToolTip(_btnShowcaseStop,
+                "Dừng mọi thao tác tab (Gemini, Zoom, audio, render). Sau đó bấm «Tiếp tục» (cam) để mở khóa — không tự chạy lại job đã hủy.");
 
-            _btnDeepClearGrid = CreateThemedUtilityButton("btnDeepClearAiGenGrid", "🗑 Làm sạch", ButtonRole.Danger);
-            _btnDeepClearGrid.Click += (_, __) => _host?.ClearActiveGrid();
+            // Một dòng: thêm/xoá trái; kịch bản → Zoom → lời thoại → audio căn giữa toolbar
+            _flpShowcaseRowManage = CreateActionFlowPanel();
+            _flpShowcaseRowManage.Dock = DockStyle.None;
+            _flpShowcaseRowManage.WrapContents = false;
+            _flpShowcaseRowManage.Controls.Add(_btnShowcaseAddVideoRow);
+            _flpShowcaseRowManage.Controls.Add(_btnDeepClearGrid);
 
-            _flpAffiliateDeepHeaderActions.Controls.Add(_btnDeepGenerateScript);
-            _flpAffiliateDeepHeaderActions.Controls.Add(_btnDeepEditScript);
-            _flpAffiliateDeepHeaderActions.Controls.Add(_btnRunAffiliateDeepVideo);
-            _flpAffiliateDeepHeaderActions.Controls.Add(_btnAffiliateDeepOpenOutput);
-            _flpAffiliateDeepHeaderActions.Controls.Add(_btnDeepClearGrid);
+            _flpShowcaseWorkflow = CreateActionFlowPanel();
+            _flpShowcaseWorkflow.Dock = DockStyle.None;
+            _flpShowcaseWorkflow.WrapContents = false;
+            _flpShowcaseWorkflow.Controls.Add(_btnDeepGenerateScript);
+            _flpShowcaseWorkflow.Controls.Add(_btnShowcaseGenerateZoomClips);
+            _flpShowcaseWorkflow.Controls.Add(_btnShowcaseGenerateVoiceover);
+            _btnShowcasePreviewNarration.Visible = false;
+            _flpShowcaseWorkflow.Controls.Add(_btnShowcaseStop);
+
+            _pnlAffiliateDeepHeaderActions.Controls.Add(_flpShowcaseRowManage);
+            _pnlAffiliateDeepHeaderActions.Controls.Add(_flpShowcaseWorkflow);
+            LayoutShowcaseHeaderToolbar();
+
+            // Hàng 2 — render (nút primary căn giữa)
+            var tblRenderCenter = new TableLayoutPanel
+            {
+                Name = "tblShowcaseRenderCenter",
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0)
+            };
+            tblRenderCenter.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            tblRenderCenter.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            tblRenderCenter.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            tblRenderCenter.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tblRenderCenter.Controls.Add(_btnRunAffiliateDeepVideo, 1, 0);
+            _pnlAffiliateDeepExecuteActions.Controls.Add(tblRenderCenter);
         }
 
         private async Task RunHostAsync(Button button, Func<IAiVideoGenControlsHost, Task> action)
@@ -299,18 +570,56 @@ namespace tiktok_Omni.Controls
                 return;
             }
 
+            if (!_host.TryBeginShowcaseTabWork())
+            {
+                return;
+            }
+
             button.Enabled = false;
             try
             {
                 await action(_host).ConfigureAwait(true);
             }
+            catch (OperationCanceledException)
+            {
+            }
             finally
             {
-                if (button != null && !button.IsDisposed)
+                _host.EndShowcaseTabWork();
+                if (button != null && !button.IsDisposed && !_host.IsShowcaseTabPaused)
                 {
                     button.Enabled = true;
                 }
             }
+        }
+
+        private void LayoutShowcaseHeaderToolbar()
+        {
+            if (_pnlAffiliateDeepHeaderActions == null
+                || _flpShowcaseRowManage == null
+                || _flpShowcaseWorkflow == null)
+            {
+                return;
+            }
+
+            var host = _pnlAffiliateDeepHeaderActions;
+            if (host.Width <= 0 || host.Height <= 0)
+            {
+                return;
+            }
+
+            _flpShowcaseRowManage.PerformLayout();
+            _flpShowcaseWorkflow.PerformLayout();
+
+            var manageY = Math.Max(0, (host.ClientSize.Height - _flpShowcaseRowManage.Height) / 2);
+            _flpShowcaseRowManage.Location = new Point(0, manageY);
+
+            var workflowY = Math.Max(0, (host.ClientSize.Height - _flpShowcaseWorkflow.Height) / 2);
+            var workflowX = Math.Max(0, (host.ClientSize.Width - _flpShowcaseWorkflow.Width) / 2);
+            _flpShowcaseWorkflow.Location = new Point(workflowX, workflowY);
+
+            _flpShowcaseRowManage.BringToFront();
+            _flpShowcaseWorkflow.BringToFront();
         }
 
         private static FlowLayoutPanel CreateActionFlowPanel()
@@ -354,6 +663,63 @@ namespace tiktok_Omni.Controls
             tbl.Controls.Add(executeRow, 0, 1);
             host.Controls.Add(tbl);
             return host;
+        }
+
+        private static JellyButton CreateShowcaseJellyButton(string name, string text, Color tint, int minWidth)
+        {
+            return Form1.CreateAppJellyButton(
+                name,
+                text,
+                tint,
+                minWidth: minWidth,
+                margin: ShowcaseJellyMargin);
+        }
+
+        /// <summary>Nút chữ nhật đặc (không jelly trong suốt) — dùng cho Thêm/Xoá dòng.</summary>
+        private static Button CreateShowcaseSolidRectButton(string name, string text, Color back, int minWidth)
+        {
+            var height = Form1.AppJellyButtonHeight;
+            var textW = TextRenderer.MeasureText(
+                text,
+                JellyFont,
+                new Size(int.MaxValue, height),
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width;
+            var width = Math.Max(minWidth, textW + 28);
+
+            var btn = new Button
+            {
+                Name = name,
+                Text = text,
+                Font = JellyFont,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = back,
+                ForeColor = Color.FromArgb(245, 247, 250),
+                AutoSize = false,
+                Height = height,
+                Width = width,
+                MinimumSize = new Size(width, height),
+                MaximumSize = new Size(width, height),
+                Margin = ShowcaseJellyMargin,
+                Cursor = Cursors.Hand,
+                TextAlign = ContentAlignment.MiddleCenter,
+                UseVisualStyleBackColor = false
+            };
+
+            var border = ControlPaint.Dark(back);
+            btn.FlatAppearance.BorderSize = 1;
+            btn.FlatAppearance.BorderColor = border;
+            btn.FlatAppearance.MouseOverBackColor = BlendColor(back, Color.White, 0.12f);
+            btn.FlatAppearance.MouseDownBackColor = ControlPaint.DarkDark(back);
+            return btn;
+        }
+
+        private static Color BlendColor(Color baseColor, Color overlay, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            var r = (int)(baseColor.R + (overlay.R - baseColor.R) * amount);
+            var g = (int)(baseColor.G + (overlay.G - baseColor.G) * amount);
+            var b = (int)(baseColor.B + (overlay.B - baseColor.B) * amount);
+            return Color.FromArgb(baseColor.A, r, g, b);
         }
 
         private static Button CreateToolbarButton(string text, bool executeStyle, int minWidth)

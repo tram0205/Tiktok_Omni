@@ -66,10 +66,10 @@ namespace tiktok_Omni.Services.Mascot
                 log?.Invoke($"[Mascot Render] Cảnh {scene.Order}/{scenes.Count}…");
 
                 var audioPath = Path.Combine(sceneDir, "voiceover.mp3");
-                await GoogleCloudTextToSpeechService.SynthesizeVietnameseFemaleToMp3Async(
+                var edge = new EdgeTtsService();
+                await edge.SynthesizeVietnameseFemaleToMp3Async(
                     scene.Voiceover,
                     audioPath,
-                    settings.TtsApiKey,
                     log,
                     cancellationToken).ConfigureAwait(false);
 

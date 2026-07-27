@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using tiktok_Omni.Services.Showcase;
+
 namespace tiktok_Omni.Services
 {
     public class AiVideoGenInputItem
@@ -28,6 +30,81 @@ namespace tiktok_Omni.Services
         public string OutputVideoPath { get; set; } = string.Empty;
         public string ScriptPreview { get; set; } = string.Empty;
         public string Category { get; set; } = string.Empty;
+
+        /// <summary>Showcase: vai trò phân cảnh do Gemini gán (pain/agitate/solve/cta hoặc attention/interest/desire/action).</summary>
+        public string SceneRole { get; set; } = string.Empty;
+
+        /// <summary>Showcase: tên ngắn của phân cảnh (vd. "Chất vải cận cảnh") hiển thị trên storyboard.</summary>
+        public string SceneTitle { get; set; } = string.Empty;
+
+        /// <summary>Showcase: lời thoại riêng cho phân cảnh này, do Gemini viết.</summary>
+        public string SceneVoiceover { get; set; } = string.Empty;
+
+        /// <summary>Chữ phụ đề cảnh — để trống = hiện đủ <see cref="SceneVoiceover"/> (TTS không đổi).</summary>
+        public string ShowcaseSubtitleDisplayVoiceover { get; set; } = string.Empty;
+
+        /// <summary>Hiệu ứng dòng trên tab Chữ hiển thị — rỗng = tab Kiểu chữ (thân).</summary>
+        public string ShowcaseSubtitleDisplayAnimation { get; set; } = string.Empty;
+
+        /// <summary>Showcase: đường dẫn đầy đủ file ảnh khi user chọn từ máy (trước khi copy vào source_images).</summary>
+        public string ShowcaseLocalPickPath { get; set; } = string.Empty;
+
+        /// <summary>Showcase: cảnh im lặng — chỉ hình + nhạc, không TTS (Gemini gợi ý silent).</summary>
+        public bool ShowcaseSceneSilent { get; set; }
+
+        /// <summary>Showcase: prompt tiếng Anh dùng để tạo clip Veo (I2V) cho phân cảnh này.</summary>
+        public string VeoPrompt { get; set; } = string.Empty;
+
+        /// <summary>Showcase: loại ảnh cảnh — flatlay hoặc on_model (do Gemini gán).</summary>
+        public string ShowcaseImageKind { get; set; } = string.Empty;
+
+        /// <summary>Showcase: công cụ tạo clip — veo, zoom hoặc kling.</summary>
+        public string ShowcaseClipTool { get; set; } = string.Empty;
+
+        /// <summary>Showcase: prompt tiếng Anh cho Kling I2V (cảnh on-model).</summary>
+        public string KlingPrompt { get; set; } = string.Empty;
+
+        /// <summary>Showcase: gợi ý chuyển động Zoom Ken Burns (tiếng Anh ngắn).</summary>
+        public string ZoomHint { get; set; } = string.Empty;
+
+        /// <summary>Showcase: preset zoom FFmpeg — push_in, pan_left, drift, … (<see cref="ShowcaseZoomStyleCatalog"/>).</summary>
+        public string ShowcaseZoomStyleId { get; set; } = string.Empty;
+
+        /// <summary>Showcase: thời lượng clip gợi ý (giây) — Gemini / ước từ thoại; dùng cho clip Zoom FFmpeg.</summary>
+        public double ShowcaseClipDurationSeconds { get; set; }
+
+        /// <summary>Showcase: đường dẫn clip Veo đã tạo tay, khớp phân cảnh này (vd. veo_clips\scene_02.mp4).</summary>
+        public string ClipPath { get; set; } = string.Empty;
+
+        /// <summary>Showcase: chủ đề tuỳ chọn (Gemini tự suy nếu để trống) — dùng chung cả phiên, lưu trên dòng đầu lưới.</summary>
+        public string ShowcaseTheme { get; set; } = string.Empty;
+
+        /// <summary>Showcase: bật đa giọng đọc khi render — dùng chung cả phiên.</summary>
+        public bool ShowcaseMultiVoice { get; set; }
+
+        /// <summary>Showcase: cỡ chữ overlay khi render.</summary>
+        public int ShowcaseTextSize { get; set; } = 50;
+
+        /// <summary>Showcase: âm lượng nhạc nền (0–100) khi render.</summary>
+        public int ShowcaseMusicVolume { get; set; } = 14;
+
+        /// <summary>Showcase: thời gian chuyển cảnh (giây) khi render.</summary>
+        public double ShowcaseTransitionSeconds { get; set; } = 0.6;
+
+        /// <summary>Showcase: file SFX (tên trong Showcase\Sfx hoặc id Gemini).</summary>
+        public string ShowcaseSfxFile { get; set; } = string.Empty;
+
+        public bool ShowcaseSfxEnabled { get; set; } = true;
+
+        /// <summary>scene_start | scene_middle | scene_end</summary>
+        public string ShowcaseSfxPlacement { get; set; } = ShowcaseSfxCatalog.PlacementSceneStart;
+
+        public double ShowcaseSfxOffsetSeconds { get; set; }
+
+        public int ShowcaseSfxVolumePercent { get; set; }
+
+        /// <summary>Gợi ý ngắn từ Gemini — chỉ hiển thị UI.</summary>
+        public string ShowcaseSfxGeminiHint { get; set; } = string.Empty;
 
         public void SetCustomerReviews(IEnumerable<string> reviews)
         {
