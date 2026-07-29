@@ -614,66 +614,59 @@ namespace tiktok_Omni
             UpdateShowcaseRenderButtonState();
         }
 
-        private async Task<bool> TryEnqueueShowcaseRenderForVideoAsync(ShowcaseVideoItem video, AppSettings settings, string profile)
+        async Task IAiVideoGenControlsHost.PreviewShowcaseOverviewAsync()
         {
-            var scenes = GetShowcaseVideoScenes(video);
-            if (!ShowcaseWorkflowConstants.HasEnoughScenes(scenes.Count))
+            if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
+                    "Chọn một dòng video trên lưới rồi bấm «Tổng quan»."))
             {
-                LogShowcase("Showcase: «" + video.ProductName + "» cần ít nhất 1 ảnh trên storyboard.");
-                return false;
+                return;
             }
 
-            var firstName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
-            if (scenes.Any(x => !string.Equals((x?.ProductName ?? string.Empty).Trim(), firstName, StringComparison.OrdinalIgnoreCase)))
-            {
-                LogShowcase("Showcase: «" + firstName + "» — các cảnh phải cùng tên sản phẩm.");
-                return false;
-            }
-
-            if (_showcaseSession == null || !string.Equals(_showcaseSession.ProductName, firstName, StringComparison.OrdinalIgnoreCase))
-            {
-                EnsureShowcaseSession(profile, firstName, settings.StorageRootPath, video);
-            }
-
-            if (_showcaseSession == null)
+            if (videos.Count > 1)
             {
                 MessageBox.Show(this,
-                    "«" + firstName + "» chưa có phiên Showcase. Hãy bấm «Tạo kịch bản» rồi «Tải excel prompt» (bảng Prompt) trước khi Render.",
-                    "Render video",
+                    "«Tổng quan» chỉ xem một video/lần. Chọn đúng một dòng (bỏ Ctrl+click các dòng khác).",
+                    "Tổng quan",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
-                return false;
+                return;
             }
 
-            var missingClips = ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, LogShowcase);
-            video.RefreshDisplayFields();
-            SyncBuffersToGrids();
-            RefreshAiVideoGenModeReadinessLabels();
-            if (missingClips.Count > 0)
-            {
-                LogShowcase("Showcase: «" + firstName + "» thiếu clip Veo cảnh " + string.Join(", ", missingClips));
-                MessageBox.Show(this,
-                    "«" + firstName + "» thiếu clip Veo cảnh: " + string.Join(", ", missingClips) +
-                    ".\r\n\r\nHãy tạo clip Veo (theo Excel prompt đã tải), đặt tên scene_0" + missingClips[0] +
-                    ".mp4 (...) rồi bỏ vào thư mục veo_clips trước khi Render.",
-                    "Thiếu clip Veo",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                return false;
-            }
+            var video = videos[0];
+            ActivateShowcaseVideo(video, refreshStoryboard: false);
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+            ShowShowcaseRenderOverviewForVideo(video, settings, profile);
+            await Task.CompletedTask.ConfigureAwait(true);
+        }
 
-            if (!ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(video, scenes))
-            {
-                var synced = ShowcaseVoiceoverHelper.IsVoiceoverSyncedToClips(video, scenes);
-                var hasText = ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes);
-                LogShowcase("Showcase: «" + firstName + "» chưa có thoại khớp clip — bấm «Tạo lời thoại» trước khi Render.");
-                var body = hasText && !synced
-                    ? "«" + firstName + "» có thoại nháp (ảnh) hoặc clip đã thay — cần «Tạo lời thoại» lại sau khi clip ổn.\r\n\r\nGemini sẽ xem clip và căn độ dài thoại."
-                    : "«" + firstName + "» chưa có lời thoại khớp clip.\r\n\r\nBấm «Tạo lời thoại» khi đã có ít nhất 1 clip — không cần đủ mọi cảnh; Gemini căn theo clip có sẵn.";
-                MessageBox.Show(this, body, "Chưa có thoại khớp clip", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return false;
-            }
+        private sealed class ShowcaseRenderPlan
+        {
+            public List<AiVideoGenInputItem> Scenes { get; set; }
 
+            public string FirstName { get; set; }
+
+            public string Category { get; set; }
+
+            public string HookText { get; set; }
+
+            public string CtaText { get; set; }
+
+            public string Theme { get; set; }
+
+            public ShowcasePerVideoRenderSettings RenderSettings { get; set; }
+
+            public AssSubtitleGeneratorOptions SubtitleOptions { get; set; }
+        }
+
+        private async Task<ShowcaseRenderPlan> BuildShowcaseRenderPlanCoreAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile,
+            List<AiVideoGenInputItem> scenes,
+            string firstName)
+        {
             if (numAiTransitionDuration != null)
             {
                 settings.VideoTransitionDurationSeconds = (double)numAiTransitionDuration.Value;
@@ -696,6 +689,83 @@ namespace tiktok_Omni
                 category = "Showcase";
             }
 
+            ScoreAndApplyAiVideoGenSafety(scenes, txtAiVideoGenPrompt?.Text?.Trim());
+
+            var subtitleOptions = ShowcaseSubtitleStyleHelper.BuildOptions(renderSettings, settings);
+            var hookText = !string.IsNullOrWhiteSpace(video.ShowcaseHookText)
+                ? video.ShowcaseHookText
+                : (_showcaseSession?.HookText ?? string.Empty);
+            var ctaText = !string.IsNullOrWhiteSpace(video.ShowcaseCtaText)
+                ? video.ShowcaseCtaText
+                : (_showcaseSession?.CtaText ?? string.Empty);
+
+            return new ShowcaseRenderPlan
+            {
+                Scenes = scenes,
+                FirstName = firstName,
+                Category = category,
+                HookText = hookText ?? string.Empty,
+                CtaText = ctaText ?? string.Empty,
+                Theme = _showcaseSession?.Theme ?? string.Empty,
+                RenderSettings = renderSettings,
+                SubtitleOptions = subtitleOptions
+            };
+        }
+
+        private async Task<ShowcaseRenderPlan> TryBuildShowcaseRenderPlanAsync(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            string profile)
+        {
+            var scenes = GetShowcaseVideoScenes(video);
+            if (!ShowcaseWorkflowConstants.HasEnoughScenes(scenes.Count))
+            {
+                return null;
+            }
+
+            var firstName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            if (scenes.Any(x => !string.Equals((x?.ProductName ?? string.Empty).Trim(), firstName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            if (_showcaseSession == null || !string.Equals(_showcaseSession.ProductName, firstName, StringComparison.OrdinalIgnoreCase))
+            {
+                EnsureShowcaseSession(profile, firstName, settings.StorageRootPath, video);
+            }
+
+            if (_showcaseSession != null)
+            {
+                ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, LogShowcase);
+                video.RefreshDisplayFields();
+                SyncBuffersToGrids();
+                RefreshAiVideoGenModeReadinessLabels();
+            }
+
+            return await BuildShowcaseRenderPlanCoreAsync(video, settings, profile, scenes, firstName).ConfigureAwait(true);
+        }
+
+        private async Task<bool> TryEnqueueShowcaseRenderForVideoAsync(ShowcaseVideoItem video, AppSettings settings, string profile)
+        {
+            var blockers = CollectShowcaseRenderBlockers(video, settings, profile);
+            if (blockers.Count > 0)
+            {
+                ShowShowcaseRenderBlockersMessage(blockers);
+                return false;
+            }
+
+            var plan = await TryBuildShowcaseRenderPlanAsync(video, settings, profile).ConfigureAwait(true);
+            if (plan == null)
+            {
+                ShowShowcaseRenderBlockersMessage(new List<string> { "Không chuẩn bị được dữ liệu render — kiểm tra storyboard và thử lại." });
+                return false;
+            }
+
+            var scenes = plan.Scenes;
+            var firstName = plan.FirstName;
+            var renderSettings = plan.RenderSettings;
+            var category = plan.Category;
+
             foreach (var item in scenes)
             {
                 if (item != null)
@@ -706,7 +776,6 @@ namespace tiktok_Omni
             }
 
             video.PipelineStatus = "Đang render";
-            ScoreAndApplyAiVideoGenSafety(scenes, txtAiVideoGenPrompt?.Text?.Trim());
 
             if (btnProcessVideo != null)
             {
@@ -742,13 +811,9 @@ namespace tiktok_Omni
                     SafetyScore = scenes[0]?.SafetyScore ?? 100,
                     AffiliateLink = scenes[0]?.AffiliateLink ?? string.Empty,
                     ProductId = scenes[0]?.ProductId ?? string.Empty,
-                    Theme = _showcaseSession.Theme ?? string.Empty,
-                    HookText = !string.IsNullOrWhiteSpace(video.ShowcaseHookText)
-                        ? video.ShowcaseHookText
-                        : (_showcaseSession.HookText ?? string.Empty),
-                    CtaText = !string.IsNullOrWhiteSpace(video.ShowcaseCtaText)
-                        ? video.ShowcaseCtaText
-                        : (_showcaseSession.CtaText ?? string.Empty),
+                    Theme = plan.Theme ?? string.Empty,
+                    HookText = plan.HookText ?? string.Empty,
+                    CtaText = plan.CtaText ?? string.Empty,
                     RenderSettings = renderSettings
                 }),
                 MaxRetries = 1,

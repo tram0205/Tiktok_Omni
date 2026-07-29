@@ -90,29 +90,23 @@ namespace tiktok_Omni.Services.Showcase
             video.ShowcaseMusicLabel = FormatMusicSummary(
                 video.ShowcaseBackgroundMusicFile,
                 video.ShowcaseMusicVolume,
-                video.ShowcaseNarrationSpeedPercent,
-                video.ShowcaseTtsEngine,
-                video.ShowcaseVoicePresetId,
-                video.ShowcaseVoiceAgeId,
-                video.ShowcaseVoiceLanguageId,
                 video);
         }
 
         public static string FormatMusicSummary(
             string musicFile,
             int volumePercent,
-            int narrationSpeedPercent = 0,
-            string ttsEngine = null,
-            string voicePresetId = null,
-            string voiceAgeId = null,
-            string voiceLanguageId = null,
-            ShowcaseVideoItem sfxSource = null)
+            ShowcaseVideoItem speedAndSfxSource = null)
         {
             var pick = (musicFile ?? string.Empty).Trim();
             var vol = volumePercent < 0 ? 0 : Math.Min(100, volumePercent);
-            var speedSuffix = FormatNarrationSpeedSummary(narrationSpeedPercent);
-            var voiceSuffix = FormatVoiceSummary(ttsEngine, voicePresetId, voiceAgeId, voiceLanguageId);
-            var sfxSuffix = FormatSfxSummary(sfxSource);
+            var speedSuffix = FormatNarrationSpeedSummary(speedAndSfxSource);
+            var voiceSuffix = FormatVoiceSummary(
+                speedAndSfxSource?.ShowcaseTtsEngine,
+                speedAndSfxSource?.ShowcaseVoicePresetId,
+                speedAndSfxSource?.ShowcaseVoiceAgeId,
+                speedAndSfxSource?.ShowcaseVoiceLanguageId);
+            var sfxSuffix = FormatSfxSummary(speedAndSfxSource);
 
 
 
@@ -173,9 +167,9 @@ namespace tiktok_Omni.Services.Showcase
             return "Edge · " + shortVoice;
         }
 
-        private static string FormatNarrationSpeedSummary(int narrationSpeedPercent)
+        private static string FormatNarrationSpeedSummary(ShowcaseVideoItem video)
         {
-            return ShowcaseNarrationSpeedHelper.FormatGridLabel(narrationSpeedPercent);
+            return ShowcaseNarrationSpeedHelper.FormatSegmentSpeedGridLabel(video);
         }
 
         private static string FormatSfxSummary(ShowcaseVideoItem video)

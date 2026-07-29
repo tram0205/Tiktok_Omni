@@ -14,6 +14,11 @@ namespace tiktok_Omni.Services.Showcase
     {
         private static readonly string[] VideoExtensions = { ".mp4", ".mov", ".webm", ".mkv" };
 
+        private static readonly HashSet<string> ImageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"
+        };
+
         public static ShowcaseSessionState CreateSession(string profileName, string productName, string storageRoot = null)
         {
             // Chỉ ghi đè storage root toàn cục khi có giá trị cụ thể — tránh xoá cấu hình đã nạp từ trước.
@@ -631,6 +636,207 @@ namespace tiktok_Omni.Services.Showcase
                     log?.Invoke("[Showcase] Không tải được ảnh cảnh " + (i + 1) + ": " + ex.Message);
                 }
             }
+        }
+
+        /// <summary>Tìm file ảnh gốc theo thứ tự — <c>photo_XX</c> hoặc <c>scene_XX</c> trong source_images.</summary>
+        public static string DetectSourceImageForOrder(string sourceImagesDir, int order)
+        {
+            if (order < 1 || string.IsNullOrWhiteSpace(sourceImagesDir) || !Directory.Exists(sourceImagesDir))
+            {
+                return null;
+            }
+
+            string resolvedDir;
+            try
+            {
+                resolvedDir = Path.GetFullPath(sourceImagesDir.Trim());
+            }
+            catch
+            {
+                return null;
+            }
+
+            foreach (var prefix in new[]
+                     {
+                         "photo_" + order.ToString("D2", CultureInfo.InvariantCulture),
+                         "scene_" + order.ToString("D2", CultureInfo.InvariantCulture)
+                     })
+            {
+                foreach (var ext in ImageExtensions)
+                {
+                    var directPath = Path.Combine(resolvedDir, prefix + ext);
+                    if (File.Exists(directPath))
+                    {
+                        return directPath;
+                    }
+                }
+
+                string[] matches;
+                try
+                {
+                    matches = Directory.GetFiles(resolvedDir, prefix + ".*");
+                }
+                catch
+                {
+                    matches = Array.Empty<string>();
+                }
+
+                foreach (var file in matches)
+                {
+                    if (ImageExtensions.Contains(Path.GetExtension(file)))
+                    {
+                        return file;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static bool TryResolveSceneSourceImagePath(
+            string sourceImagesDir,
+            int orderOneBased,
+            AiVideoGenInputItem scene,
+            out string resolvedPath)
+        {
+            resolvedPath = null;
+            if (orderOneBased < 1)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(sourceImagesDir))
+            {
+                resolvedPath = DetectSourceImageForOrder(sourceImagesDir, orderOneBased);
+                if (!string.IsNullOrWhiteSpace(resolvedPath))
+                {
+                    return true;
+                }
+            }
+
+            var stored = (scene?.ThumbnailPath ?? scene?.ImageUrl ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(stored) && File.Exists(stored))
+            {
+                resolvedPath = stored;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void ApplyResolvedSourceImagePath(AiVideoGenInputItem scene, string path)
+        {
+            if (scene == null || string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            scene.ThumbnailPath = path;
+            scene.ImageUrl = path;
+        }
+
+        /// <summary>Cập nhật đường dẫn ảnh từ source_images — trả về STT cảnh (1-based) không còn file ảnh.</summary>
+        public static List<int> RefreshSourceImageStatus(
+            string sourceImagesDir,
+            IList<AiVideoGenInputItem> orderedScenes,
+            Action<string> log = null)
+        {
+            var missing = new List<int>();
+            if (orderedScenes == null || orderedScenes.Count == 0)
+            {
+                return missing;
+            }
+
+            for (var i = 0; i < orderedScenes.Count; i++)
+            {
+                var order = i + 1;
+                var scene = orderedScenes[i];
+                if (TryResolveSceneSourceImagePath(sourceImagesDir, order, scene, out var path))
+                {
+                    ApplyResolvedSourceImagePath(scene, path);
+                    continue;
+                }
+
+                missing.Add(order);
+            }
+
+            if (missing.Count > 0 && log != null)
+            {
+                log(BuildSourceImageScanDiagnostic(sourceImagesDir, orderedScenes.Count, missing));
+            }
+
+            return missing;
+        }
+
+        /// <summary>Gỡ khỏi storyboard các cảnh không còn ảnh (vd. user xóa file trong Explorer) — trả về số cảnh đã gỡ.</summary>
+        public static int PruneScenesMissingSourceImages(
+            string sourceImagesDir,
+            IList<AiVideoGenInputItem> orderedScenes,
+            Action<string> log = null)
+        {
+            if (orderedScenes == null || orderedScenes.Count == 0)
+            {
+                return 0;
+            }
+
+            var missing = RefreshSourceImageStatus(sourceImagesDir, orderedScenes, log: null);
+            if (missing.Count == 0)
+            {
+                return 0;
+            }
+
+            var missingSet = new HashSet<int>(missing);
+            var removed = 0;
+            for (var i = orderedScenes.Count - 1; i >= 0; i--)
+            {
+                if (!missingSet.Contains(i + 1))
+                {
+                    continue;
+                }
+
+                orderedScenes.RemoveAt(i);
+                removed++;
+            }
+
+            if (removed > 0 && log != null)
+            {
+                log("[Showcase] Đã gỡ " + removed + " cảnh khỏi storyboard (ảnh không còn trong source_images). Còn "
+                    + orderedScenes.Count + " cảnh.");
+            }
+
+            return removed;
+        }
+
+        private static string BuildSourceImageScanDiagnostic(string sourceImagesDir, int sceneCount, IList<int> missingOrders)
+        {
+            if (string.IsNullOrWhiteSpace(sourceImagesDir) || !Directory.Exists(sourceImagesDir))
+            {
+                return "[Showcase] source_images không tồn tại: " + (sourceImagesDir ?? string.Empty);
+            }
+
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(sourceImagesDir)
+                    .Where(f => ImageExtensions.Contains(Path.GetExtension(f)))
+                    .ToArray();
+            }
+            catch (Exception ex)
+            {
+                return "[Showcase] Không đọc được source_images: " + ex.Message;
+            }
+
+            var names = files
+                .Select(Path.GetFileName)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Take(8)
+                .ToArray();
+            var sample = names.Length == 0
+                ? "(trống)"
+                : string.Join(", ", names) + (files.Length > names.Length ? ", ..." : string.Empty);
+            return "[Showcase] source_images có " + files.Length + " ảnh [" + sample + "] — storyboard thiếu ảnh "
+                   + missingOrders.Count + "/" + sceneCount + " cảnh ("
+                   + string.Join(", ", missingOrders) + ").";
         }
 
         /// <summary>Tìm file clip theo tên "scene_XX.*" trong thư mục veo_clips — null nếu chưa có.</summary>

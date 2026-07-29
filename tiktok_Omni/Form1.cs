@@ -5743,6 +5743,7 @@ namespace tiktok_Omni
         {
             Log(message);
             AppendToShowcaseLogPanel(message);
+            TryMirrorShowcaseLogToAudioDialog(message);
         }
 
         private void AppendToShowcaseLogPanel(string message)
@@ -7027,7 +7028,7 @@ namespace tiktok_Omni
 
             if (btnRunAffiliateDeepVideo != null)
             {
-                btnRunAffiliateDeepVideo.Enabled = ResolveShowcaseRenderButtonEnabled(ffmpegOk, storageOk);
+                UpdateShowcaseRenderButtonState(ffmpegOk, storageOk);
             }
 
             if (btnPhilosophyStartRender != null)

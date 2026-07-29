@@ -148,11 +148,7 @@ namespace tiktok_Omni
             _aiVideoGenControls?.SetShowcaseWorkflowButtonsEnabled(enabled);
             if (!enabled)
             {
-                if (btnRunAffiliateDeepVideo != null && !btnRunAffiliateDeepVideo.IsDisposed)
-                {
-                    btnRunAffiliateDeepVideo.Enabled = false;
-                }
-
+                SetShowcaseExecuteButtonsEnabled(false, false);
                 return;
             }
 

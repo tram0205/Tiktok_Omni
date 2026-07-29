@@ -177,6 +177,10 @@ namespace tiktok_Omni.Services.Showcase
 
                     return "CHẾ ĐỘ CLIP (Gemini gợi ý): TỰ chọn clip_tool từng cảnh — flatlay thường veo; on_model chọn veo (Flow-safe), zoom (Ken Burns + zoom_style + zoom_hint) hoặc kling (I2V) tùy ảnh và mạch QC.";
 
+                case ShowcaseClipModePresets.KlingVeoZoomId:
+
+                    return "CHẾ ĐỘ CLIP (Kling + Veo + Zoom): TỪNG cảnh chọn MỘT trong clip_tool=veo | kling | zoom — dùng cả ba công cụ trong video khi phù hợp; flatlay ưu tiên veo/zoom; on_model có thể kling hoặc veo Flow-safe hoặc zoom.";
+
                 case "veo_zoom":
 
                 default:

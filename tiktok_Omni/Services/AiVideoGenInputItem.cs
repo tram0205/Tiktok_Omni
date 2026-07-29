@@ -46,6 +46,30 @@ namespace tiktok_Omni.Services
         /// <summary>Hiệu ứng dòng trên tab Chữ hiển thị — rỗng = tab Kiểu chữ (thân).</summary>
         public string ShowcaseSubtitleDisplayAnimation { get; set; } = string.Empty;
 
+        /// <summary>Font dòng phụ đề — rỗng = theo mẫu thân video.</summary>
+        public string ShowcaseSubtitleDisplayFontName { get; set; } = string.Empty;
+
+        /// <summary>0 = theo mẫu thân.</summary>
+        public int ShowcaseSubtitleDisplayFontSize { get; set; }
+
+        /// <summary>Bold | Italic | rỗng = theo mẫu.</summary>
+        public string ShowcaseSubtitleDisplayFontFace { get; set; } = string.Empty;
+
+        /// <summary>Top | Middle | Bottom | rỗng = theo mẫu.</summary>
+        public string ShowcaseSubtitleDisplayPosition { get; set; } = string.Empty;
+
+        /// <summary>ASS PrimaryColour — rỗng = theo mẫu / mặc định.</summary>
+        public string ShowcaseSubtitleDisplayPrimaryColourAss { get; set; } = string.Empty;
+
+        /// <summary>Viền/bóng — rỗng = theo mẫu.</summary>
+        public string ShowcaseSubtitleDisplayDecorPreset { get; set; } = string.Empty;
+
+        /// <summary>Preset kiểu chữ — rỗng = theo mẫu thân.</summary>
+        public string ShowcaseSubtitleDisplayLookPreset { get; set; } = string.Empty;
+
+        /// <summary>Màu tô dòng — rỗng = theo mẫu / kiểu chữ.</summary>
+        public string ShowcaseSubtitleDisplayHighlightColourAss { get; set; } = string.Empty;
+
         /// <summary>Showcase: đường dẫn đầy đủ file ảnh khi user chọn từ máy (trước khi copy vào source_images).</summary>
         public string ShowcaseLocalPickPath { get; set; } = string.Empty;
 

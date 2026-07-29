@@ -23,6 +23,8 @@ namespace tiktok_Omni
         private void BuildSfxTab(TabPage tab)
         {
             tab.AutoScroll = false;
+            tab.HorizontalScroll.Enabled = false;
+            tab.HorizontalScroll.Visible = false;
 
             _chkSfxMaster = new CheckBox
             {
@@ -37,6 +39,7 @@ namespace tiktok_Omni
             _dgvSfx = new DataGridView
             {
                 Dock = DockStyle.Fill,
+                ScrollBars = ScrollBars.Vertical,
                 BackgroundColor = Color.FromArgb(38, 42, 52),
                 GridColor = Color.FromArgb(58, 64, 78),
                 BorderStyle = BorderStyle.None,
@@ -44,7 +47,7 @@ namespace tiktok_Omni
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
                 ShowCellToolTips = true,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 EnableHeadersVisualStyles = false,
                 ColumnHeadersHeight = 66,
@@ -79,13 +82,13 @@ namespace tiktok_Omni
                 Name = "colSfxLabel",
                 HeaderText = "Vị trí",
                 ReadOnly = true,
-                FillWeight = 21
+                FillWeight = 15
             };
             var colPlacement = new DataGridViewComboBoxColumn
             {
                 Name = "colSfxPlacement",
                 HeaderText = "Chèn",
-                FillWeight = 20,
+                FillWeight = 12,
                 FlatStyle = FlatStyle.Flat
             };
             colPlacement.Items.Add("Đầu cảnh");
@@ -95,37 +98,54 @@ namespace tiktok_Omni
             {
                 Name = "colSfxFile",
                 HeaderText = "File SFX",
-                FillWeight = 20,
+                FillWeight = 27,
                 FlatStyle = FlatStyle.Flat
             };
             var colVolume = new DataGridViewTextBoxColumn
             {
                 Name = "colSfxVolume",
                 HeaderText = "Volume",
-                FillWeight = 20
+                FillWeight = 7
             };
             var colOffset = new DataGridViewTextBoxColumn
             {
                 Name = "colSfxOffset",
                 HeaderText = "Lệch (s)",
-                FillWeight = 20
+                FillWeight = 7
             };
             var colGemini = new DataGridViewTextBoxColumn
             {
                 Name = "colSfxGemini",
                 HeaderText = "Gợi ý Gemini",
                 ReadOnly = true,
-                FillWeight = 20
+                FillWeight = 27
             };
 
+            _dgvSfx.Name = "dgvShowcaseAudioSfx";
             _dgvSfx.Columns.AddRange(colEnabled, colLabel, colPlacement, colFile, colVolume, colOffset, colGemini);
             ConfigureSfxGridColumnWidths();
+            ApplySfxGridHeaderChrome();
+            _dgvSfx.HandleCreated += (_, __) => ApplySfxGridHeaderChrome();
             _dgvSfx.DataError += SfxGrid_DataError;
             _dgvSfx.CellFormatting += SfxGrid_CellFormatting;
             _dgvSfx.Resize += (_, __) =>
             {
-                ConfigureSfxGridColumnWidths();
-                _dgvSfx.Invalidate();
+                if (_dgvSfx == null || _dgvSfx.IsDisposed)
+                {
+                    return;
+                }
+
+                _dgvSfx.BeginInvoke(new Action(() =>
+                {
+                    if (_dgvSfx == null || _dgvSfx.IsDisposed)
+                    {
+                        return;
+                    }
+
+                    ConfigureSfxGridColumnWidths();
+                    ApplySfxGridHeaderChrome();
+                    _dgvSfx.Invalidate();
+                }));
             };
 
             _lblSfxLibrary = new Label
@@ -137,7 +157,10 @@ namespace tiktok_Omni
                 Dock = DockStyle.Fill
             };
 
-            var btnOpen = CreateActionButton("Mở thư mục SFX", Color.FromArgb(48, 112, 168));
+            var btnOpen = CreateActionButton(
+                "btnShowcaseAudioOpenSfxFolder",
+                "Mở thư mục SFX",
+                Color.FromArgb(48, 112, 168));
             btnOpen.Click += (_, __) =>
             {
                 try
@@ -151,14 +174,20 @@ namespace tiktok_Omni
                 }
             };
 
-            var btnRefresh = CreateActionButton("Làm mới danh sách", Color.FromArgb(62, 132, 88));
+            var btnRefresh = CreateActionButton(
+                "btnShowcaseAudioRefreshSfxList",
+                "Làm mới danh sách",
+                Color.FromArgb(62, 132, 88));
             btnRefresh.Click += (_, __) =>
             {
                 ReloadSfxFileList();
                 RefreshSfxFileComboCells();
             };
 
-            var btnClearRow = CreateActionButton("Xóa SFX dòng chọn", Color.FromArgb(120, 72, 72));
+            var btnClearRow = CreateActionButton(
+                "btnShowcaseAudioClearSfxRow",
+                "Xóa SFX dòng chọn",
+                Color.FromArgb(120, 72, 72));
             btnClearRow.Click += (_, __) =>
             {
                 if (_dgvSfx.CurrentRow == null)
@@ -170,7 +199,11 @@ namespace tiktok_Omni
                 _dgvSfx.CurrentRow.Cells["colSfxEnabled"].Value = false;
             };
 
-            _btnPreviewSfx = CreateActionButton(PreviewPlaySfxLabel, Color.FromArgb(88, 118, 158));
+            _btnPreviewSfx = CreateActionButton(
+                "btnShowcaseAudioPreviewSfx",
+                PreviewPlaySfxLabel,
+                Color.FromArgb(88, 118, 158));
+            Form1.ResizeAppJellyButton(_btnPreviewSfx, minWidth: 120);
             _btnPreviewSfx.Click += (_, __) => TryPreviewSfxCurrentRow();
 
             var libButtons = new FlowLayoutPanel
@@ -218,7 +251,25 @@ namespace tiktok_Omni
             ReloadSfxFileList();
         }
 
-        /// <summary>Cột Bật cố định px; Vị trí rộng (Fill + min width).</summary>
+        // Tỷ lệ độ rộng lưới SFX (tổng = 1): Bật hẹp; File SFX + Gợi ý Gemini chia đều ~27% mỗi cột.
+        private const float SfxGridPctEnabled = 0.05f;
+        private const float SfxGridPctLabel = 0.15f;
+        private const float SfxGridPctPlacement = 0.12f;
+        private const float SfxGridNumericColumnWidthScale = 2.5f;
+        private const float SfxGridPctVolume = 0.07f * SfxGridNumericColumnWidthScale;
+        private const float SfxGridPctOffset = 0.07f * SfxGridNumericColumnWidthScale;
+        private const int SfxGridMinEnabled = 72;
+        private const int SfxGridMaxEnabled = 96;
+        private const int SfxGridMinLabel = 168;
+        private const int SfxGridMinPlacement = 92;
+        private const int SfxGridMinVolume = (int)(56 * SfxGridNumericColumnWidthScale);
+        private const int SfxGridMaxVolume = (int)(88 * SfxGridNumericColumnWidthScale);
+        private const int SfxGridMinOffset = (int)(72 * SfxGridNumericColumnWidthScale);
+        private const int SfxGridMaxOffset = (int)(96 * SfxGridNumericColumnWidthScale);
+        /// <summary>Chừa khoảng trống mép phải — cột không kéo sát viền (border lưới vẫn thấy).</summary>
+        private const int SfxGridRightEdgeInset = 24;
+
+        /// <summary>Cột Bật cố định; Vị trí/Chèn/Volume/Lệch theo % lưới; File SFX + Gợi ý Gemini chia đều phần còn lại.</summary>
         private void ConfigureSfxGridColumnWidths()
         {
             if (_dgvSfx == null || _dgvSfx.Columns.Count == 0)
@@ -226,45 +277,89 @@ namespace tiktok_Omni
                 return;
             }
 
-            const int enabledWidth = 144;
+            _dgvSfx.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+
+            var gridW = Math.Max(320, _dgvSfx.ClientSize.Width);
+            if (_dgvSfx.DisplayedRowCount(false) < _dgvSfx.RowCount)
+            {
+                gridW = Math.Max(320, gridW - SystemInformation.VerticalScrollBarWidth);
+            }
+
+            var layoutW = Math.Max(280, gridW - SfxGridRightEdgeInset);
+
+            int PctWidth(float pct, int min, int max = int.MaxValue) =>
+                Math.Min(max, Math.Max(min, (int)Math.Round(layoutW * pct)));
+
+            var wEnabled = PctWidth(SfxGridPctEnabled, SfxGridMinEnabled, SfxGridMaxEnabled);
+            var wLabel = PctWidth(SfxGridPctLabel, SfxGridMinLabel);
+            var wPlacement = PctWidth(SfxGridPctPlacement, SfxGridMinPlacement);
+            var wVolume = PctWidth(SfxGridPctVolume, SfxGridMinVolume, SfxGridMaxVolume);
+            var wOffset = PctWidth(SfxGridPctOffset, SfxGridMinOffset, SfxGridMaxOffset);
+
+            const int minFlexPair = 48;
+            var fixedSum = wEnabled + wLabel + wPlacement + wVolume + wOffset;
+            if (fixedSum > layoutW - minFlexPair)
+            {
+                var shrinkBudget = Math.Max(wEnabled + 24, layoutW - minFlexPair) - wEnabled;
+                var shrinkable = wLabel + wPlacement + wVolume + wOffset;
+                if (shrinkable > 0 && shrinkBudget < shrinkable)
+                {
+                    var scale = shrinkBudget / (double)shrinkable;
+                    wLabel = Math.Max(40, (int)Math.Round(wLabel * scale));
+                    wPlacement = Math.Max(40, (int)Math.Round(wPlacement * scale));
+                    wVolume = Math.Max(40, (int)Math.Round(wVolume * scale));
+                    wOffset = Math.Max(40, (int)Math.Round(wOffset * scale));
+                }
+
+                fixedSum = wEnabled + wLabel + wPlacement + wVolume + wOffset;
+            }
+
+            var flexTotal = Math.Max(0, layoutW - fixedSum);
+            var wFile = flexTotal / 2;
+            var wGemini = flexTotal - wFile;
 
             if (_dgvSfx.Columns["colSfxEnabled"] is DataGridViewColumn enabledCol)
             {
                 enabledCol.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-                enabledCol.MinimumWidth = enabledWidth;
-                enabledCol.Width = enabledWidth;
+                enabledCol.MinimumWidth = wEnabled;
+                enabledCol.Width = wEnabled;
                 enabledCol.Resizable = DataGridViewTriState.False;
             }
 
+            SetSfxFixedWidthColumn("colSfxLabel", wLabel);
             if (_dgvSfx.Columns["colSfxLabel"] is DataGridViewColumn labelCol)
             {
-                labelCol.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                labelCol.FillWeight = 34;
-                labelCol.MinimumWidth = 260;
                 labelCol.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
             }
 
-            const float equalTailWeight = 20f;
-            const int equalTailMinWidth = 96;
-            var equalWidthColumns = new[]
-            {
-                "colSfxPlacement",
-                "colSfxFile",
-                "colSfxVolume",
-                "colSfxOffset",
-                "colSfxGemini"
-            };
-            foreach (var columnName in equalWidthColumns)
-            {
-                if (_dgvSfx.Columns[columnName] is DataGridViewColumn col)
-                {
-                    col.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                    col.FillWeight = equalTailWeight;
-                    col.MinimumWidth = equalTailMinWidth;
-                }
-            }
+            SetSfxFixedWidthColumn("colSfxPlacement", wPlacement);
+            SetSfxFixedWidthColumn("colSfxVolume", wVolume);
+            SetSfxFixedWidthColumn("colSfxOffset", wOffset);
+            SetSfxFixedWidthColumn("colSfxFile", wFile);
+            SetSfxFixedWidthColumn("colSfxGemini", wGemini);
 
             ApplySfxGridColumnContentAlignment();
+            ApplySfxGridHeaderChrome();
+        }
+
+        private void ApplySfxGridHeaderChrome()
+        {
+            if (_dgvSfx == null || _dgvSfx.IsDisposed)
+            {
+                return;
+            }
+
+            Form1.ApplyAppGridHeaderChrome(_dgvSfx);
+        }
+
+        private void SetSfxFixedWidthColumn(string columnName, int width)
+        {
+            if (_dgvSfx.Columns[columnName] is DataGridViewColumn col)
+            {
+                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                col.MinimumWidth = width;
+                col.Width = width;
+            }
         }
 
         private void ApplySfxGridColumnContentAlignment()

@@ -174,8 +174,8 @@ namespace tiktok_Omni.Services.Showcase
                 out var stability,
                 out var similarity,
                 out var style);
-            return "Tone: " + GetToneLabel(toneId) + " (" +
-                   FormatUnit(stability) + "/" + FormatUnit(similarity) + "/" + FormatUnit(style) + ")";
+            return GetToneLabel(toneId) + " (" +
+                   ClampPercent(stability) + "/" + ClampPercent(similarity) + "/" + ClampPercent(style) + "%)";
         }
 
         private static string FormatUnit(int percent) =>
@@ -184,5 +184,9 @@ namespace tiktok_Omni.Services.Showcase
         /// <summary>Dòng tóm tắt cho Hook khi «Phong cách hook» = «⚙ Tùy chỉnh giọng».</summary>
         public static string FormatCustomVoiceSummary(int stabilityPercent, int similarityPercent, int stylePercent) =>
             "Tùy chỉnh giọng (" + FormatUnit(stabilityPercent) + "/" + FormatUnit(similarityPercent) + "/" + FormatUnit(stylePercent) + ")";
+
+        /// <summary>Chỉ bộ ba % — dùng sau «⚙ Tùy chỉnh giọng» trên dòng Kết quả.</summary>
+        public static string FormatCustomVoicePercentTriplet(int stabilityPercent, int similarityPercent, int stylePercent) =>
+            ClampPercent(stabilityPercent) + "/" + ClampPercent(similarityPercent) + "/" + ClampPercent(stylePercent) + "%";
     }
 }

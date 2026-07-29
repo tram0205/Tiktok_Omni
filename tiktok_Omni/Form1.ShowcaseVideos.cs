@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using tiktok_Omni.Controls;
@@ -196,6 +197,7 @@ namespace tiktok_Omni
 
                 RefreshAffiliateDeepStoryboard();
                 RefreshAiVideoGenModeReadinessLabels();
+                UpdateShowcaseRenderButtonState();
             }
         }
 
@@ -295,7 +297,8 @@ namespace tiktok_Omni
                 var scenes = GetShowcaseVideoScenes(video);
                 if (session != null && scenes.Count > 0)
                 {
-                    ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, scenes, LogShowcase);
+                    SyncShowcaseSourceImagesForVideo(video, refreshUi: false);
+                    ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, video.Scenes, LogShowcase);
                     video.RefreshDisplayFields();
                 }
             }
@@ -320,6 +323,70 @@ namespace tiktok_Omni
             }
 
             return video.Scenes.ToList();
+        }
+
+        private string ResolveShowcaseSourceImagesDirForSync(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return null;
+            }
+
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            if (_showcaseSession != null
+                && string.Equals(_showcaseSession.ProductName, productName, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(_showcaseSession.SourceImagesDir)
+                && Directory.Exists(_showcaseSession.SourceImagesDir))
+            {
+                return _showcaseSession.SourceImagesDir;
+            }
+
+            var sessionBase = (video.ShowcaseSessionBaseDir ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(sessionBase))
+            {
+                var dir = Path.Combine(sessionBase, "source_images");
+                if (Directory.Exists(dir))
+                {
+                    return dir;
+                }
+            }
+
+            return ShowcaseSessionService.ResolveSceneImagesDirectory(GetShowcaseVideoScenes(video));
+        }
+
+        /// <summary>Đồng bộ storyboard với source_images — gỡ cảnh khi ảnh đã xóa ngoài app.</summary>
+        private int SyncShowcaseSourceImagesForVideo(ShowcaseVideoItem video, bool refreshUi)
+        {
+            if (video?.Scenes == null || video.Scenes.Count == 0)
+            {
+                return 0;
+            }
+
+            var imagesDir = ResolveShowcaseSourceImagesDirForSync(video);
+            var removed = ShowcaseSessionService.PruneScenesMissingSourceImages(imagesDir, video.Scenes, LogShowcase);
+            if (removed <= 0)
+            {
+                ShowcaseSessionService.RefreshSourceImageStatus(imagesDir, video.Scenes, log: null);
+                return 0;
+            }
+
+            NotifyShowcaseDraftDirty();
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            if (_showcaseSession != null
+                && string.Equals(_showcaseSession.ProductName, productName, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(_showcaseSession.ClipsDir))
+            {
+                ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, video.Scenes, LogShowcase);
+            }
+
+            video.RefreshDisplayFields();
+            if (refreshUi)
+            {
+                SyncBuffersToGrids();
+                RefreshAiVideoGenModeReadinessLabels();
+            }
+
+            return removed;
         }
 
         private string GetShowcaseThemeForVideo(ShowcaseVideoItem video)

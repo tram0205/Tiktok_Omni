@@ -475,6 +475,379 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>TTS riêng hook (preview nghe thử) — lưu thẳng vào <paramref name="hookPreviewOutputPath"/>.</summary>
+        public async Task GenerateShowcaseHookPreviewAsync(
+            string hookText,
+            IList<AiVideoGenInputItem> orderedScenes,
+            AppSettings settings,
+            string hookPreviewOutputPath,
+            Action<string> log,
+            CancellationToken cancellationToken,
+            ShowcaseTtsRenderOptions showcaseTts)
+        {
+            if (orderedScenes == null || orderedScenes.Count == 0)
+            {
+                throw new InvalidOperationException("Showcase cần danh sách cảnh để tạo hook.");
+            }
+
+            if (string.IsNullOrWhiteSpace(hookPreviewOutputPath))
+            {
+                throw new ArgumentException("Hook preview path is required.", nameof(hookPreviewOutputPath));
+            }
+
+            showcaseTts = showcaseTts ?? new ShowcaseTtsRenderOptions();
+            TtsAvailabilityHelper.ValidateEngine(settings, showcaseTts.HookEngine);
+
+            var firstVoiced = FindFirstVoicedSceneIndex(orderedScenes);
+            if (firstVoiced < 0)
+            {
+                throw new InvalidOperationException("Showcase không có cảnh thoại cho hook.");
+            }
+
+            var hookSource = (orderedScenes[firstVoiced]?.SceneVoiceover ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(hookSource) && !string.IsNullOrWhiteSpace(hookText))
+            {
+                hookSource = hookText.Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(hookSource))
+            {
+                throw new InvalidOperationException("Showcase cần thoại hook ở cảnh đầu tiên có lời.");
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(hookPreviewOutputPath) ?? ".");
+            var hookPrepared = PrepareShowcaseSegmentText(
+                NormalizeShowcaseTextLocal(hookSource),
+                ShowcaseNarrationSegmentKind.Hook,
+                settings,
+                showcaseTts.HookEngine,
+                showcaseTts,
+                log);
+            log?.Invoke("[TTS] Showcase hook preview: cảnh " + (firstVoiced + 1) + "…");
+            await GenerateVoiceSegmentAsync(
+                    hookPrepared,
+                    emphaticHook: true,
+                    settings,
+                    hookPreviewOutputPath,
+                    log,
+                    cancellationToken,
+                    showcaseTts,
+                    showcaseTts.HookEngine,
+                    showcaseExpressiveBody: false)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>TTS riêng thân + CTA (preview nghe thử).</summary>
+        public async Task GenerateShowcaseBodyPreviewAsync(
+            IList<AiVideoGenInputItem> orderedScenes,
+            string ctaText,
+            AppSettings settings,
+            string bodyPreviewOutputPath,
+            string workDirectory,
+            Action<string> log,
+            CancellationToken cancellationToken,
+            ShowcaseTtsRenderOptions showcaseTts)
+        {
+            if (orderedScenes == null || orderedScenes.Count == 0)
+            {
+                throw new InvalidOperationException("Showcase cần danh sách cảnh để tạo thân.");
+            }
+
+            if (string.IsNullOrWhiteSpace(bodyPreviewOutputPath))
+            {
+                throw new ArgumentException("Body preview path is required.", nameof(bodyPreviewOutputPath));
+            }
+
+            showcaseTts = showcaseTts ?? new ShowcaseTtsRenderOptions();
+            TtsAvailabilityHelper.ValidateEngine(settings, showcaseTts.BodyEngine);
+
+            var firstVoiced = FindFirstVoicedSceneIndex(orderedScenes);
+            if (firstVoiced < 0)
+            {
+                throw new InvalidOperationException("Showcase không có cảnh thoại cho thân.");
+            }
+
+            var bodyParts = CollectBodyVoiceParts(orderedScenes, firstVoiced, ctaText);
+            if (bodyParts.Count == 0)
+            {
+                throw new InvalidOperationException("Showcase thân không có đoạn thoại (sau hook).");
+            }
+
+            var ffmpeg = ResolveFfmpegPath(settings);
+            Directory.CreateDirectory(workDirectory ?? Path.GetDirectoryName(bodyPreviewOutputPath) ?? ".");
+            var tempFiles = new List<string>();
+            var bodySceneFiles = new List<string>();
+            var bodyEngine = showcaseTts.BodyEngine;
+
+            try
+            {
+                for (var bi = 0; bi < bodyParts.Count; bi++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var partText = NormalizeShowcaseTextLocal(bodyParts[bi]);
+                    if (string.IsNullOrWhiteSpace(partText))
+                    {
+                        continue;
+                    }
+
+                    var isCtaPart = bi == bodyParts.Count - 1
+                                    && !string.IsNullOrWhiteSpace(ctaText)
+                                    && string.Equals(partText, ctaText.Trim(), StringComparison.OrdinalIgnoreCase);
+                    var segmentKind = isCtaPart
+                        ? ShowcaseNarrationSegmentKind.Cta
+                        : ShowcaseNarrationSegmentKind.Body;
+                    var prepared = PrepareShowcaseSegmentText(
+                        partText,
+                        segmentKind,
+                        settings,
+                        bodyEngine,
+                        showcaseTts,
+                        log);
+                    var scenePath = Path.Combine(
+                        workDirectory,
+                        "body_preview_" + (bi + 1).ToString("D2", CultureInfo.InvariantCulture) + ".mp3");
+                    tempFiles.Add(scenePath);
+                    log?.Invoke("[TTS] Showcase thân preview " + (bi + 1) + "/" + bodyParts.Count + "…");
+                    await GenerateVoiceSegmentAsync(
+                            prepared,
+                            emphaticHook: isCtaPart,
+                            settings,
+                            scenePath,
+                            log,
+                            cancellationToken,
+                            showcaseTts,
+                            bodyEngine,
+                            showcaseExpressiveBody: !isCtaPart)
+                        .ConfigureAwait(false);
+                    bodySceneFiles.Add(scenePath);
+                }
+
+                if (bodySceneFiles.Count == 0)
+                {
+                    throw new InvalidOperationException("Showcase thân không có đoạn thoại hợp lệ.");
+                }
+
+                if (bodySceneFiles.Count == 1)
+                {
+                    File.Copy(bodySceneFiles[0], bodyPreviewOutputPath, true);
+                }
+                else
+                {
+                    log?.Invoke("[TTS] Showcase: ghép " + bodySceneFiles.Count + " đoạn thân preview…");
+                    await ConcatAudioPartsAsync(bodySceneFiles, bodyPreviewOutputPath, ffmpeg, log, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                CleanupTempFiles(tempFiles.Where(p =>
+                    !string.Equals(p, bodyPreviewOutputPath, StringComparison.OrdinalIgnoreCase)));
+            }
+        }
+
+        /// <summary>Ghép hook + thân preview (và im lặng theo clip) thành narration.mp3 timeline.</summary>
+        public async Task AssembleShowcaseNarrationFromPreviewsAsync(
+            string hookPreviewPath,
+            string bodyPreviewPath,
+            IList<AiVideoGenInputItem> orderedScenes,
+            string hookText,
+            string ctaText,
+            AppSettings settings,
+            string outputAudioFile,
+            string workDirectory,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            if (orderedScenes == null || orderedScenes.Count == 0)
+            {
+                throw new InvalidOperationException("Showcase cần danh sách cảnh để ghép narration.");
+            }
+
+            if (string.IsNullOrWhiteSpace(hookPreviewPath) || !File.Exists(hookPreviewPath))
+            {
+                throw new InvalidOperationException("Chưa có hook_preview.mp3 — bấm «Tạo audio hook» trước.");
+            }
+
+            var ffmpeg = ResolveFfmpegPath(settings);
+            FfmpegToolkitService.TryResolve(settings, out var toolkit, out _);
+            var ffprobe = toolkit?.FfprobeExe ?? FfmpegToolkitService.GetBundledFfprobePath();
+            Directory.CreateDirectory(workDirectory ?? Path.GetDirectoryName(outputAudioFile) ?? ".");
+
+            var sceneCount = orderedScenes.Count;
+            var sceneDurations = await ProbeShowcaseSceneDurationsAsync(
+                    orderedScenes,
+                    ffprobe,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var firstVoiced = FindFirstVoicedSceneIndex(orderedScenes);
+            if (firstVoiced < 0)
+            {
+                throw new InvalidOperationException("Showcase không có cảnh thoại.");
+            }
+
+            var preHookDuration = 0d;
+            for (var i = 0; i < firstVoiced; i++)
+            {
+                preHookDuration += sceneDurations[i];
+            }
+
+            var postHookDuration = 0d;
+            for (var i = firstVoiced + 1; i < sceneCount; i++)
+            {
+                postHookDuration += sceneDurations[i];
+            }
+
+            var segmentFiles = new List<string>();
+            var tempFiles = new List<string>();
+
+            try
+            {
+                if (preHookDuration > 0.05d)
+                {
+                    var preHookSilence = Path.Combine(workDirectory, "pre_hook_silence_assemble.mp3");
+                    await ShowcaseFfmpegAudioHelper.CreateSilenceMp3Async(
+                            ffmpeg,
+                            preHookDuration,
+                            preHookSilence,
+                            log,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    segmentFiles.Add(preHookSilence);
+                    tempFiles.Add(preHookSilence);
+                }
+
+                segmentFiles.Add(hookPreviewPath);
+
+                var hasBodyPreview = !string.IsNullOrWhiteSpace(bodyPreviewPath) && File.Exists(bodyPreviewPath);
+                if (hasBodyPreview)
+                {
+                    segmentFiles.Add(bodyPreviewPath);
+                }
+                else if (postHookDuration > 0.05d)
+                {
+                    var postHookSilence = Path.Combine(workDirectory, "post_hook_silence_assemble.mp3");
+                    await ShowcaseFfmpegAudioHelper.CreateSilenceMp3Async(
+                            ffmpeg,
+                            postHookDuration,
+                            postHookSilence,
+                            log,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    segmentFiles.Add(postHookSilence);
+                    tempFiles.Add(postHookSilence);
+                }
+
+                log?.Invoke("[TTS] Showcase: ghép preview hook + thân → narration.mp3…");
+                await ConcatAudioPartsAsync(segmentFiles, outputAudioFile, ffmpeg, log, cancellationToken).ConfigureAwait(false);
+
+                var hookAudioSeconds = await ShowcaseMediaProbeHelper.ProbeDurationSecondsAsync(
+                        ffprobe,
+                        hookPreviewPath,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                var bodyAudioSeconds = 0d;
+                if (hasBodyPreview)
+                {
+                    bodyAudioSeconds = await ShowcaseMediaProbeHelper.ProbeDurationSecondsAsync(
+                            ffprobe,
+                            bodyPreviewPath,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                var hookSource = (orderedScenes[firstVoiced]?.SceneVoiceover ?? hookText ?? string.Empty).Trim();
+                var bodyMerged = ShowcaseVoiceoverFitHelper.MergePassage(
+                    CollectBodyVoiceParts(orderedScenes, firstVoiced, ctaText));
+                var timingManifest = new ShowcaseNarrationTimingManifest
+                {
+                    SpeechStartSeconds = preHookDuration,
+                    HookAudioSeconds = hookAudioSeconds,
+                    BodyAudioSeconds = bodyAudioSeconds,
+                    HookText = hookSource,
+                    BodyText = bodyMerged,
+                    FullText = ShowcaseVoiceoverFitHelper.MergePassage(new[] { hookSource, bodyMerged })
+                };
+                ShowcaseNarrationTimingManifest.Save(
+                    Path.GetDirectoryName(outputAudioFile) ?? workDirectory,
+                    timingManifest);
+            }
+            finally
+            {
+                CleanupTempFiles(tempFiles);
+            }
+        }
+
+        private static int FindFirstVoicedSceneIndex(IList<AiVideoGenInputItem> orderedScenes)
+        {
+            if (orderedScenes == null)
+            {
+                return -1;
+            }
+
+            for (var i = 0; i < orderedScenes.Count; i++)
+            {
+                if (orderedScenes[i] != null && !orderedScenes[i].ShowcaseSceneSilent)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static List<string> CollectBodyVoiceParts(
+            IList<AiVideoGenInputItem> orderedScenes,
+            int firstVoicedSceneIndex,
+            string ctaText)
+        {
+            var bodyParts = new List<string>();
+            for (var i = firstVoicedSceneIndex + 1; i < orderedScenes.Count; i++)
+            {
+                var scene = orderedScenes[i];
+                if (scene != null && !scene.ShowcaseSceneSilent && !string.IsNullOrWhiteSpace(scene.SceneVoiceover))
+                {
+                    bodyParts.Add(scene.SceneVoiceover.Trim());
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(ctaText))
+            {
+                var cta = ctaText.Trim();
+                var mergedPreview = ShowcaseVoiceoverFitHelper.MergePassage(bodyParts);
+                if (mergedPreview.IndexOf(cta, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    bodyParts.Add(cta);
+                }
+            }
+
+            return bodyParts;
+        }
+
+        private static async Task<double[]> ProbeShowcaseSceneDurationsAsync(
+            IList<AiVideoGenInputItem> orderedScenes,
+            string ffprobe,
+            CancellationToken cancellationToken)
+        {
+            var sceneCount = orderedScenes.Count;
+            var sceneDurations = new double[sceneCount];
+            for (var di = 0; di < sceneCount; di++)
+            {
+                sceneDurations[di] = 6d;
+                var clipPath = orderedScenes[di]?.ClipPath;
+                if (!string.IsNullOrWhiteSpace(clipPath) && File.Exists(clipPath))
+                {
+                    var probed = await ShowcaseMediaProbeHelper.ProbeDurationSecondsAsync(ffprobe, clipPath, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (probed > 0.1d)
+                    {
+                        sceneDurations[di] = probed;
+                    }
+                }
+            }
+
+            return sceneDurations;
+        }
+
         private static string NormalizeShowcaseTextLocal(string text)
         {
             return VietnameseTtsTextNormalizer.SanitizeForElevenLabsRequest(text);

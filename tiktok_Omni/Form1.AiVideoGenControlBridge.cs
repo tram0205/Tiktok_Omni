@@ -17,6 +17,8 @@ namespace tiktok_Omni
             flpSlideshowExecute = _aiVideoGenControls.SlideshowExecuteFlow;
             flpAffiliateDeepHeaderActions = _aiVideoGenControls.AffiliateDeepHeaderActions;
             flpAffiliateDeepExecuteActions = _aiVideoGenControls.AffiliateDeepExecuteActions;
+
+            UpdateShowcaseRenderButtonState();
         }
 
         private Button btnGenerateGeminiPrompt => _aiVideoGenControls?.GenerateGeminiPromptButton;
@@ -40,6 +42,8 @@ namespace tiktok_Omni
         private Button btnSlideshowOpenApproval => _aiVideoGenControls?.SlideshowOpenApprovalButton;
 
         private Button btnRunAffiliateDeepVideo => _aiVideoGenControls?.RunAffiliateDeepVideoButton;
+
+        private Button btnShowcaseOverview => _aiVideoGenControls?.ShowcaseOverviewButton;
 
         private Button btnDeepGenerateScript => _aiVideoGenControls?.DeepGenerateScriptButton;
 

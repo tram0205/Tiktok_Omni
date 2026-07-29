@@ -15,6 +15,51 @@ namespace tiktok_Omni.Services.Showcase
 
         /// <summary>Hiệu ứng dòng — rỗng = tab Kiểu chữ (thân).</summary>
         public string DisplayAnimation { get; set; } = string.Empty;
+
+        public string DisplayPrimaryColourAss { get; set; } = string.Empty;
+
+        public string DisplayDecorPreset { get; set; } = string.Empty;
+
+        public string DisplayFontName { get; set; } = string.Empty;
+
+        public int DisplayFontSize { get; set; }
+
+        public string DisplayFontFace { get; set; } = string.Empty;
+
+        public string DisplayLookPreset { get; set; } = string.Empty;
+
+        public string DisplayPosition { get; set; } = string.Empty;
+    }
+
+    public sealed class ShowcaseSubtitleLineRenderOverride
+    {
+        public string FontName { get; set; } = string.Empty;
+
+        public int FontSize { get; set; }
+
+        public string FontFace { get; set; } = string.Empty;
+
+        public string Position { get; set; } = string.Empty;
+
+        public string PrimaryColourAss { get; set; } = string.Empty;
+
+        public string DecorPreset { get; set; } = string.Empty;
+
+        public string LookPreset { get; set; } = string.Empty;
+
+        public string LineBackgroundColourAss { get; set; } = string.Empty;
+
+        public bool HasAny()
+        {
+            return !string.IsNullOrWhiteSpace(LookPreset)
+                   || !string.IsNullOrWhiteSpace(LineBackgroundColourAss)
+                   || !string.IsNullOrWhiteSpace(FontName)
+                   || FontSize > 0
+                   || !string.IsNullOrWhiteSpace(FontFace)
+                   || !string.IsNullOrWhiteSpace(Position)
+                   || !string.IsNullOrWhiteSpace(PrimaryColourAss)
+                   || !string.IsNullOrWhiteSpace(DecorPreset);
+        }
     }
 
     /// <summary>Chữ burn-in ASS — tách khỏi thoại TTS (xóa từ ở đây không đổi audio).</summary>
@@ -63,7 +108,14 @@ namespace tiktok_Omni.Services.Showcase
                 {
                     SceneOrder = order,
                     DisplayVoiceover = scene.ShowcaseSubtitleDisplayVoiceover ?? string.Empty,
-                    DisplayAnimation = scene.ShowcaseSubtitleDisplayAnimation ?? string.Empty
+                    DisplayAnimation = scene.ShowcaseSubtitleDisplayAnimation ?? string.Empty,
+                    DisplayPrimaryColourAss = scene.ShowcaseSubtitleDisplayPrimaryColourAss ?? string.Empty,
+                    DisplayDecorPreset = scene.ShowcaseSubtitleDisplayDecorPreset ?? string.Empty,
+                    DisplayFontName = scene.ShowcaseSubtitleDisplayFontName ?? string.Empty,
+                    DisplayFontSize = scene.ShowcaseSubtitleDisplayFontSize,
+                    DisplayFontFace = scene.ShowcaseSubtitleDisplayFontFace ?? string.Empty,
+                    DisplayLookPreset = scene.ShowcaseSubtitleDisplayLookPreset ?? string.Empty,
+                    DisplayPosition = scene.ShowcaseSubtitleDisplayPosition ?? string.Empty
                 });
             }
 
@@ -179,6 +231,95 @@ namespace tiktok_Omni.Services.Showcase
             return (sourceSpeech ?? string.Empty).Trim();
         }
 
+        /// <summary>Ảnh chụp thoại TTS trước khi sửa kịch bản — dùng đồng bộ cột phụ đề.</summary>
+        public sealed class ScriptSpeechSnapshot
+        {
+            public string Hook { get; set; } = string.Empty;
+
+            public string Cta { get; set; } = string.Empty;
+
+            public List<string> SceneVoiceovers { get; set; } = new List<string>();
+
+            public static ScriptSpeechSnapshot Capture(ShowcaseVideoItem video)
+            {
+                if (video == null)
+                {
+                    return new ScriptSpeechSnapshot();
+                }
+
+                var snap = new ScriptSpeechSnapshot
+                {
+                    Hook = (video.ShowcaseHookText ?? string.Empty).Trim(),
+                    Cta = (video.ShowcaseCtaText ?? string.Empty).Trim()
+                };
+
+                foreach (var scene in video.Scenes ?? Enumerable.Empty<AiVideoGenInputItem>())
+                {
+                    snap.SceneVoiceovers.Add(scene == null
+                        ? string.Empty
+                        : (scene.SceneVoiceover ?? string.Empty).Trim());
+                }
+
+                return snap;
+            }
+        }
+
+        /// <summary>Sau khi sửa thoại kịch bản — chỉ cập nhật phụ đề burn-in nếu đang bám thoại TTS; phụ đề rút gọn/tùy chỉnh giữ nguyên.</summary>
+        public static void SyncDisplayTextFromSpeechEdits(ShowcaseVideoItem video, ScriptSpeechSnapshot before)
+        {
+            if (video == null || before == null)
+            {
+                return;
+            }
+
+            video.ShowcaseSubtitleDisplayHook = ReconcileSpeechLinkedOverride(
+                video.ShowcaseSubtitleDisplayHook,
+                before.Hook,
+                (video.ShowcaseHookText ?? string.Empty).Trim());
+
+            video.ShowcaseSubtitleDisplayCta = ReconcileSpeechLinkedOverride(
+                video.ShowcaseSubtitleDisplayCta,
+                before.Cta,
+                (video.ShowcaseCtaText ?? string.Empty).Trim());
+
+            var scenes = video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
+            for (var i = 0; i < scenes.Count && i < before.SceneVoiceovers.Count; i++)
+            {
+                var scene = scenes[i];
+                scene.ShowcaseSubtitleDisplayVoiceover = ReconcileSpeechLinkedOverride(
+                    scene.ShowcaseSubtitleDisplayVoiceover,
+                    before.SceneVoiceovers[i],
+                    (scene.SceneVoiceover ?? string.Empty).Trim());
+            }
+        }
+
+        /// <summary>Phụ đề hiển thị khác thoại TTS (vd. rút gọn vài từ lên video) — không bị sửa khi đổi kịch bản.</summary>
+        public static bool IsIndependentDisplayOverride(string storedOverride, string sourceSpeech)
+        {
+            var storedNorm = NormalizeDisplayLine(storedOverride);
+            if (string.IsNullOrEmpty(storedNorm))
+            {
+                return false;
+            }
+
+            return !string.Equals(storedNorm, NormalizeDisplayLine(sourceSpeech), StringComparison.Ordinal);
+        }
+
+        private static string ReconcileSpeechLinkedOverride(string storedOverride, string oldSpeech, string newSpeech)
+        {
+            if (string.Equals(NormalizeDisplayLine(oldSpeech), NormalizeDisplayLine(newSpeech), StringComparison.Ordinal))
+            {
+                return storedOverride ?? string.Empty;
+            }
+
+            if (IsIndependentDisplayOverride(storedOverride, oldSpeech))
+            {
+                return storedOverride ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
         /// <summary>Lưu override: giống hệt thoại gốc → rỗng (hiện đủ khi render).</summary>
         public static string CoalesceDisplayOverrideForSave(string editedText, string sourceSpeech)
         {
@@ -195,6 +336,24 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             return edited;
+        }
+
+        /// <summary>Lưu hiệu ứng dòng: trùng tab Kiểu chữ → rỗng (render theo kiểu chữ).</summary>
+        public static string CoalesceAnimationOverrideForSave(string lineStorage, string tabStorage)
+        {
+            var line = (lineStorage ?? string.Empty).Trim();
+            var tab = (tabStorage ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(line))
+            {
+                return string.Empty;
+            }
+
+            if (string.Equals(line, tab, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Empty;
+            }
+
+            return line;
         }
 
         private static string NormalizeDisplayLine(string text)
@@ -320,6 +479,8 @@ namespace tiktok_Omni.Services.Showcase
             public string Display { get; set; }
 
             public string Animation { get; set; }
+
+            public ShowcaseSubtitleLineRenderOverride LineStyle { get; set; }
         }
 
         public sealed class ShowcaseDisplayLineWordSlice
@@ -327,6 +488,8 @@ namespace tiktok_Omni.Services.Showcase
             public List<WordTimestamp> Words { get; set; } = new List<WordTimestamp>();
 
             public string AnimationStorage { get; set; } = string.Empty;
+
+            public ShowcaseSubtitleLineRenderOverride LineStyle { get; set; }
         }
 
         public static bool HasAnyLineAnimationOverride(ShowcaseSubtitleDisplayPlan plan)
@@ -383,7 +546,8 @@ namespace tiktok_Omni.Services.Showcase
                 {
                     Source = source,
                     Display = string.IsNullOrWhiteSpace(displayOverride) ? source : displayOverride.Trim(),
-                    Animation = GetPlanSceneAnimation(plan, i + 1)
+                    Animation = GetPlanSceneAnimation(plan, i + 1),
+                    LineStyle = BuildLineStyleOverrideFromScene(scene)
                 });
             }
 
@@ -421,6 +585,28 @@ namespace tiktok_Omni.Services.Showcase
                 .DisplayAnimation ?? string.Empty;
         }
 
+        private static ShowcaseSubtitleLineRenderOverride BuildLineStyleOverrideFromScene(AiVideoGenInputItem scene)
+        {
+            if (scene == null)
+            {
+                return null;
+            }
+
+            var o = new ShowcaseSubtitleLineRenderOverride
+            {
+                LookPreset = (scene.ShowcaseSubtitleDisplayLookPreset ?? string.Empty).Trim(),
+                FontName = (scene.ShowcaseSubtitleDisplayFontName ?? string.Empty).Trim(),
+                FontSize = scene.ShowcaseSubtitleDisplayFontSize,
+                FontFace = (scene.ShowcaseSubtitleDisplayFontFace ?? string.Empty).Trim(),
+                Position = (scene.ShowcaseSubtitleDisplayPosition ?? string.Empty).Trim(),
+                PrimaryColourAss = (scene.ShowcaseSubtitleDisplayPrimaryColourAss ?? string.Empty).Trim(),
+                DecorPreset = (scene.ShowcaseSubtitleDisplayDecorPreset ?? string.Empty).Trim(),
+                LineBackgroundColourAss = (scene.ShowcaseSubtitleDisplayHighlightColourAss ?? string.Empty).Trim()
+            };
+
+            return o.HasAny() ? o : null;
+        }
+
         private static List<ShowcaseDisplayLineWordSlice> FilterBodySegmentsToSlices(
             IReadOnlyList<WordTimestamp> bodyWords,
             IReadOnlyList<BodySegment> segments)
@@ -456,7 +642,8 @@ namespace tiktok_Omni.Services.Showcase
                 slices.Add(new ShowcaseDisplayLineWordSlice
                 {
                     Words = filtered,
-                    AnimationStorage = segment.Animation ?? string.Empty
+                    AnimationStorage = segment.Animation ?? string.Empty,
+                    LineStyle = segment.LineStyle
                 });
             }
 

@@ -82,16 +82,17 @@ namespace tiktok_Omni
                     }
                 }
             }
-            SyncBuffersToGrids();
-            RefreshAffiliateDeepStoryboard();
-            RefreshAiVideoGenModeReadinessLabels();
-
             var activeVideo = GetActiveShowcaseVideo();
             if (activeVideo != null && _showcaseSession != null)
             {
-                ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, GetShowcaseVideoScenes(activeVideo), LogShowcase);
+                SyncShowcaseSourceImagesForVideo(activeVideo, refreshUi: false);
+                ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, activeVideo.Scenes, LogShowcase);
                 activeVideo.RefreshDisplayFields();
             }
+
+            SyncBuffersToGrids();
+            RefreshAffiliateDeepStoryboard();
+            RefreshAiVideoGenModeReadinessLabels();
 
             var sceneCount = _showcaseVideoBuffer.Sum(v => v.SceneCount);
             LogShowcase("[Showcase] Đã khôi phục " + _showcaseVideoBuffer.Count + " dòng video (" + sceneCount +

@@ -73,6 +73,8 @@ namespace tiktok_Omni.Services.Showcase
             SyncBodyVoiceFromHookWhenEmpty(video);
 
             ShowcaseEdgeProsodyHelper.EnsureVideoDefaults(video);
+            ShowcaseNarrationSpeedHelper.EnsureSegmentSpeedDefaults(video);
+            ShowcaseNarrationSpeedHelper.EnsureSegmentSpeedDefaults(video);
         }
 
         public static void SyncBodyVoiceFromHookWhenEmpty(ShowcaseVideoItem video)

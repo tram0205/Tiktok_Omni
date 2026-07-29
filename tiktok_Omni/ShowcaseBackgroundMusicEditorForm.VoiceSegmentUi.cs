@@ -38,6 +38,10 @@ namespace tiktok_Omni
             public Control CustomToneHost;
             public Label FootnoteLabel;
             public GroupBox Shell;
+            public FlowLayoutPanel NarrationButtonRow;
+            public TrackBar TrkNarrationSpeed;
+            public Label LblNarrationSpeedValue;
+            public Control NarrationSpeedHost;
         }
 
         private VoiceSegmentUi _hookVoice;
@@ -59,6 +63,11 @@ namespace tiktok_Omni
         private const int VoiceColumnWidthTrim = 35;
         /// <summary>Value column width as fraction of space after label column (0.7 = 70%).</summary>
         private const float VoiceSegmentFieldWidthScale = 0.7f;
+        private const float VoiceSegmentVerticalScale = 1.2f;
+        private static int VoiceSegV(int px) => (int)Math.Round(px * VoiceSegmentVerticalScale);
+        private static readonly Color VoiceNarrationGenerateTint = Color.FromArgb(56, 120, 82);
+        private static readonly Color VoiceNarrationListenTint = Color.FromArgb(118, 72, 158);
+        private static readonly Color VoiceScriptReviewTint = Color.FromArgb(48, 112, 168);
         /// <summary>Độ tuổi không còn ô chọn riêng (persona/preset đã quyết định) — dùng mặc định cố định.</summary>
         private const string DefaultSegmentAgeId = ShowcaseVoicePresetDimensions.Age.Adult26_35;
 
@@ -84,6 +93,7 @@ namespace tiktok_Omni
 
             outer.Controls.Add(WrapVoiceSegmentGroup(_hookVoice), 0, 0);
             outer.Controls.Add(WrapVoiceSegmentGroup(_bodyVoice), 1, 0);
+            AttachVoiceNarrationButtons();
             return outer;
         }
 
@@ -103,6 +113,8 @@ namespace tiktok_Omni
             var colW = Math.Max(360, half - VoiceColumnWidthTrim);
             ApplySegmentColumnShellWidth(_hookVoice, colW);
             ApplySegmentColumnShellWidth(_bodyVoice, colW);
+            LayoutVoiceNarrationButtons(_hookVoice);
+            LayoutVoiceNarrationButtons(_bodyVoice);
             _voiceColumnsPanel.PerformLayout();
         }
 
@@ -127,6 +139,7 @@ namespace tiktok_Omni
             }
 
             seg.ProsodyHost?.PerformLayout();
+            seg.CustomToneHost?.PerformLayout();
             seg.Table.PerformLayout();
             var layoutW = Math.Max(320, seg.Shell.ClientSize.Width);
             if (layoutW < 100)
@@ -135,13 +148,7 @@ namespace tiktok_Omni
             }
 
             var tableH = seg.Table.GetPreferredSize(new Size(layoutW, 0)).Height;
-            if (seg.ProsodyHost != null)
-            {
-                var prosodyPref = seg.ProsodyHost.GetPreferredSize(new Size(Math.Max(280, layoutW - VoiceSegmentLabelWidth), 0));
-                tableH = Math.Max(tableH, prosodyPref.Height + 32);
-            }
-
-            seg.Shell.Height = tableH + seg.Shell.Padding.Vertical + 32;
+            seg.Shell.Height = tableH + seg.Shell.Padding.Vertical + VoiceSegV(8);
             _voiceColumnsPanel?.PerformLayout();
         }
 
@@ -157,6 +164,7 @@ namespace tiktok_Omni
             var comboFieldW = Math.Max(200, (int)Math.Round(rawField * VoiceSegmentFieldWidthScale));
             var prosodyFieldW = Math.Max(200, rawField);
             ApplySegmentTableWidth(seg, clientW, comboFieldW, prosodyFieldW);
+            LayoutVoiceNarrationButtons(seg);
         }
 
         private void ApplySegmentTableWidth(VoiceSegmentUi seg, int tableW, int comboFieldW, int prosodyFieldW)
@@ -200,6 +208,16 @@ namespace tiktok_Omni
                 seg.CustomToneHost.PerformLayout();
             }
 
+            if (seg.NarrationSpeedHost != null)
+            {
+                seg.NarrationSpeedHost.AutoSize = true;
+                seg.NarrationSpeedHost.Dock = DockStyle.Top;
+                seg.NarrationSpeedHost.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                seg.NarrationSpeedHost.Width = prosodyFieldW;
+                LayoutNarrationSpeedHostContents(seg, prosodyFieldW);
+                seg.NarrationSpeedHost.PerformLayout();
+            }
+
             if (seg.FootnoteLabel != null)
             {
                 seg.FootnoteLabel.MaximumSize = new Size(tableW, 0);
@@ -211,6 +229,24 @@ namespace tiktok_Omni
 
         private void LayoutProsodyHostContents(VoiceSegmentUi seg, int rowWidth) =>
             LayoutSliderHostContents(seg?.ProsodyHost, rowWidth);
+
+        private void LayoutNarrationSpeedHostContents(VoiceSegmentUi seg, int rowWidth)
+        {
+            if (seg?.NarrationSpeedHost == null)
+            {
+                return;
+            }
+
+            rowWidth = Math.Max(280, rowWidth);
+            foreach (Control c in seg.NarrationSpeedHost.Controls)
+            {
+                if (c is TableLayoutPanel sliderRow && sliderRow.Tag as string == "narrationSpeedSlider")
+                {
+                    sliderRow.Width = rowWidth;
+                    sliderRow.MinimumSize = new Size(rowWidth, 0);
+                }
+            }
+        }
 
         /// <summary>Cột nhãn/giá trị (Absolute) không đổi — chỉ cột thanh trượt (Percent, phần còn lại) co theo tỉ lệ này.</summary>
         private const float VoiceSegmentSliderTrackWidthScale = 0.9f;
@@ -267,7 +303,7 @@ namespace tiktok_Omni
                 AutoSize = false,
                 ForeColor = Color.FromArgb(190, 198, 212),
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                Padding = new Padding(14, 22, 14, 12),
+                Padding = new Padding(14, VoiceSegV(22), 14, VoiceSegV(6)),
                 Margin = Padding.Empty,
                 BackColor = Color.FromArgb(31, 34, 42)
             };
@@ -299,7 +335,7 @@ namespace tiktok_Omni
                 MaximumSize = new Size(VoiceSegmentLabelWidth - VoiceSegmentLabelInset - 4, 0),
                 TextAlign = align,
                 ForeColor = Color.FromArgb(160, 168, 182),
-                Margin = new Padding(VoiceSegmentLabelInset, 18, 10, 10)
+                Margin = new Padding(VoiceSegmentLabelInset, VoiceSegV(18), 10, VoiceSegV(10))
             };
 
             var seg = new VoiceSegmentUi { IsHook = isHook };
@@ -323,7 +359,7 @@ namespace tiktok_Omni
 
             seg.CbStyle.Items.Add(new HookStyleListItem(
                 ShowcaseEdgeProsodyHelper.StyleCustom,
-                "⚙ Tùy chỉnh (chỉnh Rate / Pitch tay)"));
+                "⚙ Tùy chỉnh (Rate / Pitch)"));
 
             FillDimensionCombo(seg.CbLanguage, ShowcaseVoicePresetDimensions.ListLanguageOptions());
             FillDimensionCombo(seg.CbTone, ShowcaseVoicePresetDimensions.ListToneOptions());
@@ -383,6 +419,10 @@ namespace tiktok_Omni
                 {
                     OnSegmentCustomToneSliderChanged(seg);
                 }
+                else if (ReferenceEquals(s, seg.TrkNarrationSpeed))
+                {
+                    OnSegmentNarrationSpeedChanged(seg);
+                }
                 else
                 {
                     OnVoiceDimensionChanged();
@@ -409,14 +449,14 @@ namespace tiktok_Omni
             {
                 AutoSize = true,
                 ColumnCount = 2,
-                RowCount = 8,
+                RowCount = 10,
                 BackColor = BackColor,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             seg.Table = tbl;
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, VoiceSegmentLabelWidth));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            for (var i = 0; i < 8; i++)
+            for (var i = 0; i < 10; i++)
             {
                 tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             }
@@ -433,11 +473,11 @@ namespace tiktok_Omni
             tbl.Controls.Add(seg.LblTone, 0, 3);
             tbl.Controls.Add(seg.CbTone, 1, 3);
 
-            // Hook: "Phong cách hook" là control kích hoạt → phải nằm TRÊN "Tinh chỉnh giọng" (row 4/5 đảo so với Thân).
             var styleRow = isHook ? 4 : 5;
             var customToneRow = isHook ? 5 : 4;
 
             seg.LblCustomTone = MkLbl("Tinh chỉnh giọng", ContentAlignment.TopLeft);
+            seg.LblCustomTone.Margin = new Padding(VoiceSegmentLabelInset, VoiceSegV(8), 10, VoiceSegV(2));
             var customToneHost = BuildSegmentCustomTonePanel(seg);
             seg.CustomToneHost = customToneHost;
             tbl.Controls.Add(seg.LblCustomTone, 0, customToneRow);
@@ -453,16 +493,37 @@ namespace tiktok_Omni
             tbl.Controls.Add(seg.LblEdgeProsody, 0, 6);
             tbl.Controls.Add(prosodyHost, 1, 6);
 
+            seg.TrkNarrationSpeed = CreateNarrationSpeedTrackBar();
+            seg.LblNarrationSpeedValue = CreateNarrationSpeedValueLabel();
+            seg.TrkNarrationSpeed.ValueChanged += OnSegChanged;
+            seg.TrkNarrationSpeed.Scroll += OnSegChanged;
+            var speedHost = BuildSegmentNarrationSpeedHost(seg);
+            seg.NarrationSpeedHost = speedHost;
+            tbl.Controls.Add(MkLbl("Tốc độ thoại"), 0, 7);
+            tbl.Controls.Add(speedHost, 1, 7);
+
             seg.FootnoteLabel = new Label
             {
                 AutoSize = true,
                 ForeColor = Color.FromArgb(120, 128, 142),
                 Font = new Font("Segoe UI", 9F),
                 Text = headerHint,
-                Margin = new Padding(VoiceSegmentLabelInset, 8, 0, 0)
+                Margin = new Padding(VoiceSegmentLabelInset, VoiceSegV(2), 0, 0)
             };
-            tbl.Controls.Add(seg.FootnoteLabel, 0, 7);
+            tbl.Controls.Add(seg.FootnoteLabel, 0, 8);
             tbl.SetColumnSpan(seg.FootnoteLabel, 2);
+
+            seg.NarrationButtonRow = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                BackColor = BackColor,
+                Margin = new Padding(0, VoiceSegV(6), 0, VoiceSegV(4)),
+                Padding = Padding.Empty
+            };
+            tbl.Controls.Add(seg.NarrationButtonRow, 1, 9);
 
             if (isHook)
             {
@@ -486,7 +547,7 @@ namespace tiktok_Omni
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = BackColor,
-                Margin = new Padding(0, 4, 0, 8)
+                Margin = new Padding(0, VoiceSegV(2), 0, 0)
             };
 
             host.Resize += (_, __) =>
@@ -504,15 +565,6 @@ namespace tiktok_Omni
 
                 SyncSegmentShellHeight(seg);
             };
-
-            host.Controls.Add(new Label
-            {
-                AutoSize = true,
-                ForeColor = Color.FromArgb(140, 148, 162),
-                Font = new Font("Segoe UI", 9.25F),
-                Text = "Preset phong cách khóa slider; «Tùy chỉnh» mới kéo tay.",
-                Margin = new Padding(0, 0, 0, 8)
-            });
 
             host.Controls.Add(BuildEdgeProsodySliderRow(
                 "Rate",
@@ -542,7 +594,7 @@ namespace tiktok_Omni
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = BackColor,
-                Margin = new Padding(0, 4, 0, 8)
+                Margin = new Padding(0, VoiceSegV(2), 0, 0)
             };
 
             host.Resize += (_, __) =>
@@ -567,9 +619,9 @@ namespace tiktok_Omni
                 ForeColor = Color.FromArgb(140, 148, 162),
                 Font = new Font("Segoe UI", 9.25F),
                 Text = seg.IsHook
-                    ? "Chỉ áp dụng khi Phong cách hook = «⚙ Tùy chỉnh giọng» — kéo tay 3 số ElevenLabs."
-                    : "Chỉ áp dụng khi Tone giọng = «Tùy chỉnh» — kéo tay 3 số ElevenLabs.",
-                Margin = new Padding(0, 0, 0, 8)
+                    ? "Chỉ áp dụng khi Phong cách hook = «⚙ Tùy chỉnh giọng» — kéo 3 số ElevenLabs."
+                    : "Chỉ áp dụng khi Tone giọng = «Tùy chỉnh» — kéo 3 số ElevenLabs.",
+                Margin = new Padding(0, 0, 0, VoiceSegV(4))
             });
 
             host.Controls.Add(BuildEdgeProsodySliderRow(
@@ -596,12 +648,105 @@ namespace tiktok_Omni
             return host;
         }
 
+        private const int NarrationSpeedValueColumnWidth = 72;
+        private static readonly int NarrationSpeedTrackRowHeight = VoiceSegV(28);
+        private static readonly int NarrationSpeedHintsRowHeight = VoiceSegV(26);
+
+        private static TrackBar CreateNarrationSpeedTrackBar() =>
+            new TrackBar
+            {
+                Minimum = ShowcaseNarrationSpeedHelper.MinManualSpeedPercent,
+                Maximum = ShowcaseNarrationSpeedHelper.MaxManualSpeedPercent,
+                Value = ShowcaseNarrationSpeedHelper.DefaultManualSpeedPercent,
+                TickStyle = TickStyle.None,
+                SmallChange = 5,
+                LargeChange = 10,
+                BackColor = Color.FromArgb(45, 49, 60),
+                Height = VoiceSegV(22),
+                Margin = new Padding(0, VoiceSegV(1), 4, 0)
+            };
+
+        private static Label CreateNarrationSpeedValueLabel() => new Label
+        {
+            AutoSize = false,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleRight,
+            ForeColor = Color.FromArgb(175, 182, 196),
+            Font = new Font("Segoe UI", 9F, FontStyle.Regular),
+            Text = ShowcaseNarrationSpeedHelper.DefaultManualSpeedPercent + "%",
+            Margin = new Padding(0, 0, 2, 0),
+            AutoEllipsis = false
+        };
+
+        private static Control BuildSegmentNarrationSpeedHost(VoiceSegmentUi seg)
+        {
+            var trackBar = seg.TrkNarrationSpeed;
+            var valueLabel = seg.LblNarrationSpeedValue;
+            var root = new TableLayoutPanel
+            {
+                AutoSize = true,
+                ColumnCount = 2,
+                RowCount = 2,
+                BackColor = Color.FromArgb(31, 34, 42),
+                Margin = new Padding(0, VoiceSegV(2), 0, VoiceSegV(4)),
+                Tag = "narrationSpeedSlider"
+            };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, NarrationSpeedValueColumnWidth));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, NarrationSpeedTrackRowHeight));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, NarrationSpeedHintsRowHeight + 2));
+
+            trackBar.Dock = DockStyle.Fill;
+            root.Controls.Add(trackBar, 0, 0);
+            valueLabel.Dock = DockStyle.Fill;
+            root.Controls.Add(valueLabel, 1, 0);
+
+            var hints = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                ColumnCount = 2,
+                RowCount = 1,
+                BackColor = Color.FromArgb(31, 34, 42),
+                Margin = Padding.Empty,
+                MinimumSize = new Size(0, NarrationSpeedHintsRowHeight),
+                Padding = new Padding(0, 0, 0, 2)
+            };
+            hints.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            hints.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            hints.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            hints.Controls.Add(new Label
+            {
+                Text = ShowcaseNarrationSpeedHelper.MinManualSpeedPercent + "%",
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                ForeColor = Color.FromArgb(120, 128, 142),
+                Font = new Font("Segoe UI", 8.5F),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 0, 0, 2)
+            }, 0, 0);
+            hints.Controls.Add(new Label
+            {
+                Text = ShowcaseNarrationSpeedHelper.MaxManualSpeedPercent + "%",
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                ForeColor = Color.FromArgb(120, 128, 142),
+                Font = new Font("Segoe UI", 8.5F),
+                TextAlign = ContentAlignment.MiddleRight,
+                Margin = new Padding(0, 0, 0, 2)
+            }, 1, 0);
+            root.Controls.Add(hints, 0, 1);
+
+            return root;
+        }
+
         private ComboBox CreateVoiceSegmentCombo()
         {
             var combo = CreateDropDownCombo();
             combo.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             combo.Width = 400;
             combo.DropDownWidth = 900;
+            combo.Height = VoiceSegV(48);
             return combo;
         }
 
@@ -614,7 +759,7 @@ namespace tiktok_Omni
                 SmallChange = 1,
                 LargeChange = Math.Max(1, tickFrequency),
                 BackColor = Color.FromArgb(45, 49, 60),
-                Height = 45,
+                Height = VoiceSegV(35),
                 Width = width
             };
 
@@ -632,7 +777,7 @@ namespace tiktok_Omni
                 ColumnCount = 3,
                 RowCount = 2,
                 BackColor = Color.FromArgb(31, 34, 42),
-                Margin = new Padding(0, 0, 0, 18),
+                Margin = new Padding(0, 0, 0, VoiceSegV(6)),
                 Width = rowWidth,
                 Tag = "edgeProsodySlider"
             };
@@ -640,7 +785,7 @@ namespace tiktok_Omni
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, VoiceSegmentSliderValueWidth));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, VoiceSegV(32)));
 
             root.Controls.Add(new Label
             {
@@ -655,13 +800,13 @@ namespace tiktok_Omni
             }, 0, 0);
 
             trackBar.Dock = DockStyle.Top;
-            trackBar.Margin = new Padding(0, 2, 4, 0);
+            trackBar.Margin = new Padding(0, VoiceSegV(2), 4, 0);
             root.Controls.Add(trackBar, 1, 0);
 
             valueLabel.AutoSize = true;
             valueLabel.Dock = DockStyle.None;
             valueLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            valueLabel.Margin = new Padding(0, 10, 0, 6);
+            valueLabel.Margin = new Padding(0, VoiceSegV(6), 0, VoiceSegV(2));
             valueLabel.TextAlign = ContentAlignment.TopRight;
             root.Controls.Add(valueLabel, 2, 0);
 
@@ -669,14 +814,15 @@ namespace tiktok_Omni
             // AutoSize=true sẽ khiến TableLayoutPanel co theo nội dung, lệch khỏi 2 đầu thanh trượt thật.
             var hints = new TableLayoutPanel
             {
-                Dock = DockStyle.Top,
+                Dock = DockStyle.Fill,
                 AutoSize = false,
                 ColumnCount = 2,
                 RowCount = 1,
+                MinimumSize = new Size(0, VoiceSegV(32)),
                 BackColor = Color.FromArgb(31, 34, 42),
-                Margin = new Padding(0, 6, 4, 10)
+                Margin = new Padding(0, 0, 4, VoiceSegV(2))
             };
-            hints.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            hints.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             hints.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             hints.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
 
@@ -689,8 +835,8 @@ namespace tiktok_Omni
                 Dock = DockStyle.Fill,
                 ForeColor = Color.FromArgb(120, 128, 142),
                 Font = new Font("Segoe UI", 8.5F),
-                Margin = new Padding(0, 0, 0, 2),
-                TextAlign = ContentAlignment.TopLeft
+                Margin = Padding.Empty,
+                TextAlign = ContentAlignment.MiddleLeft
             }, 0, 0);
 
             hints.Controls.Add(new Label
@@ -700,8 +846,8 @@ namespace tiktok_Omni
                 Dock = DockStyle.Fill,
                 ForeColor = Color.FromArgb(120, 128, 142),
                 Font = new Font("Segoe UI", 8.5F),
-                Margin = new Padding(0, 0, 0, 2),
-                TextAlign = ContentAlignment.TopRight
+                Margin = Padding.Empty,
+                TextAlign = ContentAlignment.MiddleRight
             }, 1, 0);
 
             root.Controls.Add(hints, 1, 1);
@@ -744,9 +890,15 @@ namespace tiktok_Omni
             seg.Table.RowStyles[row].Height = 0f;
             foreach (Control c in seg.Table.Controls)
             {
-                if (seg.Table.GetRow(c) == row)
+                if (seg.Table.GetRow(c) != row)
                 {
-                    c.Visible = visible;
+                    continue;
+                }
+
+                c.Visible = visible;
+                if (!visible)
+                {
+                    c.MinimumSize = Size.Empty;
                 }
             }
         }
@@ -894,6 +1046,27 @@ namespace tiktok_Omni
             OnVoiceDimensionChanged();
         }
 
+        private void OnSegmentNarrationSpeedChanged(VoiceSegmentUi seg)
+        {
+            if (_voiceUiLock)
+            {
+                return;
+            }
+
+            UpdateSegmentNarrationSpeedLabel(seg);
+            OnVoiceDimensionChanged();
+        }
+
+        private static void UpdateSegmentNarrationSpeedLabel(VoiceSegmentUi seg)
+        {
+            if (seg?.LblNarrationSpeedValue == null || seg.TrkNarrationSpeed == null)
+            {
+                return;
+            }
+
+            seg.LblNarrationSpeedValue.Text = seg.TrkNarrationSpeed.Value + "%";
+        }
+
         private void OnSegmentCustomToneSliderChanged(VoiceSegmentUi seg)
         {
             var custom = seg.IsHook
@@ -959,6 +1132,7 @@ namespace tiktok_Omni
                 }
 
                 _video.ShowcaseHookTtsEngine = SelectedSegmentEngineId(seg.CbTts);
+                SaveSegmentNarrationSpeed(seg);
                 return;
             }
 
@@ -998,6 +1172,27 @@ namespace tiktok_Omni
             }
 
             _video.ShowcaseBodyTtsEngine = SelectedSegmentEngineId(seg.CbTts);
+            SaveSegmentNarrationSpeed(seg);
+        }
+
+        private void SaveSegmentNarrationSpeed(VoiceSegmentUi seg)
+        {
+            if (seg?.TrkNarrationSpeed == null)
+            {
+                return;
+            }
+
+            var pct = ShowcaseNarrationSpeedHelper.ClampManualPercent(seg.TrkNarrationSpeed.Value);
+            if (seg.IsHook)
+            {
+                _video.ShowcaseHookNarrationSpeedPercent = pct;
+            }
+            else
+            {
+                _video.ShowcaseBodyNarrationSpeedPercent = pct;
+            }
+
+            ShowcaseNarrationSpeedHelper.SyncLegacyCombinedSpeedField(_video);
         }
 
         private void LoadVoiceSegmentFromVideo(VoiceSegmentUi seg)
@@ -1032,6 +1227,27 @@ namespace tiktok_Omni
             SelectHookStyleCombo(seg.CbStyle, styleKey);
             ApplySegmentEdgeProsodyUi(seg, rateOff, pitchOff);
             ApplySegmentCustomToneUi(seg, customStability, customSimilarity, customStyle);
+            ShowcaseNarrationSpeedHelper.EnsureSegmentSpeedDefaults(_video);
+            if (seg.TrkNarrationSpeed != null)
+            {
+                var stored = seg.IsHook
+                    ? _video.ShowcaseHookNarrationSpeedPercent
+                    : _video.ShowcaseBodyNarrationSpeedPercent;
+                var pct = ShowcaseNarrationSpeedHelper.ResolveEffectiveSpeedPercent(stored);
+                _voiceUiLock = true;
+                try
+                {
+                    seg.TrkNarrationSpeed.Value = Math.Max(
+                        seg.TrkNarrationSpeed.Minimum,
+                        Math.Min(seg.TrkNarrationSpeed.Maximum, pct));
+                }
+                finally
+                {
+                    _voiceUiLock = false;
+                }
+
+                UpdateSegmentNarrationSpeedLabel(seg);
+            }
         }
 
         internal void ApplyVoiceSegmentLayoutFromTab(int tabInnerWidth)
@@ -1065,14 +1281,14 @@ namespace tiktok_Omni
                 {
                     seg.CbStyle.Items.Add(new HookStyleListItem(
                         ShowcaseEdgeProsodyHelper.StyleCustom,
-                        "⚙ Tùy chỉnh (chỉnh Rate / Pitch tay)"));
+                        "⚙ Tùy chỉnh (Rate / Pitch)"));
                 }
 
                 if (includeElevenVoiceCustom)
                 {
                     seg.CbStyle.Items.Add(new HookStyleListItem(
                         ShowcaseElevenToneHelper.HookStyleCustomVoiceKey,
-                        "⚙ Tùy chỉnh giọng (chỉnh stability/similarity/style tay)"));
+                        "⚙ Tùy chỉnh giọng (stability/similarity/style)"));
                 }
 
                 var pickKey = priorKey;
@@ -1140,8 +1356,8 @@ namespace tiktok_Omni
                 var rate = isHook ? video.ShowcaseEdgeRateOffsetPercent : video.ShowcaseBodyEdgeRateOffsetPercent;
                 var pitch = isHook ? video.ShowcaseEdgePitchOffsetHz : video.ShowcaseBodyEdgePitchOffsetHz;
                 return engine + " · " + ShowcaseVoicePresetCatalog.GetById(presetId).Label
-                       + " · «" + styleLabel + "» · "
-                       + ShowcaseEdgeProsodyHelper.FormatOffsetSummary(styleKey, rate, pitch);
+                       + " · «" + styleLabel + "»"
+                       + ShowcaseEdgeProsodyHelper.FormatSegmentProsodySuffix(styleKey, rate, pitch);
             }
 
             var set = ShowcaseVoicePresetDimensions.BuildFromVoiceUi(
@@ -1166,7 +1382,8 @@ namespace tiktok_Omni
                 if (ShowcaseElevenToneHelper.IsHookCustomVoiceStyle(styleKey))
                 {
                     styleLabel = "⚙ Tùy chỉnh giọng";
-                    toneSuffix = " · " + ShowcaseElevenToneHelper.FormatCustomVoiceSummary(customStability, customSimilarity, customStyle);
+                    toneSuffix = " · (" + ShowcaseElevenToneHelper.FormatCustomVoicePercentTriplet(
+                        customStability, customSimilarity, customStyle) + ")";
                 }
                 else
                 {
@@ -1182,6 +1399,248 @@ namespace tiktok_Omni
             var toneId = SelectedDimensionId(seg.CbTone);
             var toneSummary = ShowcaseElevenToneHelper.FormatToneSummary(toneId, customStability, customSimilarity, customStyle);
             return engine + " · " + voiceLabel + (string.IsNullOrEmpty(toneSummary) ? string.Empty : " · " + toneSummary);
+        }
+
+        private void AttachVoiceFooterActionButtons(FlowLayoutPanel host)
+        {
+            if (host == null)
+            {
+                return;
+            }
+
+            if (_renderFullMixedAudioAsync != null)
+            {
+                _btnRenderFullMixedAudio = CreateVoiceNarrationJellyButton(
+                    "btnShowcaseAudioRenderFull",
+                    ShowcaseWorkflowConstants.RenderFullMixedAudioButtonText,
+                    VoiceNarrationGenerateTint);
+                _btnRenderFullMixedAudio.Click += async (_, __) =>
+                {
+                    if (!ValidateAndSave())
+                    {
+                        return;
+                    }
+
+                    _btnRenderFullMixedAudio.Enabled = false;
+                    try
+                    {
+                        await _renderFullMixedAudioAsync().ConfigureAwait(true);
+                    }
+                    finally
+                    {
+                        RefreshNarrationButtons();
+                    }
+                };
+                host.Controls.Add(_btnRenderFullMixedAudio);
+            }
+
+            if (_listenFullMixedAudioAsync != null)
+            {
+                _btnListenFullMixedAudio = CreateVoiceNarrationJellyButton(
+                    "btnShowcaseAudioListenFull",
+                    ShowcaseWorkflowConstants.ListenFullMixedAudioButtonText,
+                    VoiceNarrationListenTint);
+                _btnListenFullMixedAudio.Click += async (_, __) =>
+                {
+                    if (!ValidateAndSave())
+                    {
+                        return;
+                    }
+
+                    _btnListenFullMixedAudio.Enabled = false;
+                    try
+                    {
+                        await _listenFullMixedAudioAsync().ConfigureAwait(true);
+                    }
+                    finally
+                    {
+                        RefreshNarrationButtons();
+                    }
+                };
+                host.Controls.Add(_btnListenFullMixedAudio);
+            }
+        }
+
+        private void AttachVoiceReviewScriptButton(Panel host)
+        {
+            if (host == null || _openScriptEditor == null)
+            {
+                return;
+            }
+
+            _btnReviewScript = CreateVoiceNarrationJellyButton(
+                "btnShowcaseAudioReviewScript",
+                "Xem lời thoại",
+                VoiceScriptReviewTint);
+            _btnReviewScript.Margin = new Padding(0);
+            _btnReviewScript.Click += (_, __) =>
+            {
+                if (!ValidateAndSave())
+                {
+                    return;
+                }
+
+                _openScriptEditor.Invoke();
+            };
+            host.Controls.Add(_btnReviewScript);
+        }
+
+        private void AttachVoiceNarrationButtons()
+        {
+            if (_generateHookNarrationAsync != null && _hookVoice?.NarrationButtonRow != null)
+            {
+                _btnGenerateHookNarration = CreateVoiceNarrationJellyButton(
+                    "btnShowcaseAudioGenHook",
+                    "Tạo audio hook",
+                    VoiceNarrationGenerateTint);
+                _btnGenerateHookNarration.Click += async (_, __) =>
+                {
+                    if (!ValidateAndSave())
+                    {
+                        return;
+                    }
+
+                    _btnGenerateHookNarration.Enabled = false;
+                    try
+                    {
+                        await _generateHookNarrationAsync().ConfigureAwait(true);
+                    }
+                    finally
+                    {
+                        RefreshNarrationButtons();
+                        if (_btnGenerateHookNarration != null && !_btnGenerateHookNarration.IsDisposed)
+                        {
+                            _btnGenerateHookNarration.Enabled = true;
+                        }
+                    }
+                };
+                _hookVoice.NarrationButtonRow.Controls.Add(_btnGenerateHookNarration);
+            }
+
+            if (_listenHookNarrationAsync != null && _hookVoice?.NarrationButtonRow != null)
+            {
+                _btnListenHookNarration = CreateVoiceNarrationJellyButton(
+                    "btnShowcaseAudioListenHook",
+                    "Nghe hook",
+                    VoiceNarrationListenTint);
+                _btnListenHookNarration.Enabled = _canListenHookNarration?.Invoke() ?? false;
+                _btnListenHookNarration.Click += async (_, __) =>
+                {
+                    _btnListenHookNarration.Enabled = false;
+                    try
+                    {
+                        await _listenHookNarrationAsync().ConfigureAwait(true);
+                    }
+                    finally
+                    {
+                        RefreshNarrationButtons();
+                    }
+                };
+                _hookVoice.NarrationButtonRow.Controls.Add(_btnListenHookNarration);
+            }
+
+            if (_generateBodyNarrationAsync != null && _bodyVoice?.NarrationButtonRow != null)
+            {
+                _btnGenerateBodyNarration = CreateVoiceNarrationJellyButton(
+                    "btnShowcaseAudioGenBody",
+                    "Tạo audio thân",
+                    VoiceNarrationGenerateTint);
+                _btnGenerateBodyNarration.Click += async (_, __) =>
+                {
+                    if (!ValidateAndSave())
+                    {
+                        return;
+                    }
+
+                    _btnGenerateBodyNarration.Enabled = false;
+                    try
+                    {
+                        await _generateBodyNarrationAsync().ConfigureAwait(true);
+                    }
+                    finally
+                    {
+                        RefreshNarrationButtons();
+                        if (_btnGenerateBodyNarration != null && !_btnGenerateBodyNarration.IsDisposed)
+                        {
+                            _btnGenerateBodyNarration.Enabled = true;
+                        }
+                    }
+                };
+                _bodyVoice.NarrationButtonRow.Controls.Add(_btnGenerateBodyNarration);
+            }
+
+            if (_listenBodyNarrationAsync != null && _bodyVoice?.NarrationButtonRow != null)
+            {
+                _btnListenBodyNarration = CreateVoiceNarrationJellyButton(
+                    "btnShowcaseAudioListenBody",
+                    "Nghe thân",
+                    VoiceNarrationListenTint);
+                _btnListenBodyNarration.Enabled = _canListenBodyNarration?.Invoke() ?? false;
+                _btnListenBodyNarration.Click += async (_, __) =>
+                {
+                    _btnListenBodyNarration.Enabled = false;
+                    try
+                    {
+                        await _listenBodyNarrationAsync().ConfigureAwait(true);
+                    }
+                    finally
+                    {
+                        RefreshNarrationButtons();
+                    }
+                };
+                _bodyVoice.NarrationButtonRow.Controls.Add(_btnListenBodyNarration);
+            }
+
+            LayoutVoiceNarrationButtons(_hookVoice);
+            LayoutVoiceNarrationButtons(_bodyVoice);
+        }
+
+        private static JellyButton CreateVoiceNarrationJellyButton(string name, string text, Color tint)
+        {
+            var btn = Form1.CreateAppJellyButton(
+                name,
+                text,
+                tint,
+                heightOverride: Form1.AppJellyButtonHeight,
+                minWidth: 96,
+                margin: new Padding(0, 0, 8, 0),
+                lockSize: true);
+            Form1.ResizeAppJellyButton(btn, minWidth: 96);
+            return btn;
+        }
+
+        private void LayoutVoiceNarrationButtons(VoiceSegmentUi seg)
+        {
+            if (seg == null)
+            {
+                return;
+            }
+
+            JellyButton gen = null;
+            JellyButton listen = null;
+            if (seg.IsHook)
+            {
+                gen = _btnGenerateHookNarration;
+                listen = _btnListenHookNarration;
+            }
+            else
+            {
+                gen = _btnGenerateBodyNarration;
+                listen = _btnListenBodyNarration;
+            }
+
+            foreach (var btn in new[] { gen, listen })
+            {
+                if (btn == null)
+                {
+                    continue;
+                }
+
+                Form1.ResizeAppJellyButton(btn, minWidth: 96);
+            }
+
+            seg.NarrationButtonRow?.PerformLayout();
+            SyncSegmentShellHeight(seg);
         }
     }
 }

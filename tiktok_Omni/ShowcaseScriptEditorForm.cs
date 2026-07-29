@@ -10,15 +10,36 @@ namespace tiktok_Omni
 {
     internal sealed class ShowcaseScriptEditorForm : Form
     {
+        private const string ColScene = "colScriptScene";
+        private const string ColVoiceover = "colScriptVoiceover";
+        private const int ScriptGridMinHeight = 480;
+        private const int ScriptGridMinRowHeight = 64;
+        private const int ScriptVoiceCellPad = 18;
+        private const string ScriptGridLayoutLock = "ScriptGridLayoutLock";
+
+        private enum ScriptGridRowKind
+        {
+            Hook,
+            Scene,
+            Cta
+        }
+
+        private sealed class ScriptGridRowTag
+        {
+            public ScriptGridRowKind Kind { get; set; }
+
+            public AiVideoGenInputItem Scene { get; set; }
+        }
+
         private readonly ShowcaseVideoItem _video;
-        private readonly TextBox _txtTheme;
-        private readonly TextBox _txtHook;
-        private readonly TextBox _txtCta;
-        private readonly List<TextBox> _sceneVoiceBoxes = new List<TextBox>();
+        private readonly ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot _speechBeforeEdit;
+        private TextBox _txtTheme;
+        private DataGridView _dgvScenes;
 
         public ShowcaseScriptEditorForm(ShowcaseVideoItem video)
         {
             _video = video ?? throw new ArgumentNullException(nameof(video));
+            _speechBeforeEdit = ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot.Capture(_video);
 
             Text = "Kịch bản — " + ((_video.ProductName ?? string.Empty).Trim().Length > 0
                 ? _video.ProductName.Trim()
@@ -31,8 +52,8 @@ namespace tiktok_Omni
             BackColor = Color.FromArgb(31, 34, 42);
             ForeColor = Color.Gainsboro;
             Font = new Font("Segoe UI", 10.5F);
-            ClientSize = new Size(1380, 740);
-            MinimumSize = new Size(1140, 580);
+            ClientSize = new Size(1380, 920);
+            MinimumSize = new Size(1140, 720);
             Padding = new Padding(24);
 
             var root = new TableLayoutPanel
@@ -45,149 +66,53 @@ namespace tiktok_Omni
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 80F));
 
-            var scroll = new Panel
+            var body = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                AutoScroll = true,
+                ColumnCount = 1,
+                RowCount = 2,
                 BackColor = BackColor,
-                Padding = new Padding(0, 0, 12, 8)
+                Padding = new Padding(0, 6, 0, 0)
             };
+            body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            body.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-            var stack = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Top,
-                BackColor = BackColor,
-                Width = 1260,
-                Padding = new Padding(0, 8, 0, 12)
-            };
-
-            void SyncStackWidths()
-            {
-                var w = Math.Max(600, stack.ClientSize.Width - stack.Padding.Horizontal);
-                foreach (Control section in stack.Controls)
-                {
-                    section.Width = w;
-                    if (!(section is FlowLayoutPanel flp))
-                    {
-                        continue;
-                    }
-
-                    foreach (Control child in flp.Controls)
-                    {
-                        if (child is Label lbl)
-                        {
-                            lbl.MaximumSize = new Size(w, 0);
-                        }
-                        else if (child is TextBox box)
-                        {
-                            box.Width = w;
-                        }
-                    }
-                }
-            }
-
-            scroll.Resize += (_, __) =>
-            {
-                stack.Width = Math.Max(930, scroll.ClientSize.Width - 24);
-                SyncStackWidths();
-            };
-
-            TextBox MkBox(string text, bool multiline = false) => new TextBox
-            {
-                Text = text ?? string.Empty,
-                Multiline = multiline,
-                WordWrap = multiline,
-                ScrollBars = multiline ? ScrollBars.Vertical : ScrollBars.None,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10.5F)
-            };
-
-            void AddLabeledField(string title, TextBox field, int fieldHeight, bool multiline = false)
-            {
-                fieldHeight += multiline ? 24 : 8;
-
-                var section = new FlowLayoutPanel
-                {
-                    FlowDirection = FlowDirection.TopDown,
-                    WrapContents = false,
-                    AutoSize = true,
-                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                    BackColor = BackColor,
-                    Margin = new Padding(0, 12, 0, 28)
-                };
-
-                var lbl = new Label
-                {
-                    Text = title,
-                    AutoSize = true,
-                    ForeColor = Color.FromArgb(160, 168, 182),
-                    Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
-                    Margin = new Padding(0, 0, 0, 10)
-                };
-
-                field.Height = fieldHeight;
-                field.Margin = new Padding(0, 0, 0, 2);
-                field.Width = 600;
-
-                section.Controls.Add(lbl);
-                section.Controls.Add(field);
-                stack.Controls.Add(section);
-            }
-
-            void AddSectionRow(string title)
-            {
-                stack.Controls.Add(new Label
-                {
-                    Text = title,
-                    AutoSize = true,
-                    ForeColor = Color.FromArgb(160, 168, 182),
-                    Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
-                    Margin = new Padding(0, 8, 0, 20)
-                });
-            }
-
-            AddLabeledField("Chủ đề video", _txtTheme = MkBox(_video.ShowcaseTheme), 34);
-
-            AddLabeledField("Hook mở đầu", _txtHook = MkBox(_video.ShowcaseHookText, multiline: true), 76, multiline: true);
-
-            AddLabeledField("CTA kết thúc", _txtCta = MkBox(_video.ShowcaseCtaText, multiline: true), 76, multiline: true);
+            var themePanel = BuildThemeFieldPanel();
+            themePanel.Dock = DockStyle.Fill;
+            body.Controls.Add(themePanel, 0, 0);
 
             var scenes = _video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
-            AddSectionRow("Voiceover từng cảnh (" + scenes.Count + ")");
-
-            if (scenes.Count == 0)
+            var gridSection = new TableLayoutPanel
             {
-                stack.Controls.Add(new Label
-                {
-                    Text = "Chưa có cảnh — thêm ảnh trên storyboard trước.",
-                    AutoSize = false,
-                    Height = 36,
-                    TextAlign = ContentAlignment.TopLeft,
-                    ForeColor = Color.FromArgb(140, 148, 162),
-                    Font = new Font("Segoe UI", 10F),
-                    Margin = new Padding(0, 0, 0, 16)
-                });
-            }
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                BackColor = BackColor,
+                MinimumSize = new Size(0, ScriptGridMinHeight),
+                Padding = new Padding(0, 20, 0, 0)
+            };
+            gridSection.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            gridSection.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-            for (var i = 0; i < scenes.Count; i++)
+            var gridCaption = new Label
             {
-                var scene = scenes[i];
-                var role = string.IsNullOrWhiteSpace(scene.SceneRole) ? "?" : scene.SceneRole;
-                var title = string.IsNullOrWhiteSpace(scene.SceneTitle) ? "Cảnh " + (i + 1) : scene.SceneTitle;
-                var box = MkBox(scene.SceneVoiceover, multiline: true);
-                _sceneVoiceBoxes.Add(box);
-                AddLabeledField((i + 1) + ". [" + role + "] " + title, box, 112, multiline: true);
-            }
+                Text = "Thoại · Hook · CTA · từng cảnh (" + (scenes.Count + 2) + " dòng)",
+                AutoSize = true,
+                ForeColor = Color.FromArgb(160, 168, 182),
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 0, 0, 14),
+                Padding = new Padding(0, 0, 0, 4)
+            };
 
-            scroll.Controls.Add(stack);
-            SyncStackWidths();
-            root.Controls.Add(scroll, 0, 0);
+            _dgvScenes = BuildSceneGrid(scenes);
+            _dgvScenes.Dock = DockStyle.Fill;
+            _dgvScenes.Margin = new Padding(0, 4, 0, 0);
+            gridSection.Controls.Add(gridCaption, 0, 0);
+            gridSection.Controls.Add(_dgvScenes, 0, 1);
+            body.Controls.Add(gridSection, 0, 1);
+
+            root.Controls.Add(body, 0, 0);
 
             var btnOk = CreateButton("OK", Color.FromArgb(56, 120, 82));
             btnOk.DialogResult = DialogResult.OK;
@@ -211,12 +136,6 @@ namespace tiktok_Omni
 
             Controls.Add(root);
 
-            Load += (_, __) =>
-            {
-                SyncStackWidths();
-                stack.PerformLayout();
-            };
-
             btnOk.Click += (_, __) =>
             {
                 if (!ValidateAndSave())
@@ -224,22 +143,374 @@ namespace tiktok_Omni
                     DialogResult = DialogResult.None;
                 }
             };
+
+            Shown += (_, __) => BeginInvoke(new Action(LayoutScriptGrid));
+        }
+
+        private void LayoutScriptGrid()
+        {
+            if (_dgvScenes == null || _dgvScenes.IsDisposed)
+            {
+                return;
+            }
+
+            FitScriptSceneColumnWidth(_dgvScenes);
+            ResizeScriptVoiceoverRows(_dgvScenes);
+        }
+
+        private void QueueScriptGridRowResize()
+        {
+            if (_dgvScenes == null || _dgvScenes.IsDisposed || IsScriptGridLayoutLocked(_dgvScenes))
+            {
+                return;
+            }
+
+            _dgvScenes.BeginInvoke(new Action(() => ResizeScriptVoiceoverRows(_dgvScenes)));
+        }
+
+        private Control BuildThemeFieldPanel()
+        {
+            const int themeFieldHeight = 44;
+
+            var block = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                BackColor = BackColor,
+                Margin = new Padding(0, 0, 0, 8),
+                Padding = new Padding(0, 0, 0, 6)
+            };
+            block.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            block.RowStyles.Add(new RowStyle(SizeType.Absolute, themeFieldHeight));
+
+            block.Controls.Add(new Label
+            {
+                Text = "Chủ đề video",
+                AutoSize = true,
+                ForeColor = Color.FromArgb(160, 168, 182),
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                Margin = new Padding(0, 0, 0, 10),
+                Padding = new Padding(0, 0, 0, 2)
+            }, 0, 0);
+
+            _txtTheme = new TextBox
+            {
+                Text = _video.ShowcaseTheme ?? string.Empty,
+                BackColor = Color.FromArgb(45, 49, 60),
+                ForeColor = Color.WhiteSmoke,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10.5F),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 2, 0, 6),
+                MinimumSize = new Size(0, themeFieldHeight - 4)
+            };
+            block.Controls.Add(_txtTheme, 0, 1);
+            return block;
+        }
+
+        private DataGridView BuildSceneGrid(IList<AiVideoGenInputItem> scenes)
+        {
+            var grid = new DataGridView
+            {
+                BackgroundColor = Color.FromArgb(38, 42, 52),
+                GridColor = Color.FromArgb(58, 64, 78),
+                BorderStyle = BorderStyle.None,
+                RowHeadersVisible = false,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = true,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
+                ScrollBars = ScrollBars.Both,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.FromArgb(45, 49, 60),
+                    ForeColor = Color.WhiteSmoke,
+                    SelectionBackColor = Color.FromArgb(68, 118, 168),
+                    SelectionForeColor = Color.White,
+                    Font = new Font("Segoe UI", 10.5F),
+                    WrapMode = DataGridViewTriState.True
+                },
+                ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.FromArgb(52, 58, 72),
+                    ForeColor = Color.Gainsboro,
+                    Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                    Alignment = DataGridViewContentAlignment.MiddleCenter
+                },
+                EnableHeadersVisualStyles = false,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
+            };
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColScene,
+                HeaderText = "Phân cảnh",
+                ReadOnly = true,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                Tag = "SkipHeaderWidth",
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.TopLeft,
+                    WrapMode = DataGridViewTriState.True
+                }
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColVoiceover,
+                HeaderText = "Lời thoại",
+                ReadOnly = false,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 100F,
+                MinimumWidth = 120,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.TopLeft,
+                    WrapMode = DataGridViewTriState.True
+                }
+            });
+
+            Form1.ApplyAppGridHeaderChrome(grid);
+            AppGridSttColumn.EnsureFirstColumn(grid);
+            grid.RowTemplate.MinimumHeight = Math.Max(grid.RowTemplate.MinimumHeight, ScriptGridMinRowHeight);
+
+            AddGridRow(grid, "Hook mở đầu", _video.ShowcaseHookText ?? string.Empty, new ScriptGridRowTag { Kind = ScriptGridRowKind.Hook });
+
+            if (scenes.Count == 0)
+            {
+                var rowIndex = grid.Rows.Add();
+                var placeholder = grid.Rows[rowIndex];
+                placeholder.Cells[ColScene].Value = "(Chưa có cảnh — thêm ảnh trên storyboard trước.)";
+                placeholder.Cells[ColVoiceover].Value = string.Empty;
+                placeholder.ReadOnly = true;
+                placeholder.DefaultCellStyle.ForeColor = Color.FromArgb(140, 148, 162);
+            }
+            else
+            {
+                for (var i = 0; i < scenes.Count; i++)
+                {
+                    var scene = scenes[i];
+                    ResolveSceneRowContent(scene, i, out var sceneName, out var voice);
+                    AddGridRow(
+                        grid,
+                        sceneName,
+                        voice,
+                        new ScriptGridRowTag { Kind = ScriptGridRowKind.Scene, Scene = scene });
+                }
+            }
+
+            AddGridRow(grid, "CTA kết thúc", _video.ShowcaseCtaText ?? string.Empty, new ScriptGridRowTag { Kind = ScriptGridRowKind.Cta });
+
+            grid.CellEndEdit += (_, __) => QueueScriptGridRowResize();
+            grid.ColumnWidthChanged += (_, __) => QueueScriptGridRowResize();
+            grid.SizeChanged += (_, __) => QueueScriptGridRowResize();
+
+            return grid;
+        }
+
+        private static bool IsScriptGridLayoutLocked(DataGridView grid) =>
+            string.Equals(grid?.Tag as string, ScriptGridLayoutLock, StringComparison.Ordinal);
+
+        /// <summary>Giãn chiều cao dòng theo wrap cột Phân cảnh và Lời thoại.</summary>
+        private static void ResizeScriptVoiceoverRows(DataGridView grid)
+        {
+            if (grid == null || grid.IsDisposed || IsScriptGridLayoutLocked(grid)
+                || !grid.Columns.Contains(ColVoiceover))
+            {
+                return;
+            }
+
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                row.MinimumHeight = ScriptGridMinRowHeight;
+                var hScene = MeasureScriptGridCellHeight(grid, row, ColScene);
+                var hVoice = MeasureScriptGridCellHeight(grid, row, ColVoiceover);
+                row.Height = Math.Max(ScriptGridMinRowHeight, Math.Max(hScene, hVoice));
+            }
+        }
+
+        private static int MeasureScriptGridCellHeight(DataGridView grid, DataGridViewRow row, string colName)
+        {
+            if (!grid.Columns.Contains(colName))
+            {
+                return ScriptGridMinRowHeight;
+            }
+
+            var col = grid.Columns[colName];
+            var colWidth = col.Displayed ? col.Width : col.MinimumWidth;
+            if (colWidth < 48)
+            {
+                colWidth = colName == ColScene ? 200 : 400;
+            }
+
+            var measureWidth = Math.Max(48, colWidth - ScriptVoiceCellPad);
+            var cell = row.Cells[colName];
+            var font = cell.InheritedStyle.Font ?? grid.DefaultCellStyle.Font ?? grid.Font;
+            var text = cell.Value?.ToString() ?? string.Empty;
+            if (text.Length == 0)
+            {
+                return ScriptGridMinRowHeight;
+            }
+
+            var size = TextRenderer.MeasureText(
+                text,
+                font,
+                new Size(measureWidth, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPadding);
+            return Math.Max(ScriptGridMinRowHeight, size.Height + ScriptVoiceCellPad);
+        }
+
+        /// <summary>Cột Phân cảnh co theo nội dung; Lời thoại chiếm phần còn lại.</summary>
+        private static void FitScriptSceneColumnWidth(DataGridView grid)
+        {
+            if (grid == null || grid.IsDisposed || !grid.Columns.Contains(ColScene))
+            {
+                return;
+            }
+
+            var sceneCol = grid.Columns[ColScene];
+            var font = sceneCol.DefaultCellStyle.Font ?? grid.DefaultCellStyle.Font ?? grid.Font;
+            const int horizontalPad = 28;
+            const int minWidth = 96;
+            const int maxWidth = 280;
+
+            var maxText = TextRenderer.MeasureText(
+                sceneCol.HeaderText ?? "Phân cảnh",
+                font,
+                new Size(int.MaxValue, int.MaxValue),
+                TextFormatFlags.NoPadding).Width;
+
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                var text = row.Cells[ColScene].Value?.ToString() ?? string.Empty;
+                if (text.Length == 0)
+                {
+                    continue;
+                }
+
+                var w = TextRenderer.MeasureText(
+                    text,
+                    font,
+                    new Size(int.MaxValue, int.MaxValue),
+                    TextFormatFlags.NoPadding).Width;
+                if (w > maxText)
+                {
+                    maxText = w;
+                }
+            }
+
+            var width = Math.Min(maxWidth, Math.Max(minWidth, maxText + horizontalPad));
+
+            var prevTag = grid.Tag;
+            grid.Tag = ScriptGridLayoutLock;
+            try
+            {
+                grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None;
+                sceneCol.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                sceneCol.Width = width;
+                sceneCol.MinimumWidth = width;
+                sceneCol.FillWeight = 1f;
+
+                if (grid.Columns.Contains(ColVoiceover))
+                {
+                    var voiceCol = grid.Columns[ColVoiceover];
+                    voiceCol.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                    voiceCol.FillWeight = 100f;
+                    voiceCol.MinimumWidth = 120;
+                }
+            }
+            finally
+            {
+                grid.Tag = prevTag;
+            }
+        }
+
+        private static void AddGridRow(DataGridView grid, string sceneName, string voiceover, ScriptGridRowTag tag)
+        {
+            var rowIndex = grid.Rows.Add();
+            var row = grid.Rows[rowIndex];
+            row.Cells[ColScene].Value = sceneName ?? string.Empty;
+            row.Cells[ColVoiceover].Value = voiceover ?? string.Empty;
+            row.Tag = tag;
+        }
+
+        /// <summary>Tách tên cảnh và lời thoại — tránh gán nhầm khi thoại nằm trong SceneTitle.</summary>
+        private static void ResolveSceneRowContent(
+            AiVideoGenInputItem scene,
+            int index,
+            out string sceneName,
+            out string voice)
+        {
+            voice = (scene?.SceneVoiceover ?? string.Empty).Trim();
+            var title = (scene?.SceneTitle ?? string.Empty).Trim();
+            var role = (scene?.SceneRole ?? string.Empty).Trim();
+
+            if (voice.Length > 0)
+            {
+                sceneName = title.Length > 0 ? title : "Cảnh " + (index + 1);
+                return;
+            }
+
+            if (title.Length > 0)
+            {
+                voice = title;
+                sceneName = role.Length > 0 ? role : "Cảnh " + (index + 1);
+                return;
+            }
+
+            sceneName = "Cảnh " + (index + 1);
         }
 
         private bool ValidateAndSave()
         {
             _video.ShowcaseTheme = _txtTheme.Text?.Trim() ?? string.Empty;
-            _video.ShowcaseHookText = _txtHook.Text?.Trim() ?? string.Empty;
-            _video.ShowcaseCtaText = _txtCta.Text?.Trim() ?? string.Empty;
+            _video.ShowcaseHookText = string.Empty;
+            _video.ShowcaseCtaText = string.Empty;
 
-            var scenes = _video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
-            for (var i = 0; i < scenes.Count && i < _sceneVoiceBoxes.Count; i++)
+            if (_dgvScenes != null && !_dgvScenes.IsDisposed)
             {
-                scenes[i].SceneVoiceover = _sceneVoiceBoxes[i].Text?.Trim() ?? string.Empty;
-                scenes[i].ShowcaseTheme = _video.ShowcaseTheme;
+                foreach (DataGridViewRow row in _dgvScenes.Rows)
+                {
+                    if (row.IsNewRow || !(row.Tag is ScriptGridRowTag tag))
+                    {
+                        continue;
+                    }
+
+                    var voice = (row.Cells[ColVoiceover].Value?.ToString() ?? string.Empty).Trim();
+                    switch (tag.Kind)
+                    {
+                        case ScriptGridRowKind.Hook:
+                            _video.ShowcaseHookText = voice;
+                            break;
+                        case ScriptGridRowKind.Cta:
+                            _video.ShowcaseCtaText = voice;
+                            break;
+                        case ScriptGridRowKind.Scene when tag.Scene != null:
+                            tag.Scene.SceneVoiceover = voice;
+                            tag.Scene.ShowcaseTheme = _video.ShowcaseTheme;
+                            break;
+                    }
+                }
             }
 
             _video.ApplySettingsToScenes();
+            ShowcaseSubtitleDisplayHelper.SyncDisplayTextFromSpeechEdits(_video, _speechBeforeEdit);
             ShowcaseContentDisplayHelper.RefreshContentLabels(_video);
             return true;
         }

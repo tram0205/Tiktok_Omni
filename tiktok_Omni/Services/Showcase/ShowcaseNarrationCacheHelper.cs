@@ -14,6 +14,9 @@ namespace tiktok_Omni.Services.Showcase
     {
         public const string NarrationFileName = "narration.mp3";
         public const string FingerprintFileName = "narration_script.fingerprint";
+        public const string HookPreviewFileName = "hook_preview.mp3";
+        public const string BodyPreviewFileName = "body_preview.mp3";
+        public const string FullMixPreviewFileName = "full_mix_preview.mp3";
 
         /// <summary>Lấy thư mục phiên (cha của veo_clips) từ đường dẫn clip scene_XX.</summary>
         public static string TryResolveSessionBaseFromClips(IList<AiVideoGenInputItem> orderedScenes)
@@ -273,17 +276,114 @@ namespace tiktok_Omni.Services.Showcase
             {
                 return false;
             }
+            return AudioFileHasContent(Path.Combine(GetAudioDirectory(sessionBaseDir), NarrationFileName));
+        }
 
-            var path = Path.Combine(GetAudioDirectory(sessionBaseDir), NarrationFileName);
+        public static string GetHookPreviewPath(string sessionBaseDir) =>
+            Path.Combine(GetAudioDirectory(sessionBaseDir), HookPreviewFileName);
+
+        public static string GetBodyPreviewPath(string sessionBaseDir) =>
+            Path.Combine(GetAudioDirectory(sessionBaseDir), BodyPreviewFileName);
+
+        public static string GetFullMixPreviewPath(string sessionBaseDir) =>
+            Path.Combine(GetAudioDirectory(sessionBaseDir), FullMixPreviewFileName);
+
+        public static bool HasFullMixPreviewFile(string sessionBaseDir) =>
+            AudioFileHasContent(GetFullMixPreviewPath(sessionBaseDir));
+
+        public static bool HasHookPreviewFile(string sessionBaseDir) =>
+            AudioFileHasContent(GetHookPreviewPath(sessionBaseDir));
+
+        public static bool HasBodyPreviewFile(string sessionBaseDir) =>
+            AudioFileHasContent(GetBodyPreviewPath(sessionBaseDir));
+
+        public static bool HasBothPreviewFiles(string sessionBaseDir) =>
+            HasHookPreviewFile(sessionBaseDir) && HasBodyPreviewFile(sessionBaseDir);
+
+        private static bool AudioFileHasContent(string path)
+        {
             try
             {
-                var info = new FileInfo(path);
+                var info = new FileInfo(path ?? string.Empty);
                 return info.Exists && info.Length > 512;
             }
             catch
             {
                 return false;
             }
+        }
+
+        public static void ClearHookPreview(string sessionBaseDir)
+        {
+            if (string.IsNullOrWhiteSpace(sessionBaseDir))
+            {
+                return;
+            }
+
+            TryDelete(GetHookPreviewPath(sessionBaseDir));
+            ClearCachedNarration(sessionBaseDir);
+        }
+
+        public static bool HasBodyVoiceAfterFirstVoicedScene(IList<AiVideoGenInputItem> orderedScenes)
+        {
+            if (orderedScenes == null)
+            {
+                return false;
+            }
+
+            var foundHook = false;
+            foreach (var scene in orderedScenes)
+            {
+                if (scene == null || scene.ShowcaseSceneSilent)
+                {
+                    continue;
+                }
+
+                if (!foundHook)
+                {
+                    foundHook = true;
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(scene.SceneVoiceover))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Có thể nghe timeline đầy đủ (narration.mp3 hoặc ghép preview hook/thân).</summary>
+        public static bool CanListenFullNarration(string sessionBaseDir, IList<AiVideoGenInputItem> orderedScenes)
+        {
+            if (!string.IsNullOrWhiteSpace(sessionBaseDir) && HasNarrationFile(sessionBaseDir))
+            {
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(sessionBaseDir) || !HasHookPreviewFile(sessionBaseDir))
+            {
+                return false;
+            }
+
+            if (!HasBodyVoiceAfterFirstVoicedScene(orderedScenes))
+            {
+                return true;
+            }
+
+            return HasBodyPreviewFile(sessionBaseDir);
+        }
+
+        public static void ClearBodyPreview(string sessionBaseDir)
+        {
+            if (string.IsNullOrWhiteSpace(sessionBaseDir))
+            {
+                return;
+            }
+
+            TryDelete(GetBodyPreviewPath(sessionBaseDir));
+            ClearCachedNarration(sessionBaseDir);
         }
 
         /// <summary>Xóa narration cache sau khi đổi thoại — render sẽ gọi TTS lại.</summary>
@@ -296,6 +396,23 @@ namespace tiktok_Omni.Services.Showcase
 
             var audioDir = GetAudioDirectory(sessionBaseDir);
             TryDelete(Path.Combine(audioDir, NarrationFileName));
+            TryDelete(Path.Combine(audioDir, FingerprintFileName));
+            TryDelete(ShowcaseNarrationTimingManifest.GetPath(audioDir));
+        }
+
+        /// <summary>Xóa toàn bộ audio cache phiên (preview + narration).</summary>
+        public static void ClearAllCachedAudio(string sessionBaseDir)
+        {
+            ClearCachedNarration(sessionBaseDir);
+            if (string.IsNullOrWhiteSpace(sessionBaseDir))
+            {
+                return;
+            }
+
+            var audioDir = GetAudioDirectory(sessionBaseDir);
+            TryDelete(GetHookPreviewPath(sessionBaseDir));
+            TryDelete(GetBodyPreviewPath(sessionBaseDir));
+            TryDelete(GetFullMixPreviewPath(sessionBaseDir));
             TryDelete(Path.Combine(audioDir, FingerprintFileName));
             TryDelete(ShowcaseNarrationTimingManifest.GetPath(audioDir));
         }

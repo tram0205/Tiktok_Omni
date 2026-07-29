@@ -208,7 +208,7 @@ namespace tiktok_Omni
                     clipModeCombo.ReadOnly = false;
                     clipModeCombo.HeaderText = "Công cụ Video";
                     clipModeCombo.ToolTipText =
-                        "Công cụ clip: Veo + Zoom, Veo + Kling, Zoom + Kling, Chỉ Veo/Kling/Zoom, Gemini gợi ý. Chọn trước «Tạo kịch bản».";
+                        "Công cụ clip: Veo + Zoom, Veo + Kling, Zoom + Kling, Kling + Veo + Zoom, Chỉ Veo/Kling/Zoom, Gemini gợi ý. Chọn trước «Tạo kịch bản».";
                 }
 
                 var aspectCol = dgvDeepDiveInput.Columns["colAiShowcaseOutputAspect"];
@@ -841,7 +841,7 @@ namespace tiktok_Omni
 
                 Name = "colAiShowcaseSceneSummary",
 
-                HeaderText = "Cảnh",
+                HeaderText = "Phân cảnh",
 
                 DataPropertyName = nameof(ShowcaseVideoItem.SceneCountDisplay),
 

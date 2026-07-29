@@ -288,7 +288,8 @@ namespace tiktok_Omni.Services
                         var bodyOpts = ShowcaseSubtitleStyleHelper.BuildBodyOptionsWithLineOverride(
                             style,
                             settings,
-                            slice.AnimationStorage);
+                            slice.AnimationStorage,
+                            slice.LineStyle);
                         AppendDialogueLines(
                             sb,
                             slice.Words,
@@ -365,13 +366,24 @@ namespace tiktok_Omni.Services
 
                 var lineStartMs = chunk[0].StartTimeMs;
                 var lineEndMs = chunk[chunk.Count - 1].EndTimeMs;
-                var text = BuildChunkDialogueText(chunk, lineStartMs, opt);
+                var text = BuildLineBackgroundPrefix(opt) + BuildChunkDialogueText(chunk, lineStartMs, opt);
                 sb.AppendLine(
                     "Dialogue: 0," +
                     FormatAssTime(lineStartMs) + "," +
                     FormatAssTime(lineEndMs) +
                     "," + styleName + ",,0,0,0,," + text);
             }
+        }
+
+        private static string BuildLineBackgroundPrefix(AssSubtitleGeneratorOptions opt)
+        {
+            if (opt == null)
+            {
+                return string.Empty;
+            }
+
+            return ShowcaseSubtitleHighlightColourCatalog.BuildLineBackgroundAssTag(
+                opt.LineBackgroundColourAss);
         }
 
         private static IReadOnlyList<List<WordTimestamp>> GroupIntoLines(
@@ -804,5 +816,8 @@ namespace tiktok_Omni.Services
 
         /// <summary>ASS SecondaryColour — màu tô khi karaoke highlight.</summary>
         public string SecondaryColourAss { get; set; }
+
+        /// <summary>Band nền phía sau cả dòng — ASS prefix tag khi render.</summary>
+        public string LineBackgroundColourAss { get; set; }
     }
 }

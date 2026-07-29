@@ -56,6 +56,13 @@ namespace tiktok_Omni
                 return;
             }
 
+            var video = GetActiveShowcaseVideo();
+            var prunedScenes = 0;
+            if (video != null && video.Scenes.Count > 0)
+            {
+                prunedScenes = SyncShowcaseSourceImagesForVideo(video, refreshUi: false);
+            }
+
             flpAffiliateDeepStoryboard.SuspendLayout();
             flpAffiliateDeepStoryboard.Controls.Clear();
             var scenes = GetDeepDiveStoryboardOrderedBuffer();
@@ -65,6 +72,12 @@ namespace tiktok_Omni
             }
 
             flpAffiliateDeepStoryboard.ResumeLayout(true);
+            if (prunedScenes > 0 && video != null)
+            {
+                video.RefreshDisplayFields();
+                SyncBuffersToGrids();
+                RefreshAiVideoGenModeReadinessLabels();
+            }
         }
 
         private List<AiVideoGenInputItem> GetDeepDiveStoryboardOrderedBuffer()
@@ -98,7 +111,7 @@ namespace tiktok_Omni
                 SizeMode = PictureBoxSizeMode.Zoom,
                 BackColor = Color.FromArgb(20, 22, 28)
             };
-            TryLoadStoryboardThumb(pic, item?.ImageUrl);
+            TryLoadStoryboardThumb(pic, item?.ThumbnailPath ?? item?.ImageUrl);
 
             var sceneName = !string.IsNullOrWhiteSpace(item?.SceneTitle)
                 ? item.SceneTitle.Trim()

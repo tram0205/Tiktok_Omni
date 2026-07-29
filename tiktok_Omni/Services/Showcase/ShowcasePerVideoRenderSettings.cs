@@ -137,7 +137,7 @@ namespace tiktok_Omni.Services.Showcase
                 HookSubtitleFontSize = video.ShowcaseHookSubtitleFontSize,
                 BackgroundMusicFile = video.ShowcaseBackgroundMusicFile ?? string.Empty,
                 MusicVolume = video.ShowcaseMusicVolume >= 0 ? video.ShowcaseMusicVolume : 14,
-                NarrationSpeedPercent = ShowcaseNarrationSpeedHelper.ResolveEffectiveSpeedPercent(video.ShowcaseNarrationSpeedPercent),
+                NarrationSpeedPercent = ShowcaseNarrationSpeedHelper.ResolveRenderSpeedPercent(video),
                 TtsEngine = video.ShowcaseTtsEngine ?? string.Empty,
                 HookTtsEngine = video.ShowcaseHookTtsEngine ?? string.Empty,
                 BodyTtsEngine = video.ShowcaseBodyTtsEngine ?? string.Empty,

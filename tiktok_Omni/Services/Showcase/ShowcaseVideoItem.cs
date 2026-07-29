@@ -122,6 +122,30 @@ namespace tiktok_Omni.Services.Showcase
 
         public int ShowcaseHookSubtitleFontSize { get; set; }
 
+        /// <summary>ASS PrimaryColour thân — rỗng = trắng.</summary>
+        public string ShowcaseSubtitlePrimaryColourAss { get; set; } = string.Empty;
+
+        /// <summary>Viền/bóng thân — rỗng = mặc định.</summary>
+        public string ShowcaseSubtitleDecorPreset { get; set; } = string.Empty;
+
+        /// <summary>ASS PrimaryColour hook — rỗng = vàng catalog.</summary>
+        public string ShowcaseHookSubtitlePrimaryColourAss { get; set; } = string.Empty;
+
+        /// <summary>Viền/bóng hook.</summary>
+        public string ShowcaseHookSubtitleDecorPreset { get; set; } = string.Empty;
+
+        /// <summary>Preset gom font/màu/trang trí thân — <see cref="ShowcaseSubtitleLookPresetCatalog"/>.</summary>
+        public string ShowcaseSubtitleLookPreset { get; set; } = string.Empty;
+
+        /// <summary>Preset gom font/màu/trang trí hook.</summary>
+        public string ShowcaseHookSubtitleLookPreset { get; set; } = string.Empty;
+
+        /// <summary>Màu tô karaoke/highlight thân — rỗng = theo kiểu chữ.</summary>
+        public string ShowcaseSubtitleHighlightColourAss { get; set; } = string.Empty;
+
+        /// <summary>Màu tô hook — rỗng = theo kiểu hook.</summary>
+        public string ShowcaseHookSubtitleHighlightColourAss { get; set; } = string.Empty;
+
         public string ShowcaseSubtitleStyleLabel { get; set; } = string.Empty;
 
 
@@ -132,8 +156,14 @@ namespace tiktok_Omni.Services.Showcase
 
         public int ShowcaseMusicVolume { get; set; } = 14;
 
-        /// <summary>0 = tự khớp thoại với clip; 50–200 = tốc độ thoại %.</summary>
+        /// <summary>0 = tự khớp thoại với clip; 50–200 = tốc độ thoại % (legacy — dùng hook/thân riêng).</summary>
         public int ShowcaseNarrationSpeedPercent { get; set; }
+
+        /// <summary>Tốc độ timeline thoại hook — 50–200% (0 → 100%).</summary>
+        public int ShowcaseHookNarrationSpeedPercent { get; set; }
+
+        /// <summary>Tốc độ timeline thoại thân — 50–200% (0 → 100%).</summary>
+        public int ShowcaseBodyNarrationSpeedPercent { get; set; }
 
         public string ShowcaseTtsEngine { get; set; } = string.Empty;
 

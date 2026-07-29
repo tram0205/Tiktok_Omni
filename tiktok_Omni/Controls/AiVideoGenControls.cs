@@ -51,6 +51,8 @@ namespace tiktok_Omni.Controls
         private Button _btnSlideshowOpenApproval;
         private Button _btnDeepGenerateScript;
         private Button _btnRunAffiliateDeepVideo;
+        private Button _btnShowcaseOverview;
+        private FlowLayoutPanel _flpShowcaseExecute;
         private Button _btnDeepClearGrid;
         private Button _btnShowcaseExportExcel;
         private Button _btnShowcaseGenerateZoomClips;
@@ -109,6 +111,8 @@ namespace tiktok_Omni.Controls
 
         public Button RunAffiliateDeepVideoButton => _btnRunAffiliateDeepVideo;
 
+        public Button ShowcaseOverviewButton => _btnShowcaseOverview;
+
         public Button DeepGenerateScriptButton => _btnDeepGenerateScript;
 
         public Button DeepEditScriptButton => null;
@@ -140,7 +144,7 @@ namespace tiktok_Omni.Controls
                 return;
             }
 
-            _btnShowcaseStop.Text = continueMode ? "Tiếp tục" : "Dừng";
+            _btnShowcaseStop.Text = continueMode ? "Tiếp tục" : "⏹ Dừng lại";
             _btnShowcaseStop.Enabled = enabled;
             if (_btnShowcaseStop is JellyButton jelly)
             {
@@ -412,7 +416,7 @@ namespace tiktok_Omni.Controls
             _btnDeepGenerateScript = CreateShowcaseJellyButton("btnDeepGenerateScript", "📝 Tạo kịch bản", ShowcaseTintScript, 148);
             _btnDeepGenerateScript.Click += async (_, __) => await RunHostAsync(_btnDeepGenerateScript, h => h.GenerateShowcaseSceneScriptAsync()).ConfigureAwait(true);
 
-            _btnShowcaseExportExcel = CreateShowcaseJellyButton("btnShowcaseExportExcel", "Tải excel prompt", ShowcaseTintExcel, 148);
+            _btnShowcaseExportExcel = CreateShowcaseJellyButton("btnShowcaseExportExcel", "Tải excel prompt", ShowcaseTintExcel, 232);
             _btnShowcaseExportExcel.Click += async (_, __) => await RunHostAsync(_btnShowcaseExportExcel, h => h.ExportShowcaseExcelAsync()).ConfigureAwait(true);
 
             _btnShowcaseGenerateZoomClips = CreateShowcaseJellyButton("btnShowcaseGenerateZoomClips", "⚡ Tạo clip Zoom", ShowcaseTintZoom, 156);
@@ -443,7 +447,7 @@ namespace tiktok_Omni.Controls
             _btnShowcaseListenNarration.Click += async (_, __) =>
                 await RunHostAsync(_btnShowcaseListenNarration, h => h.ListenShowcaseNarrationAsync()).ConfigureAwait(true);
 
-            _btnShowcaseStop = CreateShowcaseJellyButton("btnShowcaseStop", "Dừng", ShowcaseTintStop, 96);
+            _btnShowcaseStop = CreateShowcaseJellyButton("btnShowcaseStop", "⏹ Dừng lại", ShowcaseTintStop, 128);
             _btnShowcaseStop.Enabled = false;
             _btnShowcaseStop.Click += async (_, __) =>
             {
@@ -466,17 +470,43 @@ namespace tiktok_Omni.Controls
                 }
             };
 
+            _btnShowcaseOverview = CreateShowcaseJellyButton(
+                "btnShowcaseOverview",
+                "👁 Tổng quan",
+                Color.FromArgb(72, 118, 198),
+                168);
+
             _btnRunAffiliateDeepVideo = Form1.CreateAppPrimaryJellyButton(
                 "btnRunAffiliateDeepVideo",
                 "▶ Render video",
                 Color.FromArgb(22, 168, 86),
-                minWidth: 520,
-                margin: new Padding(0));
+                minWidth: 300,
+                margin: new Padding(8, 0, 8, 0));
             if (_btnRunAffiliateDeepVideo is JellyButton renderJelly)
             {
                 renderJelly.JellyFillOpacity = 0.92f;
                 renderJelly.ForeColor = Color.FromArgb(255, 252, 240);
             }
+
+            _btnShowcaseOverview.Click += async (_, __) =>
+            {
+                if (_host == null)
+                {
+                    return;
+                }
+
+                if (_host.IsShowcaseTabPaused)
+                {
+                    MessageBox.Show(
+                        "Tab Showcase đang dừng — bấm «Tiếp tục» (nút cam) rồi thử lại.",
+                        "Tổng quan",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
+                await _host.PreviewShowcaseOverviewAsync().ConfigureAwait(true);
+            };
 
             _btnRunAffiliateDeepVideo.Click += async (_, __) =>
             {
@@ -491,6 +521,11 @@ namespace tiktok_Omni.Controls
                 }
 
                 _btnRunAffiliateDeepVideo.Enabled = false;
+                if (_btnShowcaseOverview != null && !_btnShowcaseOverview.IsDisposed)
+                {
+                    _btnShowcaseOverview.Enabled = false;
+                }
+
                 try
                 {
                     await _host.RunAffiliateDeepVideoAsync().ConfigureAwait(true);
@@ -520,10 +555,12 @@ namespace tiktok_Omni.Controls
                 "Mở file narration.mp3 đã tạo — nghe thử trước khi render (không gọi ElevenLabs lại).");
             _showcaseToolTip.SetToolTip(_btnShowcaseAddVideoRow,
                 "Thêm một dòng video mới trên lưới — thêm ảnh bằng cột «Ảnh» (➕ Thêm ảnh) trên từng dòng.");
+            _showcaseToolTip.SetToolTip(_btnShowcaseOverview,
+                "Bảng trực quan: pipeline, timeline từng cảnh (ảnh + clip + thoại), thoại/phụ đề/nhạc, checklist Render.");
             _showcaseToolTip.SetToolTip(_btnRunAffiliateDeepVideo,
-                "Cần đủ clip + thoại + audio (tab Âm thanh → «Audio thoại» → Tạo audio). Nghe thử ngay trên tab đó.");
+                "Bấm để render — nếu thiếu điều kiện, app liệt kê cụ thể (clip, thoại, TTS, FFmpeg…).");
             _showcaseToolTip.SetToolTip(_btnShowcaseStop,
-                "Dừng mọi thao tác tab (Gemini, Zoom, audio, render). Sau đó bấm «Tiếp tục» (cam) để mở khóa — không tự chạy lại job đã hủy.");
+                "Dừng lại mọi thao tác tab (Gemini, Zoom, audio, render). Sau đó bấm «Tiếp tục» (cam) để mở khóa — không tự chạy lại job đã hủy.");
 
             // Một dòng: thêm/xoá trái; kịch bản → Zoom → lời thoại → audio căn giữa toolbar
             _flpShowcaseRowManage = CreateActionFlowPanel();
@@ -539,7 +576,6 @@ namespace tiktok_Omni.Controls
             _flpShowcaseWorkflow.Controls.Add(_btnShowcaseGenerateZoomClips);
             _flpShowcaseWorkflow.Controls.Add(_btnShowcaseGenerateVoiceover);
             _btnShowcasePreviewNarration.Visible = false;
-            _flpShowcaseWorkflow.Controls.Add(_btnShowcaseStop);
 
             _pnlAffiliateDeepHeaderActions.Controls.Add(_flpShowcaseRowManage);
             _pnlAffiliateDeepHeaderActions.Controls.Add(_flpShowcaseWorkflow);
@@ -559,7 +595,15 @@ namespace tiktok_Omni.Controls
             tblRenderCenter.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             tblRenderCenter.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             tblRenderCenter.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tblRenderCenter.Controls.Add(_btnRunAffiliateDeepVideo, 1, 0);
+
+            _flpShowcaseExecute = CreateActionFlowPanel();
+            _flpShowcaseExecute.Dock = DockStyle.None;
+            _flpShowcaseExecute.WrapContents = false;
+            _flpShowcaseExecute.Controls.Add(_btnShowcaseOverview);
+            _flpShowcaseExecute.Controls.Add(_btnRunAffiliateDeepVideo);
+            _flpShowcaseExecute.Controls.Add(_btnShowcaseStop);
+
+            tblRenderCenter.Controls.Add(_flpShowcaseExecute, 1, 0);
             _pnlAffiliateDeepExecuteActions.Controls.Add(tblRenderCenter);
         }
 

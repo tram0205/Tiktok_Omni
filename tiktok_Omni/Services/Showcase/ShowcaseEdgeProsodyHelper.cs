@@ -152,6 +152,19 @@ namespace tiktok_Omni.Services.Showcase
             return HookStyleCatalog.GetDisplayName(hookStyleKey) + " · " + FormatOffsetPair(rate, pitch);
         }
 
+        /// <summary>Phần rate/pitch trên dòng Kết quả — sau «phong cách», không lặp tên phong cách.</summary>
+        public static string FormatSegmentProsodySuffix(string hookStyleKey, int customRateOffset, int customPitchOffset)
+        {
+            ResolveEffectiveOffsets(hookStyleKey, customRateOffset, customPitchOffset, out var rate, out var pitch);
+            if (!IsCustomStyle(hookStyleKey) && rate == 0 && pitch == 0)
+            {
+                return string.Empty;
+            }
+
+            var pair = FormatOffsetPair(rate, pitch);
+            return " · " + pair;
+        }
+
         public static string FormatOffsetPair(int rateOffset, int pitchOffset)
         {
             rateOffset = ClampRateOffset(rateOffset);

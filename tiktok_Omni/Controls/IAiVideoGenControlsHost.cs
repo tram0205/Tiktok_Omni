@@ -32,6 +32,9 @@ namespace tiktok_Omni.Controls
 
         Task RunAffiliateDeepVideoAsync();
 
+        /// <summary>Showcase: bảng tóm tắt thoại, cảnh, phụ đề, nhạc, audio trước render thành phẩm.</summary>
+        Task PreviewShowcaseOverviewAsync();
+
         Task SaveGeminiStyleTemplateAsync(GeminiStyleTemplate template);
 
         /// <summary>Showcase sản phẩm: Gemini xem ảnh storyboard → tự suy chủ đề/thứ tự cảnh → voiceover + prompt Veo từng cảnh.</summary>

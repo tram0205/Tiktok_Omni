@@ -63,6 +63,7 @@ namespace tiktok_Omni.Services.Showcase
         public const string ZoomKlingId = "zoom_kling";
 
         public const string GeminiSuggestId = "gemini_suggest";
+        public const string KlingVeoZoomId = "kling_veo_zoom";
 
 
 
@@ -150,6 +151,18 @@ namespace tiktok_Omni.Services.Showcase
 
 
 
+        public static ShowcaseClipModePreset KlingVeoZoom { get; } =
+
+            new ShowcaseClipModePreset(
+
+                KlingVeoZoomId,
+
+                "Kling + Veo + Zoom",
+
+                "Gemini chọn clip_tool từng cảnh trong veo, kling và zoom (Ken Burns) — dùng đủ ba công cụ khi phù hợp ảnh/mạch.");
+
+
+
         /// <summary>Id cũ <c>custom</c> — dùng <see cref="GeminiSuggestId"/>.</summary>
         public static ShowcaseClipModePreset Custom => GeminiSuggest;
 
@@ -170,6 +183,8 @@ namespace tiktok_Omni.Services.Showcase
             KlingOnly,
 
             ZoomOnly,
+
+            KlingVeoZoom,
 
             GeminiSuggest
 
@@ -249,7 +264,9 @@ namespace tiktok_Omni.Services.Showcase
 
 
 
-            return string.Equals(mode, GeminiSuggestId, StringComparison.Ordinal);
+            return string.Equals(mode, GeminiSuggestId, StringComparison.Ordinal)
+
+                || string.Equals(mode, KlingVeoZoomId, StringComparison.Ordinal);
 
         }
 
@@ -259,7 +276,11 @@ namespace tiktok_Omni.Services.Showcase
 
         {
 
-            return string.Equals(ResolveIdForGemini(clipModeId), GeminiSuggestId, StringComparison.Ordinal);
+            var mode = ResolveIdForGemini(clipModeId);
+
+            return string.Equals(mode, GeminiSuggestId, StringComparison.Ordinal)
+
+                || string.Equals(mode, KlingVeoZoomId, StringComparison.Ordinal);
 
         }
 
@@ -335,7 +356,17 @@ namespace tiktok_Omni.Services.Showcase
 
 
 
-            if (s == "veo-kling-zoom" || s == "veo_kling_zoom" || s == "custom" || s == "veo / zoom / kling")
+            if (s == "veo-kling-zoom" || s == "veo_kling_zoom" || s == "kling+veo+zoom" || s == "kling + veo + zoom"
+
+                || s == "kling_veo_zoom" || s == "kling-veo-zoom" || s == "kling veo zoom")
+
+            {
+
+                return KlingVeoZoomId;
+
+            }
+
+            if (s == "custom" || s == "veo / zoom / kling")
 
             {
 

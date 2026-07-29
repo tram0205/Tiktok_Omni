@@ -146,6 +146,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 case "custom":
                 case "gemini_suggest":
+                case "kling_veo_zoom":
 
                     return flatlay ? ToolVeo : ToolZoom;
 

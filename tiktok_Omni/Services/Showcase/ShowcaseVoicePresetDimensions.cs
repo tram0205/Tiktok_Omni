@@ -133,7 +133,7 @@ namespace tiktok_Omni.Services.Showcase
             new VoiceDimensionChoice(Tone.Sweet, "Ngọt ngào"),
             new VoiceDimensionChoice(Tone.Philosophy, "Triết lý — chậm rãi"),
             new VoiceDimensionChoice(Tone.Narrator, "Kể chuyện — trung tính"),
-            new VoiceDimensionChoice(Tone.Custom, "⚙ Tùy chỉnh (chỉnh stability/similarity/style tay)")
+            new VoiceDimensionChoice(Tone.Custom, "⚙ Tùy chỉnh (stability/similarity/style)")
         };
 
         private static readonly Dictionary<string, VoiceDimensionSet> ByPresetId = BuildMap();

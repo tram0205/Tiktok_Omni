@@ -55,6 +55,78 @@ namespace tiktok_Omni.Services.Showcase
             return ClampManualPercent(storedPercent);
         }
 
+        /// <summary>Điền hook/thân từ giá trị cũ một cột nếu chưa lưu riêng.</summary>
+        public static void EnsureSegmentSpeedDefaults(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            var legacy = ResolveEffectiveSpeedPercent(video.ShowcaseNarrationSpeedPercent);
+            if (video.ShowcaseHookNarrationSpeedPercent <= 0)
+            {
+                video.ShowcaseHookNarrationSpeedPercent = legacy;
+            }
+
+            if (video.ShowcaseBodyNarrationSpeedPercent <= 0)
+            {
+                video.ShowcaseBodyNarrationSpeedPercent = legacy;
+            }
+        }
+
+        /// <summary>Tốc độ render timeline (ưu tiên thân, rồi hook).</summary>
+        public static int ResolveRenderSpeedPercent(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return DefaultManualSpeedPercent;
+            }
+
+            EnsureSegmentSpeedDefaults(video);
+            if (video.ShowcaseBodyNarrationSpeedPercent > 0)
+            {
+                return ResolveEffectiveSpeedPercent(video.ShowcaseBodyNarrationSpeedPercent);
+            }
+
+            if (video.ShowcaseHookNarrationSpeedPercent > 0)
+            {
+                return ResolveEffectiveSpeedPercent(video.ShowcaseHookNarrationSpeedPercent);
+            }
+
+            return ResolveEffectiveSpeedPercent(video.ShowcaseNarrationSpeedPercent);
+        }
+
+        public static void SyncLegacyCombinedSpeedField(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            EnsureSegmentSpeedDefaults(video);
+            video.ShowcaseNarrationSpeedPercent = video.ShowcaseBodyNarrationSpeedPercent;
+        }
+
+        public static string FormatSegmentSpeedGridLabel(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return FormatGridLabel(DefaultManualSpeedPercent);
+            }
+
+            EnsureSegmentSpeedDefaults(video);
+            var hook = ResolveEffectiveSpeedPercent(video.ShowcaseHookNarrationSpeedPercent);
+            var body = ResolveEffectiveSpeedPercent(video.ShowcaseBodyNarrationSpeedPercent);
+            if (hook == body)
+            {
+                return FormatGridLabel(hook);
+            }
+
+            return "hook " + hook.ToString(CultureInfo.InvariantCulture) + "% · thân "
+                   + body.ToString(CultureInfo.InvariantCulture) + "% · tự khớp";
+        }
+
         public static string FormatGridLabel(int speedPercent)
         {
             if (speedPercent <= 0)

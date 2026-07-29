@@ -127,7 +127,10 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
                 }
             }
 
-            using (var hub = new ShowcaseScriptPromptHubForm(video, ExportShowcaseExcelForVideoFromPromptEditorAsync))
+            using (var hub = new ShowcaseScriptPromptHubForm(
+                video,
+                ExportShowcaseExcelForVideoFromPromptEditorAsync,
+                () => RegenerateShowcaseScriptForHubAsync(video)))
             {
                 if (hub.ShowDialog(this) != DialogResult.OK)
                 {
@@ -148,6 +151,39 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
             dgvDeepDiveInput?.InvalidateRow(gridRowIndex);
             RefreshAiVideoGenModeReadinessLabels();
             NotifyShowcaseDraftDirty();
+        }
+
+        private async Task<bool> RegenerateShowcaseScriptForHubAsync(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return false;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            if (string.IsNullOrWhiteSpace(settings.AiApiKey))
+            {
+                MessageBox.Show(
+                    this,
+                    "Cần cấu hình AI API Key trong tab Cài đặt.",
+                    "Tạo lại kịch bản",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return false;
+            }
+
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            ActivateShowcaseVideo(video, refreshStoryboard: false);
+            var ok = await GenerateShowcaseSceneScriptForVideoAsync(video, settings, GetRunningProfileName())
+                .ConfigureAwait(true);
+            if (ok)
+            {
+                SyncShowcaseVideoSettingsToScenes(video);
+                RefreshAffiliateDeepStoryboard();
+                NotifyShowcaseDraftDirty();
+            }
+
+            return ok;
         }
 
         private async void OpenShowcaseOutputFolderFromGridCell(ShowcaseVideoItem video)
@@ -377,6 +413,13 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
                 _showcaseSession.CtaText = video.ShowcaseCtaText ?? string.Empty;
             }
 
+            var sessionBase = _showcaseSession?.BaseDir
+                              ?? ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(GetShowcaseVideoScenes(video));
+            if (!string.IsNullOrWhiteSpace(sessionBase))
+            {
+                ShowcaseNarrationCacheHelper.ClearAllCachedAudio(sessionBase);
+            }
+
             SyncShowcaseVideoSettingsToScenes(video);
             RefreshAffiliateDeepStoryboard();
             dgvDeepDiveInput?.InvalidateRow(gridRowIndex);
@@ -459,7 +502,7 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
             ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
             EnsureShowcaseSession(profile, (video.ProductName ?? string.Empty).Trim(), settings.StorageRootPath, video);
 
-            bool CanListenNarration()
+            string ResolveSessionBase()
             {
                 var scenes = GetShowcaseVideoScenes(video);
                 var sessionBase = _showcaseSession?.BaseDir;
@@ -468,8 +511,36 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
                     sessionBase = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(scenes);
                 }
 
+                return sessionBase;
+            }
+
+            bool CanListenHookNarration()
+            {
+                var sessionBase = ResolveSessionBase();
                 return !string.IsNullOrWhiteSpace(sessionBase)
-                       && ShowcaseNarrationCacheHelper.HasNarrationFile(sessionBase);
+                       && ShowcaseNarrationCacheHelper.HasHookPreviewFile(sessionBase);
+            }
+
+            bool CanListenBodyNarration()
+            {
+                var sessionBase = ResolveSessionBase();
+                return !string.IsNullOrWhiteSpace(sessionBase)
+                       && ShowcaseNarrationCacheHelper.HasBodyPreviewFile(sessionBase);
+            }
+
+            bool CanRenderFullMixedAudio()
+            {
+                var sessionBase = ResolveSessionBase();
+                var scenes = GetShowcaseVideoScenes(video);
+                return !string.IsNullOrWhiteSpace(sessionBase)
+                       && ShowcaseNarrationCacheHelper.CanListenFullNarration(sessionBase, scenes);
+            }
+
+            bool CanListenFullMixedAudio()
+            {
+                var sessionBase = ResolveSessionBase();
+                return !string.IsNullOrWhiteSpace(sessionBase)
+                       && ShowcaseNarrationCacheHelper.HasFullMixPreviewFile(sessionBase);
             }
 
             ShowcaseBackgroundMusicEditorForm audioDlg = null;
@@ -477,11 +548,10 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
                 video,
                 settings,
                 musicNames,
-                () => ListenShowcaseNarrationForVideoAsync(video, settings, profile),
-                CanListenNarration,
                 async () =>
                 {
-                    await RunShowcaseNarrationActionAsync(null, new[] { video }).ConfigureAwait(true);
+                    audioDlg?.SetOperationStatus("Đang tạo audio hook…");
+                    await RunShowcaseHookNarrationPreviewForVideoAsync(video).ConfigureAwait(true);
                     if (audioDlg != null && !audioDlg.IsDisposed)
                     {
                         audioDlg.RefreshNarrationButtons();
@@ -490,14 +560,74 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
                     SyncShowcaseVideoSettingsToScenes(video);
                     dgvDeepDiveInput?.InvalidateRow(gridRowIndex);
                     NotifyShowcaseDraftDirty();
-                    UpdateShowcaseNarrationButtonState();
+                },
+                async () =>
+                {
+                    audioDlg?.SetOperationStatus("Đang tạo audio thân…");
+                    await RunShowcaseBodyNarrationPreviewForVideoAsync(video).ConfigureAwait(true);
+                    if (audioDlg != null && !audioDlg.IsDisposed)
+                    {
+                        audioDlg.RefreshNarrationButtons();
+                    }
+
+                    SyncShowcaseVideoSettingsToScenes(video);
+                    dgvDeepDiveInput?.InvalidateRow(gridRowIndex);
+                    NotifyShowcaseDraftDirty();
+                },
+                () => ListenShowcaseHookPreviewForVideoAsync(video, settings, profile),
+                () => ListenShowcaseBodyPreviewForVideoAsync(video, settings, profile),
+                CanListenHookNarration,
+                CanListenBodyNarration,
+                async () =>
+                {
+                    audioDlg?.SetOperationStatus("Đang render thành phẩm audio…");
+                    await RenderShowcaseFullMixedAudioForVideoAsync(video, settings, profile).ConfigureAwait(true);
+                    if (audioDlg != null && !audioDlg.IsDisposed)
+                    {
+                        audioDlg.RefreshNarrationButtons();
+                    }
+                },
+                async () =>
+                {
+                    audioDlg?.SetOperationStatus("Đang phát thành phẩm audio…");
+                    await ListenShowcaseFullMixedAudioForVideoAsync(video, settings, profile).ConfigureAwait(true);
+                    if (audioDlg != null && !audioDlg.IsDisposed)
+                    {
+                        audioDlg.RefreshNarrationButtons();
+                    }
+                },
+                CanRenderFullMixedAudio,
+                CanListenFullMixedAudio,
+                () =>
+                {
+                    if (audioDlg != null && !audioDlg.IsDisposed && !audioDlg.SaveToVideo())
+                    {
+                        return false;
+                    }
+
+                    ShowShowcaseScriptEditor(video, gridRowIndex);
+                    if (audioDlg != null && !audioDlg.IsDisposed)
+                    {
+                        audioDlg.RefreshNarrationButtons();
+                        audioDlg.RefreshVoiceSummaryAndHint();
+                    }
+
+                    return true;
                 });
 
             using (audioDlg)
             {
-                if (audioDlg.ShowDialog(this) != DialogResult.OK)
+                BindShowcaseAudioDialog(audioDlg);
+                try
                 {
-                    return;
+                    if (audioDlg.ShowDialog(this) != DialogResult.OK)
+                    {
+                        return;
+                    }
+                }
+                finally
+                {
+                    UnbindShowcaseAudioDialog();
                 }
             }
 

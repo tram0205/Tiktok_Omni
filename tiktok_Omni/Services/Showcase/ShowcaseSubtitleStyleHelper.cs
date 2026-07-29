@@ -12,7 +12,8 @@ namespace tiktok_Omni.Services.Showcase
         public static AssSubtitleGeneratorOptions BuildBodyOptionsWithLineOverride(
             ShowcaseVideoItem video,
             AppSettings fallbackSettings,
-            string lineAnimationStorage)
+            string lineAnimationStorage,
+            ShowcaseSubtitleLineRenderOverride lineStyle = null)
         {
             EnsureVideoDefaults(video, fallbackSettings);
             var saved = video.ShowcaseSubtitleAnimation;
@@ -23,11 +24,161 @@ namespace tiktok_Omni.Services.Showcase
 
             try
             {
-                return BuildBodyOptionsCore(video, fallbackSettings);
+                var opts = BuildBodyOptionsCore(video, fallbackSettings);
+                ApplyLineStyleOverride(opts, lineStyle);
+                return opts;
             }
             finally
             {
                 video.ShowcaseSubtitleAnimation = saved;
+            }
+        }
+
+        private static void ApplyLineStyleOverride(
+            AssSubtitleGeneratorOptions opts,
+            ShowcaseSubtitleLineRenderOverride lineStyle)
+        {
+            if (opts == null || lineStyle == null || !lineStyle.HasAny())
+            {
+                return;
+            }
+
+            var look = (lineStyle.LookPreset ?? string.Empty).Trim();
+            if (look.Length > 0)
+            {
+                ShowcaseSubtitleLookPresetCatalog.ApplyToOptions(opts, look, ShowcaseDisplayLineEffectKind.Body);
+            }
+
+            var fontName = (lineStyle.FontName ?? string.Empty).Trim();
+            if (fontName.Length > 0)
+            {
+                ShowcaseSubtitleFontHelper.ApplyToOptions(opts, fontName, opts.Bold, opts.Italic);
+            }
+
+            if (lineStyle.FontSize > 0)
+            {
+                opts.FontSize = Math.Max(28, Math.Min(160, lineStyle.FontSize));
+            }
+
+            if (look.Length == 0)
+            {
+                var face = (lineStyle.FontFace ?? string.Empty).Trim();
+                if (string.Equals(face, "Bold", StringComparison.OrdinalIgnoreCase))
+                {
+                    opts.Bold = true;
+                    opts.Italic = false;
+                }
+                else if (string.Equals(face, "Italic", StringComparison.OrdinalIgnoreCase))
+                {
+                    opts.Bold = false;
+                    opts.Italic = true;
+                }
+                else if (string.Equals(face, "Regular", StringComparison.OrdinalIgnoreCase))
+                {
+                    opts.Bold = false;
+                    opts.Italic = false;
+                }
+
+                var colour = (lineStyle.PrimaryColourAss ?? string.Empty).Trim();
+                if (colour.Length > 0)
+                {
+                    opts.PrimaryColourAss = colour;
+                    opts.SecondaryColourAss = ShowcaseSubtitleColourPresetCatalog.SecondaryAssFromPrimaryAss(colour);
+                }
+
+                var decor = (lineStyle.DecorPreset ?? string.Empty).Trim();
+                if (decor.Length > 0)
+                {
+                    ShowcaseSubtitleDecorPresetCatalog.Apply(opts, decor);
+                }
+            }
+
+            var pos = (lineStyle.Position ?? string.Empty).Trim();
+            if (pos.Length > 0)
+            {
+                opts.Alignment = (int)ReupSubtitleStyleHelper.ParsePosition(pos);
+            }
+
+            var lineBg = (lineStyle.LineBackgroundColourAss ?? string.Empty).Trim();
+            if (lineBg.Length > 0)
+            {
+                opts.LineBackgroundColourAss = lineBg;
+            }
+
+            ShowcaseSubtitleFontHelper.ApplyToOptions(opts, opts.FontName, opts.Bold, opts.Italic);
+        }
+
+        private static void ApplyAnimationStorageToOptions(AssSubtitleGeneratorOptions opts, string storage, bool forHook)
+        {
+            if (opts == null)
+            {
+                return;
+            }
+
+            var value = (storage ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(value) || string.Equals(value, "Pop", StringComparison.OrdinalIgnoreCase))
+            {
+                value = forHook ? ShowcaseHookAnimationCatalog.DefaultStorage : "Pop";
+            }
+
+            if (!forHook && string.Equals(value, "Plain", StringComparison.OrdinalIgnoreCase))
+            {
+                opts.Animation = ReupKaraokeAnimationMode.Plain;
+                opts.PopScalePercent = 150;
+                opts.PopDurationMs = 100;
+                return;
+            }
+
+            var animation = ShowcaseHookAnimationCatalog.ParseMode(value);
+            opts.Animation = animation;
+
+            if (ShowcaseHookAnimationCatalog.IsSlam(value))
+            {
+                opts.PopScalePercent = forHook ? 280 : 220;
+                opts.PopDurationMs = forHook ? 160 : 140;
+            }
+            else if (ShowcaseHookAnimationCatalog.IsNeonSale(value))
+            {
+                opts.PopScalePercent = forHook ? 240 : 200;
+                opts.PopDurationMs = forHook ? 130 : 120;
+                opts.PrimaryColourAss = "&H004444FF";
+                opts.SecondaryColourAss = "&H006666FF";
+                opts.OutlineWidth = Math.Max(opts.OutlineWidth, 14);
+            }
+            else if (animation == ReupKaraokeAnimationMode.Pop)
+            {
+                opts.PopScalePercent = forHook ? 220 : 165;
+                opts.PopDurationMs = forHook ? 130 : 105;
+            }
+            else if (animation == ReupKaraokeAnimationMode.Bounce)
+            {
+                opts.PopScalePercent = forHook ? 200 : 175;
+                opts.PopDurationMs = forHook ? 130 : 115;
+            }
+            else if (animation == ReupKaraokeAnimationMode.Shake)
+            {
+                opts.PopScalePercent = forHook ? 210 : 180;
+                opts.PopDurationMs = forHook ? 130 : 110;
+            }
+            else if (animation == ReupKaraokeAnimationMode.GlowPulse)
+            {
+                opts.PopScalePercent = forHook ? 150 : 150;
+                opts.PopDurationMs = forHook ? 130 : 110;
+                if (string.IsNullOrWhiteSpace(opts.PrimaryColourAss))
+                {
+                    opts.PrimaryColourAss = "&H00FFFFFF";
+                    opts.SecondaryColourAss = "&H00FFFFCC";
+                }
+
+                if (opts.OutlineWidth <= 10)
+                {
+                    opts.OutlineWidth = 6;
+                }
+            }
+            else
+            {
+                opts.PopScalePercent = forHook ? 150 : 150;
+                opts.PopDurationMs = forHook ? 130 : 100;
             }
         }
 
@@ -42,24 +193,53 @@ namespace tiktok_Omni.Services.Showcase
 
             var fontSize = Math.Max(28, Math.Min(160, video.ShowcaseSubtitleFontSize <= 0 ? 72 : video.ShowcaseSubtitleFontSize));
             var position = ReupSubtitleStyleHelper.ParsePosition(video.ShowcaseSubtitlePosition);
-            var animation = ReupSubtitleStyleHelper.ParseAnimation(video.ShowcaseSubtitleAnimation);
             var settings = fallbackSettings ?? new AppSettings();
+            var storage = (video.ShowcaseSubtitleAnimation ?? string.Empty).Trim();
 
-            return new AssSubtitleGeneratorOptions
+            var opts = new AssSubtitleGeneratorOptions
             {
                 FontName = fontName,
                 FontSize = fontSize,
                 Alignment = (int)position,
                 MarginV = ReupSubtitleStyleHelper.ResolveMarginV(position, settings.ReupSubtitleMarginV),
-                Animation = animation,
-                WordsPerLine = 6,
+                WordsPerLine = Math.Max(4, Math.Min(12, video.ShowcaseSubtitleWordsPerLine > 0 ? video.ShowcaseSubtitleWordsPerLine : 6)),
                 MinWordsPerLine = 2,
                 RhythmicLineBreaks = true,
                 Bold = video.ShowcaseSubtitleBold,
-                Italic = video.ShowcaseSubtitleItalic,
-                PopScalePercent = 150,
-                PopDurationMs = 100
+                Italic = video.ShowcaseSubtitleItalic
             };
+
+            ApplyAnimationStorageToOptions(opts, storage, forHook: false);
+
+            var bodyLook = (video.ShowcaseSubtitleLookPreset ?? string.Empty).Trim();
+            if (bodyLook.Length > 0)
+            {
+                ShowcaseSubtitleLookPresetCatalog.ApplyToOptions(opts, bodyLook, ShowcaseDisplayLineEffectKind.Body);
+            }
+            else
+            {
+                var bodyColour = (video.ShowcaseSubtitlePrimaryColourAss ?? string.Empty).Trim();
+                if (bodyColour.Length > 0)
+                {
+                    opts.PrimaryColourAss = bodyColour;
+                    opts.SecondaryColourAss = ShowcaseSubtitleColourPresetCatalog.SecondaryAssFromPrimaryAss(bodyColour);
+                }
+
+                ShowcaseSubtitleDecorPresetCatalog.Apply(opts, video.ShowcaseSubtitleDecorPreset);
+            }
+
+            ApplyHighlightSecondaryOverride(opts, video.ShowcaseSubtitleHighlightColourAss);
+            ShowcaseSubtitleFontHelper.ApplyToOptions(opts, opts.FontName, opts.Bold, opts.Italic);
+            return opts;
+        }
+
+        private static void ApplyHighlightSecondaryOverride(AssSubtitleGeneratorOptions opts, string highlightAss)
+        {
+            var ass = (highlightAss ?? string.Empty).Trim();
+            if (ass.Length > 0 && opts != null)
+            {
+                opts.LineBackgroundColourAss = ass;
+            }
         }
 
         public static AssSubtitleGeneratorOptions BuildHookOptions(ShowcaseVideoItem video, AppSettings fallbackSettings)
@@ -108,54 +288,47 @@ namespace tiktok_Omni.Services.Showcase
                 ? video.ShowcaseHookSubtitleFontSize
                 : Math.Max(80, Math.Min(120, bodySize + 22));
 
-            var animation = ShowcaseHookAnimationCatalog.ParseMode(video.ShowcaseHookSubtitleAnimation);
             var storage = (video.ShowcaseHookSubtitleAnimation ?? string.Empty).Trim();
-            var popScale = ShowcaseHookAnimationCatalog.IsSlam(storage)
-                ? 280
-                : ShowcaseHookAnimationCatalog.IsNeonSale(storage)
-                    ? 240
-                    : animation == ReupKaraokeAnimationMode.Pop
-                        ? 220
-                        : animation == ReupKaraokeAnimationMode.Bounce
-                            ? 200
-                            : animation == ReupKaraokeAnimationMode.Shake
-                                ? 210
-                                : 150;
 
-            var primaryColour = "&H00FFFF00";
-            var secondaryColour = "&H0000FFFF";
-            var outline = 10;
-            if (ShowcaseHookAnimationCatalog.IsNeonSale(storage))
-            {
-                primaryColour = "&H004444FF";
-                secondaryColour = "&H006666FF";
-                outline = 14;
-            }
-            else if (animation == ReupKaraokeAnimationMode.GlowPulse)
-            {
-                primaryColour = "&H00FFFFFF";
-                secondaryColour = "&H00FFFFCC";
-                outline = 6;
-            }
-
-            return new AssSubtitleGeneratorOptions
+            var opts = new AssSubtitleGeneratorOptions
             {
                 FontName = fontName,
                 FontSize = Math.Max(72, Math.Min(132, hookSize)),
                 Alignment = 5,
                 MarginV = 460,
-                Animation = animation,
                 WordsPerLine = 6,
                 MinWordsPerLine = 2,
                 RhythmicLineBreaks = true,
                 Bold = true,
                 Italic = false,
-                PrimaryColourAss = primaryColour,
-                SecondaryColourAss = secondaryColour,
-                OutlineWidth = outline,
-                PopScalePercent = popScale,
-                PopDurationMs = ShowcaseHookAnimationCatalog.IsSlam(storage) ? 160 : 130
+                PrimaryColourAss = "&H0000FFFF",
+                SecondaryColourAss = "&H00FFFF00",
+                OutlineWidth = 10
             };
+
+            ApplyAnimationStorageToOptions(opts, storage, forHook: true);
+
+            var hookLook = (video.ShowcaseHookSubtitleLookPreset ?? string.Empty).Trim();
+            if (hookLook.Length > 0)
+            {
+                ShowcaseSubtitleLookPresetCatalog.ApplyToOptions(opts, hookLook, ShowcaseDisplayLineEffectKind.Hook);
+            }
+            else
+            {
+                var hookColour = (video.ShowcaseHookSubtitlePrimaryColourAss ?? string.Empty).Trim();
+                if (hookColour.Length > 0)
+                {
+                    opts.PrimaryColourAss = hookColour;
+                    opts.SecondaryColourAss = ShowcaseSubtitleColourPresetCatalog.SecondaryAssFromPrimaryAss(hookColour);
+                }
+
+                ShowcaseSubtitleDecorPresetCatalog.Apply(opts, video.ShowcaseHookSubtitleDecorPreset);
+            }
+
+            ApplyHighlightSecondaryOverride(opts, video.ShowcaseHookSubtitleHighlightColourAss);
+
+            ShowcaseSubtitleFontHelper.ApplyToOptions(opts, opts.FontName, opts.Bold, opts.Italic);
+            return opts;
         }
 
         public static AssSubtitleGeneratorOptions BuildOptions(ShowcaseVideoItem video, AppSettings fallbackSettings)

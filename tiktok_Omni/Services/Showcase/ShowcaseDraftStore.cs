@@ -78,11 +78,31 @@ namespace tiktok_Omni.Services
 
         public int ShowcaseHookSubtitleFontSize { get; set; }
 
+        public string ShowcaseSubtitlePrimaryColourAss { get; set; } = string.Empty;
+
+        public string ShowcaseSubtitleDecorPreset { get; set; } = string.Empty;
+
+        public string ShowcaseHookSubtitlePrimaryColourAss { get; set; } = string.Empty;
+
+        public string ShowcaseHookSubtitleDecorPreset { get; set; } = string.Empty;
+
+        public string ShowcaseSubtitleLookPreset { get; set; } = string.Empty;
+
+        public string ShowcaseHookSubtitleLookPreset { get; set; } = string.Empty;
+
+        public string ShowcaseSubtitleHighlightColourAss { get; set; } = string.Empty;
+
+        public string ShowcaseHookSubtitleHighlightColourAss { get; set; } = string.Empty;
+
         public string ShowcaseBackgroundMusicFile { get; set; } = string.Empty;
 
         public int ShowcaseMusicVolume { get; set; } = 14;
 
         public int ShowcaseNarrationSpeedPercent { get; set; }
+
+        public int ShowcaseHookNarrationSpeedPercent { get; set; }
+
+        public int ShowcaseBodyNarrationSpeedPercent { get; set; }
 
         public string ShowcaseTtsEngine { get; set; } = string.Empty;
 
@@ -291,9 +311,19 @@ namespace tiktok_Omni.Services
                 ShowcaseHookSubtitleAnimation = video.ShowcaseHookSubtitleAnimation ?? "PopStrong",
                 ShowcaseHookSubtitleFontName = video.ShowcaseHookSubtitleFontName ?? string.Empty,
                 ShowcaseHookSubtitleFontSize = video.ShowcaseHookSubtitleFontSize,
+                ShowcaseSubtitlePrimaryColourAss = video.ShowcaseSubtitlePrimaryColourAss ?? string.Empty,
+                ShowcaseSubtitleDecorPreset = video.ShowcaseSubtitleDecorPreset ?? string.Empty,
+                ShowcaseHookSubtitlePrimaryColourAss = video.ShowcaseHookSubtitlePrimaryColourAss ?? string.Empty,
+                ShowcaseHookSubtitleDecorPreset = video.ShowcaseHookSubtitleDecorPreset ?? string.Empty,
+                ShowcaseSubtitleLookPreset = video.ShowcaseSubtitleLookPreset ?? string.Empty,
+                ShowcaseHookSubtitleLookPreset = video.ShowcaseHookSubtitleLookPreset ?? string.Empty,
+                ShowcaseSubtitleHighlightColourAss = video.ShowcaseSubtitleHighlightColourAss ?? string.Empty,
+                ShowcaseHookSubtitleHighlightColourAss = video.ShowcaseHookSubtitleHighlightColourAss ?? string.Empty,
                 ShowcaseBackgroundMusicFile = video.ShowcaseBackgroundMusicFile ?? string.Empty,
                 ShowcaseMusicVolume = video.ShowcaseMusicVolume,
                 ShowcaseNarrationSpeedPercent = video.ShowcaseNarrationSpeedPercent,
+                ShowcaseHookNarrationSpeedPercent = video.ShowcaseHookNarrationSpeedPercent,
+                ShowcaseBodyNarrationSpeedPercent = video.ShowcaseBodyNarrationSpeedPercent,
                 ShowcaseTtsEngine = video.ShowcaseTtsEngine ?? string.Empty,
                 ShowcaseHookTtsEngine = video.ShowcaseHookTtsEngine ?? string.Empty,
                 ShowcaseBodyTtsEngine = video.ShowcaseBodyTtsEngine ?? string.Empty,
@@ -384,9 +414,19 @@ namespace tiktok_Omni.Services
                     : entry.ShowcaseHookSubtitleAnimation.Trim(),
                 ShowcaseHookSubtitleFontName = entry.ShowcaseHookSubtitleFontName ?? string.Empty,
                 ShowcaseHookSubtitleFontSize = entry.ShowcaseHookSubtitleFontSize,
+                ShowcaseSubtitlePrimaryColourAss = entry.ShowcaseSubtitlePrimaryColourAss ?? string.Empty,
+                ShowcaseSubtitleDecorPreset = entry.ShowcaseSubtitleDecorPreset ?? string.Empty,
+                ShowcaseHookSubtitlePrimaryColourAss = entry.ShowcaseHookSubtitlePrimaryColourAss ?? string.Empty,
+                ShowcaseHookSubtitleDecorPreset = entry.ShowcaseHookSubtitleDecorPreset ?? string.Empty,
+                ShowcaseSubtitleLookPreset = entry.ShowcaseSubtitleLookPreset ?? string.Empty,
+                ShowcaseHookSubtitleLookPreset = entry.ShowcaseHookSubtitleLookPreset ?? string.Empty,
+                ShowcaseSubtitleHighlightColourAss = entry.ShowcaseSubtitleHighlightColourAss ?? string.Empty,
+                ShowcaseHookSubtitleHighlightColourAss = entry.ShowcaseHookSubtitleHighlightColourAss ?? string.Empty,
                 ShowcaseBackgroundMusicFile = entry.ShowcaseBackgroundMusicFile ?? string.Empty,
                 ShowcaseMusicVolume = entry.ShowcaseMusicVolume >= 0 ? entry.ShowcaseMusicVolume : 14,
                 ShowcaseNarrationSpeedPercent = entry.ShowcaseNarrationSpeedPercent,
+                ShowcaseHookNarrationSpeedPercent = entry.ShowcaseHookNarrationSpeedPercent,
+                ShowcaseBodyNarrationSpeedPercent = entry.ShowcaseBodyNarrationSpeedPercent,
                 ShowcaseTtsEngine = entry.ShowcaseTtsEngine ?? string.Empty,
                 ShowcaseHookTtsEngine = entry.ShowcaseHookTtsEngine ?? string.Empty,
                 ShowcaseBodyTtsEngine = entry.ShowcaseBodyTtsEngine ?? string.Empty,
@@ -513,6 +553,13 @@ namespace tiktok_Omni.Services
             scene.SceneVoiceover = (scene.SceneVoiceover ?? string.Empty).Trim();
             scene.ShowcaseSubtitleDisplayVoiceover = (scene.ShowcaseSubtitleDisplayVoiceover ?? string.Empty).Trim();
             scene.ShowcaseSubtitleDisplayAnimation = (scene.ShowcaseSubtitleDisplayAnimation ?? string.Empty).Trim();
+            scene.ShowcaseSubtitleDisplayFontName = (scene.ShowcaseSubtitleDisplayFontName ?? string.Empty).Trim();
+            scene.ShowcaseSubtitleDisplayFontFace = (scene.ShowcaseSubtitleDisplayFontFace ?? string.Empty).Trim();
+            scene.ShowcaseSubtitleDisplayPosition = (scene.ShowcaseSubtitleDisplayPosition ?? string.Empty).Trim();
+            scene.ShowcaseSubtitleDisplayPrimaryColourAss = (scene.ShowcaseSubtitleDisplayPrimaryColourAss ?? string.Empty).Trim();
+            scene.ShowcaseSubtitleDisplayDecorPreset = (scene.ShowcaseSubtitleDisplayDecorPreset ?? string.Empty).Trim();
+            scene.ShowcaseSubtitleDisplayLookPreset = (scene.ShowcaseSubtitleDisplayLookPreset ?? string.Empty).Trim();
+            scene.ShowcaseSubtitleDisplayHighlightColourAss = (scene.ShowcaseSubtitleDisplayHighlightColourAss ?? string.Empty).Trim();
             scene.VeoPrompt = (scene.VeoPrompt ?? string.Empty).Trim();
             scene.KlingPrompt = (scene.KlingPrompt ?? string.Empty).Trim();
             scene.ZoomHint = (scene.ZoomHint ?? string.Empty).Trim();

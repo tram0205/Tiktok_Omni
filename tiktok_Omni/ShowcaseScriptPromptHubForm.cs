@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -12,50 +13,55 @@ namespace tiktok_Omni
     internal sealed class ShowcaseScriptPromptHubForm : Form
     {
         private static readonly Color Bg = ShowcasePastelTheme.ShellBg;
-        private static readonly Color AccentScript = ShowcasePastelTheme.ScriptHeader;
-        private static readonly Color AccentScriptCap = ShowcasePastelTheme.ScriptCap;
-        private static readonly Color AccentPrompt = ShowcasePastelTheme.PromptHeader;
-        private static readonly Color AccentPromptCap = ShowcasePastelTheme.PromptCap;
-        private static readonly Color FrameBodyScript = ShowcasePastelTheme.ScriptFrame;
-        private static readonly Color FrameBodyPrompt = ShowcasePastelTheme.PromptFrame;
         private static readonly Color FieldBg = ShowcasePastelTheme.FieldBg;
 
-        private const int HeaderRowHeight = 128;
-        private const int ButtonBarHeight = 72;
+        private const int ButtonBarHeight = 100;
         private const int FormClientWidth = 2577;
         private const int FormMinWidth = 2178;
-        private const int StackDefaultWidth = 1162;
-        private const int FieldDefaultWidth = 1016;
-        private const int SectionDefaultWidth = 1125;
-        private const int CapBarHeight = 54;
-        private const float FieldFontSize = 11.5F;
-        private const float MonoFieldFontSize = 10.5F;
-        private const int PromptBoxMinHeight = 96;
-        private const int PromptBoxMaxHeight = 720;
+        private const int HubGridMinRowHeight = 72;
+        private const int HubGridCellPad = 18;
+        private const int HubGridRightEdgeInset = 20;
+        private const string HubGridLayoutLock = "HubGridLayoutLock";
+
+        private const string ColScene = "colHubScene";
+        private const string ColImage = "colHubImage";
+        private const string ColVoice = "colHubVoice";
+        private const string ColTool = "colHubTool";
+        private const string ColPrompt = "colHubPrompt";
+
+        private const float HubGridPctScene = 0.14f;
+        private const float HubGridPctImage = 0.12f;
+        private const float HubGridPctVoice = 0.24f;
+        private const float HubGridPctTool = 0.11f;
 
         private readonly ShowcaseVideoItem _video;
+        private ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot _speechBeforeEdit;
         private readonly Func<Task> _exportExcelAsync;
-        private TextBox _txtTheme;
-        private TextBox _txtHook;
-        private TextBox _txtCta;
-        private readonly List<TextBox> _sceneVoiceBoxes = new List<TextBox>();
-        private readonly List<ScenePromptFields> _scenePromptFields = new List<ScenePromptFields>();
-        private readonly List<TextBox> _autoHeightPromptBoxes = new List<TextBox>();
-        private FlowLayoutPanel _scriptStack;
-        private FlowLayoutPanel _promptStack;
+        private readonly Func<Task<bool>> _regenerateScriptAsync;
 
-        private sealed class ScenePromptFields
+        private TextBox _txtTheme;
+        private DataGridView _dgvHub;
+        private string _toolEditPrevious;
+        private Button _btnRegenerateScript;
+
+        private sealed class HubGridRowTag
         {
             public AiVideoGenInputItem Scene { get; set; }
-            public TextBox VeoBox { get; set; }
-            public TextBox KlingBox { get; set; }
-            public TextBox ZoomBox { get; set; }
+            /// <summary>Cảnh 1 — lời thoại đồng bộ với <see cref="ShowcaseVideoItem.ShowcaseHookText"/>.</summary>
+            public bool IsOpeningHookScene { get; set; }
+            /// <summary>Cảnh cuối — lời thoại đồng bộ với <see cref="ShowcaseVideoItem.ShowcaseCtaText"/>.</summary>
+            public bool IsClosingCtaScene { get; set; }
         }
 
-        public ShowcaseScriptPromptHubForm(ShowcaseVideoItem video, Func<Task> exportExcelAsync = null)
+        public ShowcaseScriptPromptHubForm(
+            ShowcaseVideoItem video,
+            Func<Task> exportExcelAsync = null,
+            Func<Task<bool>> regenerateScriptAsync = null)
         {
             _video = video ?? throw new ArgumentNullException(nameof(video));
+            _speechBeforeEdit = ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot.Capture(_video);
             _exportExcelAsync = exportExcelAsync;
+            _regenerateScriptAsync = regenerateScriptAsync;
 
             var product = (_video.ProductName ?? string.Empty).Trim();
             Text = "Kịch bản · Prompt" + (product.Length > 0 ? " — " + product : string.Empty);
@@ -81,62 +87,331 @@ namespace tiktok_Omni
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 2,
+                ColumnCount = 1,
                 RowCount = 3,
                 BackColor = Bg
             };
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, HeaderRowHeight));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, ButtonBarHeight));
 
-            root.Controls.Add(MakeHeader("Kịch bản", "Thoại · Hook · CTA", AccentScript, rightColumn: false), 0, 0);
-            root.Controls.Add(MakeHeader("Prompt clip", "Veo · Zoom · Kling", AccentPrompt, rightColumn: true), 1, 0);
+            root.Controls.Add(BuildThemePanel(), 0, 0);
 
-            root.Controls.Add(BuildScriptScrollColumn(), 0, 1);
-            root.Controls.Add(BuildPromptScrollColumn(), 1, 1);
+            var scenes = _video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
+            _dgvHub = BuildHubGrid(scenes);
+            _dgvHub.Dock = DockStyle.Fill;
+            _dgvHub.Margin = new Padding(0, 16, 0, 8);
+            root.Controls.Add(_dgvHub, 0, 1);
 
-            var btnSave = MakeButton("Lưu", ShowcasePastelTheme.ButtonSave);
-            btnSave.DialogResult = DialogResult.OK;
-            AcceptButton = btnSave;
-            var btnCancel = MakeButton("Hủy", ShowcasePastelTheme.ButtonCancel);
-            btnCancel.DialogResult = DialogResult.Cancel;
-            CancelButton = btnCancel;
+            root.Controls.Add(BuildBottomBar(), 0, 2);
 
+            shell.Controls.Add(root);
+            Controls.Add(shell);
+
+            Shown += (_, __) => BeginInvoke(new Action(LayoutHubGrid));
+        }
+
+        private Control BuildThemePanel()
+        {
+            var block = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                BackColor = Bg,
+                Dock = DockStyle.Top,
+                Width = 400
+            };
+            block.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            block.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+
+            block.Controls.Add(new Label
+            {
+                Text = "Chủ đề video",
+                AutoSize = true,
+                ForeColor = ShowcasePastelTheme.TextPrimary,
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
+                Margin = new Padding(0, 0, 0, 10)
+            }, 0, 0);
+
+            _txtTheme = new TextBox
+            {
+                Text = _video.ShowcaseTheme ?? string.Empty,
+                BackColor = FieldBg,
+                ForeColor = ShowcasePastelTheme.TextBody,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 11F),
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 0, 0, 4)
+            };
+            block.Controls.Add(_txtTheme, 0, 1);
+            return block;
+        }
+
+        private DataGridView BuildHubGrid(IList<AiVideoGenInputItem> scenes)
+        {
+            var grid = new DataGridView
+            {
+                BackgroundColor = Color.FromArgb(38, 42, 52),
+                GridColor = Color.FromArgb(58, 64, 78),
+                BorderStyle = BorderStyle.FixedSingle,
+                RowHeadersVisible = false,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = true,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
+                ScrollBars = ScrollBars.Vertical,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.FromArgb(45, 49, 60),
+                    ForeColor = Color.WhiteSmoke,
+                    SelectionBackColor = Color.FromArgb(68, 118, 168),
+                    SelectionForeColor = Color.White,
+                    Font = new Font("Segoe UI", 10.5F),
+                    WrapMode = DataGridViewTriState.True
+                },
+                ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+                {
+                    BackColor = Color.FromArgb(52, 58, 72),
+                    ForeColor = Color.Gainsboro,
+                    Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                    Alignment = DataGridViewContentAlignment.MiddleCenter
+                },
+                EnableHeadersVisualStyles = false,
+                ColumnHeadersHeight = 66,
+                RowTemplate = { MinimumHeight = HubGridMinRowHeight }
+            };
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColScene,
+                HeaderText = "Phân cảnh",
+                ReadOnly = true,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.TopLeft,
+                    WrapMode = DataGridViewTriState.True
+                }
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColImage,
+                HeaderText = "Tên ảnh",
+                ReadOnly = true,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.TopLeft,
+                    WrapMode = DataGridViewTriState.True
+                }
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColVoice,
+                HeaderText = "Lời thoại",
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.TopLeft,
+                    WrapMode = DataGridViewTriState.True
+                }
+            });
+
+            var colTool = new DataGridViewComboBoxColumn
+            {
+                Name = ColTool,
+                HeaderText = "Công cụ",
+                FlatStyle = FlatStyle.Flat,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.MiddleCenter
+                }
+            };
+            colTool.Items.Add(ShowcaseClipToolHelper.GetToolDisplayLabel(ShowcaseClipToolHelper.ToolVeo));
+            colTool.Items.Add(ShowcaseClipToolHelper.GetToolDisplayLabel(ShowcaseClipToolHelper.ToolZoom));
+            colTool.Items.Add(ShowcaseClipToolHelper.GetToolDisplayLabel(ShowcaseClipToolHelper.ToolKling));
+            grid.Columns.Add(colTool);
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColPrompt,
+                HeaderText = "Prompt",
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.TopLeft,
+                    WrapMode = DataGridViewTriState.True,
+                    Font = new Font("Consolas", 10.5F)
+                }
+            });
+
+            Form1.ApplyAppGridHeaderChrome(grid);
+            AppGridSttColumn.EnsureFirstColumn(grid);
+
+            PopulateHubGridRows(grid, scenes);
+
+            grid.CellFormatting += HubGrid_CellFormatting;
+
+            grid.CellBeginEdit += HubGrid_CellBeginEdit;
+            grid.CellEndEdit += HubGrid_CellEndEdit;
+            grid.DataError += HubGrid_DataError;
+            grid.CellEndEdit += (_, __) => QueueHubGridRowResize();
+            grid.ColumnWidthChanged += (_, __) => QueueHubGridRowResize();
+            grid.Resize += (_, __) =>
+            {
+                ConfigureHubGridColumnWidths();
+                QueueHubGridRowResize();
+            };
+
+            return grid;
+        }
+
+        private void PopulateHubGridRows(DataGridView grid, IList<AiVideoGenInputItem> scenes)
+        {
+            if (grid == null || grid.IsDisposed)
+            {
+                return;
+            }
+
+            grid.Rows.Clear();
+            scenes = scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
+
+            if (scenes.Count == 0)
+            {
+                var rowIndex = grid.Rows.Add();
+                var placeholder = grid.Rows[rowIndex];
+                placeholder.Cells[ColScene].Value = "(Chưa có cảnh — thêm ảnh hoặc «Tạo kịch bản».)";
+                placeholder.Cells[ColImage].Value = string.Empty;
+                placeholder.Cells[ColVoice].Value = string.Empty;
+                placeholder.Cells[ColTool].Value = string.Empty;
+                placeholder.Cells[ColPrompt].Value = string.Empty;
+                placeholder.ReadOnly = true;
+                placeholder.DefaultCellStyle.ForeColor = Color.FromArgb(140, 148, 162);
+                return;
+            }
+
+            for (var i = 0; i < scenes.Count; i++)
+            {
+                var scene = scenes[i];
+                var tool = ShowcaseClipToolHelper.NormalizeClipTool(scene.ShowcaseClipTool);
+                if (string.IsNullOrEmpty(tool))
+                {
+                    tool = ShowcaseClipToolHelper.ResolveDefaultTool(_video.ShowcaseClipModeId, scene.ShowcaseImageKind);
+                }
+
+                var isOpening = i == 0;
+                var isClosing = i == scenes.Count - 1;
+                var sceneLabel = FormatHubSceneLabel(scene, i, scenes.Count);
+                var imageName = ResolveSceneImageFileName(scene);
+                var voice = ResolveHubSceneVoice(scene, i, scenes.Count);
+                var prompt = FormatPromptForCell(ShowcaseClipToolHelper.ResolveScenePrompt(scene));
+                var toolLabel = ShowcaseClipToolHelper.GetToolDisplayLabel(tool);
+
+                AddHubRow(grid, sceneLabel, imageName, voice, toolLabel, prompt,
+                    new HubGridRowTag
+                    {
+                        Scene = scene,
+                        IsOpeningHookScene = isOpening,
+                        IsClosingCtaScene = isClosing
+                    });
+            }
+        }
+
+        private void ReloadHubGridFromVideo()
+        {
+            if (_dgvHub == null || _dgvHub.IsDisposed)
+            {
+                return;
+            }
+
+            _txtTheme.Text = _video.ShowcaseTheme ?? string.Empty;
+            var scenes = _video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
+            PopulateHubGridRows(_dgvHub, scenes);
+            _speechBeforeEdit = ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot.Capture(_video);
+            LayoutHubGrid();
+        }
+
+        private async Task TryRegenerateScriptAsync()
+        {
+            if (_regenerateScriptAsync == null || _btnRegenerateScript == null)
+            {
+                return;
+            }
+
+            var confirm = MessageBox.Show(
+                this,
+                "Gemini sẽ xem lại ảnh và ghi đè lời thoại, prompt clip, Hook/CTA (và gợi ý nhạc/SFX nếu có) trên dòng video này.\r\n\r\nTiếp tục?",
+                "Tạo lại kịch bản",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
+
+            _video.ShowcaseTheme = _txtTheme.Text?.Trim() ?? string.Empty;
+
+            _btnRegenerateScript.Enabled = false;
+            UseWaitCursor = true;
+            try
+            {
+                var ok = await _regenerateScriptAsync().ConfigureAwait(true);
+                if (ok)
+                {
+                    ReloadHubGridFromVideo();
+                }
+            }
+            finally
+            {
+                UseWaitCursor = false;
+                if (_btnRegenerateScript != null && !_btnRegenerateScript.IsDisposed)
+                {
+                    _btnRegenerateScript.Enabled = true;
+                }
+            }
+        }
+
+        private Control BuildBottomBar()
+        {
             var bottomBar = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                BackColor = Bg,
-                Padding = new Padding(0, 10, 0, 0)
-            };
-            bottomBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            bottomBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-
-            var leftSpacer = new Panel { Dock = DockStyle.Fill, BackColor = Bg };
-
-            var rightHalfBar = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                BackColor = Bg
+                BackColor = Bg,
+                Padding = new Padding(0, 8, 0, 18)
             };
-            rightHalfBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            rightHalfBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            rightHalfBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            bottomBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
             var flpExcel = new FlowLayoutPanel
             {
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
                 BackColor = Bg,
                 Padding = new Padding(4, 0, 8, 0)
             };
+            if (_regenerateScriptAsync != null)
+            {
+                _btnRegenerateScript = MakeButton("Tạo lại kịch bản", ShowcasePastelTheme.ScriptHeader, 252);
+                _btnRegenerateScript.Click += async (_, __) => await TryRegenerateScriptAsync().ConfigureAwait(true);
+                flpExcel.Controls.Add(_btnRegenerateScript);
+            }
+
             if (_exportExcelAsync != null)
             {
-                var btnExcel = MakeButton("Tải excel prompt", ShowcasePastelTheme.ButtonExcel);
+                var btnExcel = MakeButton("Tải excel prompt", ShowcasePastelTheme.ButtonExcel, 232);
                 btnExcel.Click += async (_, __) =>
                 {
                     if (!ValidateAndSave())
@@ -160,32 +435,12 @@ namespace tiktok_Omni
                 flpExcel.Controls.Add(btnExcel);
             }
 
-            var flpRight = new FlowLayoutPanel
-            {
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                FlowDirection = FlowDirection.RightToLeft,
-                BackColor = Bg,
-                Padding = new Padding(0, 0, 8, 0),
-                MinimumSize = new Size(320, 48)
-            };
-            flpRight.Controls.Add(btnCancel);
-            flpRight.Controls.Add(btnSave);
-
-            var midSpacer = new Panel { Dock = DockStyle.Fill, BackColor = Bg };
-
-            rightHalfBar.Controls.Add(flpExcel, 0, 0);
-            rightHalfBar.Controls.Add(midSpacer, 1, 0);
-            rightHalfBar.Controls.Add(flpRight, 2, 0);
-
-            bottomBar.Controls.Add(leftSpacer, 0, 0);
-            bottomBar.Controls.Add(rightHalfBar, 1, 0);
-
-            root.Controls.Add(bottomBar, 0, 2);
-            root.SetColumnSpan(bottomBar, 2);
-
-            shell.Controls.Add(root);
-            Controls.Add(shell);
+            var btnSave = MakeButton("Lưu", ShowcasePastelTheme.ButtonSave);
+            btnSave.DialogResult = DialogResult.OK;
+            AcceptButton = btnSave;
+            var btnCancel = MakeButton("Hủy", ShowcasePastelTheme.ButtonCancel);
+            btnCancel.DialogResult = DialogResult.Cancel;
+            CancelButton = btnCancel;
 
             btnSave.Click += (_, __) =>
             {
@@ -195,478 +450,524 @@ namespace tiktok_Omni
                 }
             };
 
-            Shown += (_, __) =>
+            var flpRight = new FlowLayoutPanel
             {
-                SyncAllStackWidths();
-                RefitAllPromptBoxes();
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                BackColor = Bg,
+                Padding = new Padding(0, 0, 8, 6),
+                MinimumSize = new Size(316, 52),
+                Margin = new Padding(0)
             };
-        }
+            flpRight.Controls.Add(btnCancel);
+            flpRight.Controls.Add(btnSave);
 
-        private Control BuildScriptScrollColumn()
-        {
-            var scroll = new Panel
+            var rightHost = new Panel
             {
                 Dock = DockStyle.Fill,
-                AutoScroll = true,
-                BackColor = FrameBodyScript,
-                Margin = new Padding(0, 6, 8, 8),
-                Padding = new Padding(10, 10, 10, 10)
+                BackColor = Bg,
+                MinimumSize = new Size(320, 52),
+                Padding = new Padding(0, 0, 0, 4)
             };
-
-            _scriptStack = CreateVerticalStack(FrameBodyScript);
-            scroll.Controls.Add(_scriptStack);
-            scroll.Resize += (_, __) =>
+            flpRight.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            rightHost.Controls.Add(flpRight);
+            rightHost.Resize += (_, __) =>
             {
-                SyncStackWidth(_scriptStack, scroll);
-                RefitAllPromptBoxes();
-            };
-
-            _txtTheme = MakeFieldBox(_video.ShowcaseTheme, height: 56, mono: false, autoGrow: false);
-            _txtHook = MakeFieldBox(_video.ShowcaseHookText, height: 132, mono: false, autoGrow: false);
-            _txtCta = MakeFieldBox(_video.ShowcaseCtaText, height: 132, mono: false, autoGrow: false);
-
-            _scriptStack.Controls.Add(MakeSectionFrame("Chủ đề video", AccentScriptCap, FrameBodyScript, _txtTheme));
-            _scriptStack.Controls.Add(MakeSectionFrame("Hook mở đầu", AccentScriptCap, FrameBodyScript, _txtHook));
-            _scriptStack.Controls.Add(MakeSectionFrame("CTA kết thúc", AccentScriptCap, FrameBodyScript, _txtCta));
-
-            var scenes = _video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
-            if (scenes.Count == 0)
-            {
-                _scriptStack.Controls.Add(MakeInfoFrame(
-                    "Chưa có cảnh",
-                    "Thêm ảnh trên storyboard hoặc «Tạo kịch bản» trước.",
-                    AccentScriptCap,
-                    FrameBodyScript));
-            }
-            else
-            {
-                for (var i = 0; i < scenes.Count; i++)
+                if (rightHost.IsDisposed || flpRight.IsDisposed)
                 {
-                    var scene = scenes[i];
-                    var role = string.IsNullOrWhiteSpace(scene.SceneRole) ? "?" : scene.SceneRole;
-                    var title = string.IsNullOrWhiteSpace(scene.SceneTitle) ? "Cảnh " + (i + 1) : scene.SceneTitle;
-                    var cap = (i + 1) + ". [" + role + "] " + title;
-                    var box = MakeFieldBox(scene.SceneVoiceover, height: 148, mono: false, autoGrow: false);
-                    _sceneVoiceBoxes.Add(box);
-                    _scriptStack.Controls.Add(MakeSectionFrame(cap, AccentScriptCap, FrameBodyScript, box));
+                    return;
                 }
-            }
 
-            return scroll;
+                flpRight.Top = 0;
+                flpRight.Left = Math.Max(0, rightHost.ClientSize.Width - flpRight.Width);
+            };
+            rightHost.HandleCreated += (_, __) => rightHost.PerformLayout();
+
+            var midSpacer = new Panel { Dock = DockStyle.Fill, BackColor = Bg };
+
+            bottomBar.Controls.Add(flpExcel, 0, 0);
+            bottomBar.Controls.Add(midSpacer, 1, 0);
+            bottomBar.Controls.Add(rightHost, 2, 0);
+            return bottomBar;
         }
 
-        private Control BuildPromptScrollColumn()
+        private static string FormatHubSceneLabel(AiVideoGenInputItem scene, int index, int sceneCount)
         {
-            var scroll = new Panel
+            var core = FormatSceneLabel(scene, index);
+            var isOpening = index == 0;
+            var isClosing = sceneCount > 0 && index == sceneCount - 1;
+            if (isOpening && isClosing)
             {
-                Dock = DockStyle.Fill,
-                AutoScroll = true,
-                BackColor = FrameBodyPrompt,
-                Margin = new Padding(0, 6, 0, 8),
-                Padding = new Padding(10, 10, 10, 10)
-            };
-
-            _promptStack = CreateVerticalStack(FrameBodyPrompt);
-            scroll.Controls.Add(_promptStack);
-            scroll.Resize += (_, __) =>
-            {
-                SyncStackWidth(_promptStack, scroll);
-                RefitAllPromptBoxes();
-            };
-
-            var scenes = _video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
-            if (scenes.Count == 0)
-            {
-                _promptStack.Controls.Add(MakeInfoFrame(
-                    "Chưa có cảnh",
-                    "Thêm ảnh trước khi nhập prompt clip.",
-                    AccentPromptCap,
-                    FrameBodyPrompt));
+                return "Hook · CTA · " + core;
             }
-            else
+
+            if (isOpening)
             {
-                for (var i = 0; i < scenes.Count; i++)
+                return "Hook · " + core;
+            }
+
+            if (isClosing)
+            {
+                return "CTA · " + core;
+            }
+
+            return core;
+        }
+
+        private string ResolveHubSceneVoice(AiVideoGenInputItem scene, int sceneIndex, int sceneCount)
+        {
+            var voice = (scene?.SceneVoiceover ?? string.Empty).Trim();
+            var hook = (_video.ShowcaseHookText ?? string.Empty).Trim();
+            var cta = (_video.ShowcaseCtaText ?? string.Empty).Trim();
+            var isOpening = sceneIndex == 0;
+            var isClosing = sceneCount > 0 && sceneIndex == sceneCount - 1;
+
+            if (isOpening && isClosing)
+            {
+                if (hook.Length > 0)
                 {
-                    var scene = scenes[i];
-                    var tool = ShowcaseClipToolHelper.NormalizeClipTool(scene.ShowcaseClipTool);
-                    if (string.IsNullOrEmpty(tool))
+                    return hook;
+                }
+
+                if (cta.Length > 0)
+                {
+                    return cta;
+                }
+
+                return voice;
+            }
+
+            if (isOpening && hook.Length > 0)
+            {
+                return hook;
+            }
+
+            if (isClosing && cta.Length > 0)
+            {
+                return cta;
+            }
+
+            return voice;
+        }
+
+        private static string FormatSceneLabel(AiVideoGenInputItem scene, int index)
+        {
+            var role = string.IsNullOrWhiteSpace(scene?.SceneRole) ? string.Empty : scene.SceneRole.Trim();
+            var title = string.IsNullOrWhiteSpace(scene?.SceneTitle)
+                ? "Cảnh " + (index + 1)
+                : scene.SceneTitle.Trim();
+            return role.Length > 0 ? "[" + role + "] " + title : title;
+        }
+
+        private static string FormatPromptForCell(string raw) =>
+            ShowcasePromptTextHelper.StripDurationClauses(raw ?? string.Empty);
+
+        private static string ResolveSceneImageFileName(AiVideoGenInputItem scene)
+        {
+            var fullPath = ResolveSceneImageFullPath(scene);
+            if (fullPath.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            return Path.GetFileName(fullPath);
+        }
+
+        private static string ResolveSceneImageFullPath(AiVideoGenInputItem scene)
+        {
+            if (scene == null)
+            {
+                return string.Empty;
+            }
+
+            foreach (var raw in new[]
+                     {
+                         scene.ThumbnailPath,
+                         scene.ShowcaseLocalPickPath,
+                         scene.ImageUrl
+                     })
+            {
+                var p = (raw ?? string.Empty).Trim();
+                if (p.Length == 0)
+                {
+                    continue;
+                }
+
+                if (p.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                    || p.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
                     {
-                        tool = ShowcaseClipToolHelper.ResolveDefaultTool(_video.ShowcaseClipModeId, scene.ShowcaseImageKind);
+                        return new Uri(p).LocalPath;
                     }
-
-                    var role = string.IsNullOrWhiteSpace(scene.SceneRole) ? "?" : scene.SceneRole;
-                    var title = string.IsNullOrWhiteSpace(scene.SceneTitle) ? "Cảnh " + (i + 1) : scene.SceneTitle;
-                    var cap = (i + 1) + ". [" + role + "] " + title + " · "
-                              + ShowcaseClipToolHelper.GetToolDisplayLabel(tool);
-
-                    var inner = new FlowLayoutPanel
+                    catch
                     {
-                        FlowDirection = FlowDirection.TopDown,
-                        WrapContents = false,
-                        AutoSize = true,
-                        AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                        BackColor = FrameBodyPrompt,
-                        Width = SectionDefaultWidth,
-                        Padding = new Padding(0)
-                    };
-
-                    var veoBox = MakePromptFieldBox(scene.VeoPrompt);
-                    var klingBox = MakePromptFieldBox(scene.KlingPrompt);
-                    var zoomBox = MakePromptFieldBox(scene.ZoomHint, mono: false);
-
-                    var showVeo = tool == ShowcaseClipToolHelper.ToolVeo || tool == ShowcaseClipToolHelper.ToolKling;
-                    var showKling = tool == ShowcaseClipToolHelper.ToolKling;
-                    var showZoom = tool == ShowcaseClipToolHelper.ToolZoom;
-
-                    AddPromptSubField(inner, "Prompt Veo (Flow I2V)", veoBox, showVeo);
-                    AddPromptSubField(inner, "Prompt Kling (on-model)", klingBox, showKling);
-                    AddPromptSubField(inner, "Zoom (Ken Burns trong app)", zoomBox, showZoom);
-
-                    _scenePromptFields.Add(new ScenePromptFields
-                    {
-                        Scene = scene,
-                        VeoBox = veoBox,
-                        KlingBox = klingBox,
-                        ZoomBox = zoomBox
-                    });
-
-                    _promptStack.Controls.Add(MakeSectionFrame(cap, AccentPromptCap, FrameBodyPrompt, inner));
+                        return p;
+                    }
                 }
+
+                return p;
             }
 
-            return scroll;
+            return string.Empty;
         }
 
-        private TextBox MakePromptFieldBox(string raw, bool mono = true)
+        private static void AddHubRow(
+            DataGridView grid,
+            string sceneLabel,
+            string imageName,
+            string voice,
+            string toolLabel,
+            string prompt,
+            HubGridRowTag tag)
         {
-            var cleaned = ShowcasePromptTextHelper.StripDurationClauses(raw ?? string.Empty);
-            var box = MakeFieldBox(cleaned, height: PromptBoxMinHeight, mono: mono, autoGrow: true);
-            return box;
-        }
+            var rowIndex = grid.Rows.Add();
+            var row = grid.Rows[rowIndex];
+            row.Cells[ColScene].Value = sceneLabel ?? string.Empty;
+            row.Cells[ColImage].Value = imageName ?? string.Empty;
+            row.Cells[ColVoice].Value = voice ?? string.Empty;
+            row.Cells[ColTool].Value = toolLabel ?? string.Empty;
+            row.Cells[ColPrompt].Value = prompt ?? string.Empty;
+            row.Tag = tag;
 
-        private static FlowLayoutPanel CreateVerticalStack(Color back) => new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Dock = DockStyle.Top,
-            BackColor = back,
-            Width = StackDefaultWidth,
-            Padding = new Padding(6, 6, 6, 14)
-        };
-
-        private void RefitAllPromptBoxes()
-        {
-            foreach (var box in _autoHeightPromptBoxes)
+            if (tag?.Scene == null)
             {
-                FitPromptBoxHeight(box);
+                row.Cells[ColImage].ReadOnly = true;
+                row.Cells[ColImage].Style.BackColor = Color.FromArgb(52, 56, 68);
+                row.Cells[ColTool].ReadOnly = true;
+                row.Cells[ColPrompt].ReadOnly = true;
+                row.Cells[ColTool].Style.BackColor = Color.FromArgb(52, 56, 68);
+                row.Cells[ColPrompt].Style.BackColor = Color.FromArgb(52, 56, 68);
             }
-
-            _promptStack?.PerformLayout();
-            _scriptStack?.PerformLayout();
         }
 
-        private static void FitPromptBoxHeight(TextBox box)
+        private void HubGrid_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
         {
-            if (box == null || box.IsDisposed || box.Width < 40)
+            if (_dgvHub == null || e.RowIndex < 0 || e.ColumnIndex < 0)
             {
                 return;
             }
 
-            var flags = TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPadding;
-            var text = box.Text ?? string.Empty;
-            var innerW = Math.Max(40, box.Width - 8);
-            var measured = TextRenderer.MeasureText(text, box.Font, new Size(innerW, int.MaxValue), flags);
-            var target = Math.Max(PromptBoxMinHeight, measured.Height + 22);
-            if (target > PromptBoxMaxHeight)
+            if (_dgvHub.Columns[e.ColumnIndex].Name != ColImage)
             {
-                box.Height = PromptBoxMaxHeight;
-                box.ScrollBars = ScrollBars.Vertical;
-            }
-            else
-            {
-                box.Height = target;
-                box.ScrollBars = ScrollBars.None;
-            }
-        }
-
-        private void SyncAllStackWidths()
-        {
-            if (_scriptStack?.Parent is Panel leftScroll)
-            {
-                SyncStackWidth(_scriptStack, leftScroll);
-            }
-
-            if (_promptStack?.Parent is Panel rightScroll)
-            {
-                SyncStackWidth(_promptStack, rightScroll);
-            }
-
-            _scriptStack?.PerformLayout();
-            _promptStack?.PerformLayout();
-            RefitAllPromptBoxes();
-        }
-
-        private void SyncStackWidth(FlowLayoutPanel stack, Panel scrollHost)
-        {
-            var w = Math.Max(871, scrollHost.ClientSize.Width - scrollHost.Padding.Horizontal - 16);
-            stack.Width = w;
-            foreach (Control c in stack.Controls)
-            {
-                if (c is FlowLayoutPanel section)
+                if (_dgvHub.Columns[e.ColumnIndex].Name == ColTool)
                 {
-                    section.Width = w - 8;
-                    var sectionInnerWidth = section.Width;
-                    foreach (Control child in section.Controls)
-                    {
-                        if (child is Panel cap && cap.Height <= CapBarHeight + 2)
-                        {
-                            cap.Width = sectionInnerWidth;
-                            foreach (Control capChild in cap.Controls)
-                            {
-                                if (capChild is Label cl)
-                                {
-                                    cl.MaximumSize = new Size(sectionInnerWidth - 28, CapBarHeight - 6);
-                                    cl.Top = Math.Max(0, (cap.Height - cl.Height) / 2);
-                                }
-                            }
-                        }
-                        else if (child is TextBox box)
-                        {
-                            box.Width = sectionInnerWidth;
-                        }
-                        else if (child is FlowLayoutPanel inner)
-                        {
-                            inner.Width = sectionInnerWidth;
-                            foreach (Control ic in inner.Controls)
-                            {
-                                if (ic is TextBox ib)
-                                {
-                                    ib.Width = sectionInnerWidth;
-                                }
-                            }
-                        }
-                        else if (child is Label lbl && !lbl.AutoSize)
-                        {
-                            lbl.Width = sectionInnerWidth;
-                        }
-                    }
+                    e.CellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
                 }
+
+                return;
             }
+
+            var row = _dgvHub.Rows[e.RowIndex];
+            if (row.Tag is HubGridRowTag tag && tag.Scene != null)
+            {
+                var full = ResolveSceneImageFullPath(tag.Scene);
+                row.Cells[e.ColumnIndex].ToolTipText = full.Length > 0 ? full : "(chưa có ảnh)";
+            }
+        }
+
+        private void HubGrid_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
+        {
+            if (_dgvHub == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (_dgvHub.Columns[e.ColumnIndex].Name != ColTool)
+            {
+                return;
+            }
+
+            _toolEditPrevious = _dgvHub.Rows[e.RowIndex].Cells[ColTool].Value?.ToString() ?? string.Empty;
+        }
+
+        private void HubGrid_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            if (_dgvHub == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            var row = _dgvHub.Rows[e.RowIndex];
+            if (!(row.Tag is HubGridRowTag tag) || tag.Scene == null)
+            {
+                return;
+            }
+
+            if (_dgvHub.Columns[e.ColumnIndex].Name == ColTool)
+            {
+                var prevTool = ToolLabelToId(_toolEditPrevious);
+                var promptText = row.Cells[ColPrompt].Value?.ToString() ?? string.Empty;
+                WritePromptToScene(tag.Scene, prevTool, promptText, Math.Max(0, _video.Scenes?.IndexOf(tag.Scene) ?? 0));
+
+                var newTool = ToolLabelToId(row.Cells[ColTool].Value?.ToString());
+                tag.Scene.ShowcaseClipTool = newTool;
+                row.Cells[ColPrompt].Value = FormatPromptForCell(ShowcaseClipToolHelper.ResolveScenePrompt(tag.Scene));
+            }
+        }
+
+        private static void HubGrid_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            if (e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            var grid = sender as DataGridView;
+            if (grid?.Columns[e.ColumnIndex].Name == ColTool)
+            {
+                e.ThrowException = false;
+                e.Cancel = true;
+            }
+        }
+
+        private void LayoutHubGrid()
+        {
+            ConfigureHubGridColumnWidths();
+            ResizeHubGridRows();
+        }
+
+        private void QueueHubGridRowResize()
+        {
+            if (_dgvHub == null || _dgvHub.IsDisposed || IsHubGridLayoutLocked(_dgvHub))
+            {
+                return;
+            }
+
+            _dgvHub.BeginInvoke(new Action(ResizeHubGridRows));
+        }
+
+        private static bool IsHubGridLayoutLocked(DataGridView grid) =>
+            string.Equals(grid?.Tag as string, HubGridLayoutLock, StringComparison.Ordinal);
+
+        private void ConfigureHubGridColumnWidths()
+        {
+            if (_dgvHub == null || _dgvHub.IsDisposed || _dgvHub.Columns.Count == 0)
+            {
+                return;
+            }
+
+            var gridW = Math.Max(480, _dgvHub.ClientSize.Width);
+            if (_dgvHub.DisplayedRowCount(false) < _dgvHub.RowCount)
+            {
+                gridW = Math.Max(480, gridW - SystemInformation.VerticalScrollBarWidth);
+            }
+
+            gridW = Math.Max(400, gridW - HubGridRightEdgeInset);
+            var sttW = AppGridSttColumn.ColumnWidth;
+            var remain = Math.Max(320, gridW - sttW);
+
+            int Pct(int min, float pct, int max = int.MaxValue) =>
+                Math.Min(max, Math.Max(min, (int)Math.Round(remain * pct)));
+
+            var wScene = Pct(112, HubGridPctScene, 380);
+            var wImage = Pct(96, HubGridPctImage, 280);
+            var wVoice = Pct(152, HubGridPctVoice, 640);
+            var wTool = Pct(100, HubGridPctTool, 200);
+            var wPrompt = Math.Max(160, remain - wScene - wImage - wVoice - wTool);
+
+            var prevTag = _dgvHub.Tag;
+            _dgvHub.Tag = HubGridLayoutLock;
+            try
+            {
+                SetHubColWidth(ColScene, wScene);
+                SetHubColWidth(ColImage, wImage);
+                SetHubColWidth(ColVoice, wVoice);
+                SetHubColWidth(ColTool, wTool);
+                SetHubColWidth(ColPrompt, wPrompt);
+            }
+            finally
+            {
+                _dgvHub.Tag = prevTag;
+            }
+        }
+
+        private void SetHubColWidth(string name, int width)
+        {
+            if (_dgvHub.Columns[name] is DataGridViewColumn col)
+            {
+                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
+                col.MinimumWidth = Math.Min(width, 80);
+                col.Width = width;
+            }
+        }
+
+        private void ResizeHubGridRows()
+        {
+            if (_dgvHub == null || _dgvHub.IsDisposed)
+            {
+                return;
+            }
+
+            foreach (DataGridViewRow row in _dgvHub.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                row.MinimumHeight = HubGridMinRowHeight;
+                var hScene = MeasureCellRowHeight(row, ColScene);
+                var hImage = MeasureCellRowHeight(row, ColImage);
+                var hVoice = MeasureCellRowHeight(row, ColVoice);
+                var hPrompt = MeasureCellRowHeight(row, ColPrompt);
+                row.Height = Math.Max(HubGridMinRowHeight, Math.Max(Math.Max(hScene, hImage), Math.Max(hVoice, hPrompt)));
+            }
+        }
+
+        private int MeasureCellRowHeight(DataGridViewRow row, string colName)
+        {
+            if (!_dgvHub.Columns.Contains(colName))
+            {
+                return HubGridMinRowHeight;
+            }
+
+            var cell = row.Cells[colName];
+            var col = _dgvHub.Columns[colName];
+            var colWidth = col.Displayed ? col.Width : col.MinimumWidth;
+            if (colWidth < 48)
+            {
+                return HubGridMinRowHeight;
+            }
+
+            var font = cell.InheritedStyle.Font ?? _dgvHub.DefaultCellStyle.Font ?? _dgvHub.Font;
+            var text = cell.Value?.ToString() ?? string.Empty;
+            if (text.Length == 0)
+            {
+                return HubGridMinRowHeight;
+            }
+
+            var measureWidth = Math.Max(48, colWidth - HubGridCellPad);
+            var size = TextRenderer.MeasureText(
+                text,
+                font,
+                new Size(measureWidth, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPadding);
+            return Math.Max(HubGridMinRowHeight, size.Height + HubGridCellPad);
         }
 
         private bool ValidateAndSave()
         {
             _video.ShowcaseTheme = _txtTheme.Text?.Trim() ?? string.Empty;
-            _video.ShowcaseHookText = _txtHook.Text?.Trim() ?? string.Empty;
-            _video.ShowcaseCtaText = _txtCta.Text?.Trim() ?? string.Empty;
+            _video.ShowcaseHookText = string.Empty;
+            _video.ShowcaseCtaText = string.Empty;
 
-            var scenes = _video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
-            for (var i = 0; i < scenes.Count && i < _sceneVoiceBoxes.Count; i++)
+            if (_dgvHub != null && !_dgvHub.IsDisposed)
             {
-                scenes[i].SceneVoiceover = _sceneVoiceBoxes[i].Text?.Trim() ?? string.Empty;
-                scenes[i].ShowcaseTheme = _video.ShowcaseTheme;
-            }
-
-            for (var i = 0; i < _scenePromptFields.Count; i++)
-            {
-                var entry = _scenePromptFields[i];
-                var scene = entry.Scene;
-                if (scene == null)
+                foreach (DataGridViewRow row in _dgvHub.Rows)
                 {
-                    continue;
-                }
+                    if (row.IsNewRow || !(row.Tag is HubGridRowTag tag))
+                    {
+                        continue;
+                    }
 
-                var tool = ShowcaseClipToolHelper.NormalizeClipTool(scene.ShowcaseClipTool);
-                if (string.IsNullOrEmpty(tool))
-                {
-                    tool = ShowcaseClipToolHelper.ResolveDefaultTool(_video.ShowcaseClipModeId, scene.ShowcaseImageKind);
-                    scene.ShowcaseClipTool = tool;
-                }
+                    var voice = (row.Cells[ColVoice].Value?.ToString() ?? string.Empty).Trim();
+                    if (tag.Scene == null)
+                    {
+                        continue;
+                    }
 
-                scene.VeoPrompt = ShowcaseVeoPromptSanitizer.Sanitize(entry.VeoBox.Text?.Trim() ?? string.Empty, i);
-                scene.KlingPrompt = ShowcaseKlingPromptSanitizer.Sanitize(entry.KlingBox.Text?.Trim() ?? string.Empty, i);
-                scene.ZoomHint = ShowcasePromptTextHelper.StripDurationClauses(entry.ZoomBox.Text?.Trim() ?? string.Empty);
+                    tag.Scene.SceneVoiceover = voice;
+                    tag.Scene.ShowcaseTheme = _video.ShowcaseTheme;
+                    if (tag.IsOpeningHookScene)
+                    {
+                        _video.ShowcaseHookText = voice;
+                    }
+
+                    if (tag.IsClosingCtaScene)
+                    {
+                        _video.ShowcaseCtaText = voice;
+                    }
+
+                    var tool = ToolLabelToId(row.Cells[ColTool].Value?.ToString());
+                    if (string.IsNullOrEmpty(tool))
+                    {
+                        tool = ShowcaseClipToolHelper.ResolveDefaultTool(
+                            _video.ShowcaseClipModeId,
+                            tag.Scene.ShowcaseImageKind);
+                    }
+
+                    tag.Scene.ShowcaseClipTool = tool;
+                    var prompt = row.Cells[ColPrompt].Value?.ToString() ?? string.Empty;
+                    var sceneIndex = _video.Scenes?.IndexOf(tag.Scene) ?? 0;
+                    if (sceneIndex < 0)
+                    {
+                        sceneIndex = 0;
+                    }
+
+                    WritePromptToScene(tag.Scene, tool, prompt, sceneIndex);
+                }
             }
 
             _video.ApplySettingsToScenes();
+            ShowcaseSubtitleDisplayHelper.SyncDisplayTextFromSpeechEdits(_video, _speechBeforeEdit);
             ShowcaseContentDisplayHelper.RefreshContentLabels(_video);
             return true;
         }
 
-        private static void AddPromptSubField(FlowLayoutPanel section, string title, TextBox field, bool visible)
+        private static string ToolLabelToId(string label)
         {
-            if (!visible)
+            var t = (label ?? string.Empty).Trim();
+            if (t.StartsWith("Kling", StringComparison.OrdinalIgnoreCase))
             {
-                field.Visible = false;
+                return ShowcaseClipToolHelper.ToolKling;
+            }
+
+            if (t.StartsWith("Zoom", StringComparison.OrdinalIgnoreCase))
+            {
+                return ShowcaseClipToolHelper.ToolZoom;
+            }
+
+            if (t.StartsWith("Veo", StringComparison.OrdinalIgnoreCase))
+            {
+                return ShowcaseClipToolHelper.ToolVeo;
+            }
+
+            return ShowcaseClipToolHelper.NormalizeClipTool(t);
+        }
+
+        private static void WritePromptToScene(AiVideoGenInputItem scene, string tool, string prompt, int sceneIndex)
+        {
+            if (scene == null)
+            {
                 return;
             }
 
-            section.Controls.Add(new Label
+            tool = ShowcaseClipToolHelper.NormalizeClipTool(tool);
+            prompt = (prompt ?? string.Empty).Trim();
+            switch (tool)
             {
-                Text = title,
-                AutoSize = true,
-                ForeColor = ShowcasePastelTheme.TextMuted,
-                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
-                Margin = new Padding(0, 8, 0, 8)
-            });
-            field.Margin = new Padding(0, 0, 0, 10);
-            section.Controls.Add(field);
-        }
-
-        private TextBox MakeFieldBox(string text, int height, bool mono, bool autoGrow)
-        {
-            var box = new TextBox
-            {
-                Text = text ?? string.Empty,
-                Multiline = true,
-                WordWrap = true,
-                AcceptsReturn = true,
-                ScrollBars = ScrollBars.None,
-                Height = height,
-                Width = FieldDefaultWidth,
-                BackColor = FieldBg,
-                ForeColor = ShowcasePastelTheme.TextBody,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = mono ? new Font("Consolas", MonoFieldFontSize) : new Font("Segoe UI", FieldFontSize),
-                Margin = new Padding(0, 4, 0, 6)
-            };
-
-            if (autoGrow)
-            {
-                _autoHeightPromptBoxes.Add(box);
-                box.TextChanged += (_, __) => FitPromptBoxHeight(box);
-                box.Resize += (_, __) => FitPromptBoxHeight(box);
+                case ShowcaseClipToolHelper.ToolKling:
+                    scene.KlingPrompt = ShowcaseKlingPromptSanitizer.Sanitize(prompt, sceneIndex);
+                    break;
+                case ShowcaseClipToolHelper.ToolZoom:
+                    scene.ZoomHint = ShowcasePromptTextHelper.StripDurationClauses(prompt);
+                    break;
+                default:
+                    scene.VeoPrompt = ShowcaseVeoPromptSanitizer.Sanitize(prompt, sceneIndex);
+                    break;
             }
-
-            return box;
         }
 
-        private static FlowLayoutPanel MakeSectionFrame(string caption, Color accent, Color bodyBg, Control content)
+        private static Button MakeButton(string text, Color back, int width = 148)
         {
-            var section = new FlowLayoutPanel
+            var font = new Font("Segoe UI", 10F, FontStyle.Bold);
+            var minW = TextRenderer.MeasureText(text, font, Size.Empty, TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width + 36;
+            var w = Math.Max(width, minW);
+            return new Button
             {
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                BackColor = bodyBg,
-                Margin = new Padding(0, 0, 0, 18),
-                Width = SectionDefaultWidth,
-                Padding = new Padding(0, 0, 0, 6)
+                Text = text,
+                Size = new Size(w, 48),
+                MinimumSize = new Size(w, 48),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = back,
+                ForeColor = Color.White,
+                Font = font,
+                Margin = new Padding(8, 0, 0, 0),
+                UseVisualStyleBackColor = false
             };
-
-            var capBar = MakeCapBar(caption, accent, SectionDefaultWidth);
-
-            content.Margin = new Padding(0, 12, 0, 10);
-            content.Width = SectionDefaultWidth;
-
-            section.Controls.Add(capBar);
-            section.Controls.Add(content);
-            return section;
         }
-
-        private static Panel MakeCapBar(string caption, Color accent, int width)
-        {
-            var capBar = new Panel
-            {
-                Height = CapBarHeight,
-                Width = width,
-                BackColor = accent
-            };
-
-            var capLabel = new Label
-            {
-                Text = caption,
-                AutoSize = true,
-                MaximumSize = new Size(Math.Max(120, width - 28), CapBarHeight - 6),
-                Left = 14,
-                ForeColor = ShowcasePastelTheme.TextPrimary,
-                BackColor = accent,
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                UseCompatibleTextRendering = true
-            };
-
-            void CenterCaption()
-            {
-                capLabel.MaximumSize = new Size(Math.Max(120, capBar.Width - 28), CapBarHeight - 6);
-                capLabel.Top = Math.Max(0, (capBar.Height - capLabel.Height) / 2);
-            }
-
-            capBar.Controls.Add(capLabel);
-            capBar.Resize += (_, __) => CenterCaption();
-            capLabel.SizeChanged += (_, __) => CenterCaption();
-            CenterCaption();
-            return capBar;
-        }
-
-        private static FlowLayoutPanel MakeInfoFrame(string caption, string message, Color accent, Color bodyBg)
-        {
-            var lbl = new Label
-            {
-                Text = message,
-                AutoSize = false,
-                Width = FieldDefaultWidth,
-                Height = 56,
-                ForeColor = ShowcasePastelTheme.TextMuted,
-                Font = new Font("Segoe UI", FieldFontSize)
-            };
-            return MakeSectionFrame(caption, accent, bodyBg, lbl);
-        }
-
-        private static Panel MakeHeader(string title, string subtitle, Color accent, bool rightColumn)
-        {
-            var p = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = accent,
-                Margin = rightColumn ? new Padding(0) : new Padding(0, 0, 8, 0),
-                Padding = new Padding(14, 8, 10, 8)
-            };
-
-            var inner = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                BackColor = accent
-            };
-            inner.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
-            inner.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-            inner.Controls.Add(new Label
-            {
-                Text = title,
-                Dock = DockStyle.Fill,
-                ForeColor = ShowcasePastelTheme.TextPrimary,
-                Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-                TextAlign = ContentAlignment.MiddleLeft,
-                UseCompatibleTextRendering = true
-            }, 0, 0);
-            inner.Controls.Add(new Label
-            {
-                Text = subtitle,
-                Dock = DockStyle.Fill,
-                ForeColor = ShowcasePastelTheme.TextSubheader,
-                Font = new Font("Segoe UI", 10.5F),
-                TextAlign = ContentAlignment.MiddleLeft,
-                UseCompatibleTextRendering = true
-            }, 0, 1);
-            p.Controls.Add(inner);
-            return p;
-        }
-
-        private static Button MakeButton(string text, Color back) => new Button
-        {
-            Text = text,
-            Size = new Size(148, 48),
-            MinimumSize = new Size(148, 48),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = back,
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI", 10F, FontStyle.Bold),
-            Margin = new Padding(8, 0, 0, 0),
-            UseVisualStyleBackColor = false
-        };
     }
 }

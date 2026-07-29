@@ -18,8 +18,8 @@ namespace tiktok_Omni
             Sfx
         }
 
-        private Button _btnPreviewMusic;
-        private Button _btnPreviewSfx;
+        private JellyButton _btnPreviewMusic;
+        private JellyButton _btnPreviewSfx;
         private AudioPreviewKind _audioPreviewKind = AudioPreviewKind.None;
         private Timer _audioPreviewPollTimer;
 
@@ -105,7 +105,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            ApplyActionButtonLabel(_btnPreviewSfx, PreviewPlaySfxLabel);
+            ApplyActionButtonLabel(_btnPreviewSfx, PreviewPlaySfxLabel, minWidth: 120);
             _btnPreviewSfx.Enabled = true;
         }
 
@@ -141,7 +141,7 @@ namespace tiktok_Omni
 
             try
             {
-                var vol = _numVolume != null ? (int)_numVolume.Value : 14;
+                var vol = MusicVolumePercent;
                 UiAudioPreviewPlayer.Play(path, vol);
                 BeginAudioPreview(AudioPreviewKind.Music);
             }
