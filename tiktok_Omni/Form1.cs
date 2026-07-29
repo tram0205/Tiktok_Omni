@@ -123,7 +123,6 @@ namespace tiktok_Omni
         private TextBox txtVeoApiKey;
         private TextBox txtTtsApiKey;
         private TextBox txtVeoEndpoint;
-        private TextBox txtTtsEndpoint;
         private TextBox txtFfmpegPath;
         private TextBox txtYtDlpPath;
         private Button btnToggleAiApiKey;
@@ -6427,7 +6426,6 @@ namespace tiktok_Omni
             txtAiProvider.TextChanged += (sender, e) => ValidateSettingsInputs();
             txtAiModel.TextChanged += (sender, e) => ValidateSettingsInputs();
             txtVeoEndpoint.TextChanged += (sender, e) => ValidateSettingsInputs();
-            txtTtsEndpoint.TextChanged += (sender, e) => ValidateSettingsInputs();
             txtFfmpegPath.TextChanged += (sender, e) => ValidateSettingsInputs();
         }
 
@@ -6465,13 +6463,17 @@ namespace tiktok_Omni
                 return false;
             }
 
-            if (!IsValidHttpUrl(txtTtsEndpoint.Text))
+            foreach (var voiceField in EnumerateVoicePersonaFields())
             {
-                lblSettingsValidation.Text = "URL gateway TTS phải là URL http/https hợp lệ.";
-                btnSaveSettings.Enabled = false;
-                ApplySettingsSaveButtonState();
-                EnsureSettingsValidationBarVisible();
-                return false;
+                if (!ElevenLabsTtsHelper.IsValidSettingsVoiceField(voiceField.Text))
+                {
+                    lblSettingsValidation.Text =
+                        "Voice ID ElevenLabs không hợp lệ — chỉ nhập ID (vd. B2sElSyvaOc1di2VskcS), không cần URL.";
+                    btnSaveSettings.Enabled = false;
+                    ApplySettingsSaveButtonState();
+                    EnsureSettingsValidationBarVisible();
+                    return false;
+                }
             }
 
             var ffmpegPath = (txtFfmpegPath.Text ?? string.Empty).Trim();
@@ -7824,7 +7826,6 @@ namespace tiktok_Omni
         }
 
         private const string DefaultVeoEndpointPlaceholder = "https://api.veo.example.com/v1/videos";
-        private const string DefaultTtsEndpointPlaceholder = "https://api.example.com/v1/tts/synthesize";
 
         /// <summary>Tự điền mặc định + phát hiện ffmpeg/yt-dlp/nhạc khi mở Cài đặt. Trả về true nếu cần lưu file.</summary>
         private static bool ApplySettingsAutoFillAndDetect(AppSettings settings, ICollection<string> notes)
@@ -7862,13 +7863,6 @@ namespace tiktok_Omni
                 settings.VeoEndpoint = DefaultVeoEndpointPlaceholder;
                 changed = true;
                 Note("URL gateway Veo → placeholder (thay bằng URL API thật khi dùng Veo)");
-            }
-
-            if (string.IsNullOrWhiteSpace(settings.TtsEndpoint))
-            {
-                settings.TtsEndpoint = DefaultTtsEndpointPlaceholder;
-                changed = true;
-                Note("URL gateway TTS → placeholder (thay bằng URL API TTS thật, tùy chọn)");
             }
 
             if (settings.BlockPostingSafetyScoreBelow <= 0)
@@ -8021,7 +8015,6 @@ namespace tiktok_Omni
                 txtVeoApiKey.Text = settings.VeoApiKey;
                 txtTtsApiKey.Text = settings.TtsApiKey;
                 txtVeoEndpoint.Text = settings.VeoEndpoint;
-                txtTtsEndpoint.Text = settings.TtsEndpoint;
                 txtFfmpegPath.Text = settings.FfmpegPath;
                 _storageRootPathCache = string.Empty;
                 ProfileScopedPaths.SetConfiguredStorageRoot(string.Empty);
@@ -8037,19 +8030,34 @@ namespace tiktok_Omni
                     txtVideoReupMusicLibraryPath.Text = string.Empty;
                 }
 
-                if (txtVoiceIdMelancholic != null)
+                if (txtVoiceIdFemaleYoung != null)
                 {
-                    txtVoiceIdMelancholic.Text = settings.VoiceId_Melancholic ?? string.Empty;
+                    txtVoiceIdFemaleYoung.Text = settings.VoiceId_FemaleYoung ?? string.Empty;
                 }
 
-                if (txtVoiceIdIntense != null)
+                if (txtVoiceIdFemaleMature != null)
                 {
-                    txtVoiceIdIntense.Text = settings.VoiceId_Intense ?? string.Empty;
+                    txtVoiceIdFemaleMature.Text = settings.VoiceId_FemaleMature ?? string.Empty;
                 }
 
-                if (txtVoiceIdCalm != null)
+                if (txtVoiceIdMaleYoung != null)
                 {
-                    txtVoiceIdCalm.Text = settings.VoiceId_Calm ?? string.Empty;
+                    txtVoiceIdMaleYoung.Text = settings.VoiceId_MaleYoung ?? string.Empty;
+                }
+
+                if (txtVoiceIdMaleMature != null)
+                {
+                    txtVoiceIdMaleMature.Text = settings.VoiceId_MaleMature ?? string.Empty;
+                }
+
+                if (txtVoiceIdGirlChild != null)
+                {
+                    txtVoiceIdGirlChild.Text = settings.VoiceId_GirlChild ?? string.Empty;
+                }
+
+                if (txtVoiceIdBoyChild != null)
+                {
+                    txtVoiceIdBoyChild.Text = settings.VoiceId_BoyChild ?? string.Empty;
                 }
 
                 if (cbGeminiStyleTemplate != null)
@@ -8172,7 +8180,12 @@ namespace tiktok_Omni
                 settings.VeoApiKey = txtVeoApiKey.Text.Trim();
                 settings.TtsApiKey = txtTtsApiKey.Text.Trim();
                 settings.VeoEndpoint = txtVeoEndpoint.Text.Trim();
-                settings.TtsEndpoint = txtTtsEndpoint.Text.Trim();
+                // TtsEndpoint không còn ô nhập riêng — tự suy từ Voice ID persona đầu tiên có giá trị
+                // (giữ cho IsElevenLabsConfigured/EndpointIncludesVoiceId hoạt động cho các tab TTS cũ).
+                var firstVoiceId = ResolveFirstSettingsVoiceId();
+                settings.TtsEndpoint = string.IsNullOrWhiteSpace(firstVoiceId)
+                    ? string.Empty
+                    : ElevenLabsTtsHelper.NormalizeSettingsEndpoint(firstVoiceId);
                 settings.FfmpegPath = NormalizeSettingsFfmpegPathForSave(txtFfmpegPath.Text);
                 txtFfmpegPath.Text = settings.FfmpegPath;
                 settings.StorageRootPath = string.Empty;
@@ -8181,9 +8194,12 @@ namespace tiktok_Omni
                 settings.YtDlpPath = (txtYtDlpPath?.Text ?? string.Empty).Trim();
                 settings.VideoReupMusicLibraryPath = string.Empty;
                 // HookStockClipsRoot / VoiceId_Reup*: không còn trên UI — giữ nguyên giá trị đã load từ file.
-                settings.VoiceId_Melancholic = (txtVoiceIdMelancholic?.Text ?? string.Empty).Trim();
-                settings.VoiceId_Intense = (txtVoiceIdIntense?.Text ?? string.Empty).Trim();
-                settings.VoiceId_Calm = (txtVoiceIdCalm?.Text ?? string.Empty).Trim();
+                settings.VoiceId_FemaleYoung = (txtVoiceIdFemaleYoung?.Text ?? string.Empty).Trim();
+                settings.VoiceId_FemaleMature = (txtVoiceIdFemaleMature?.Text ?? string.Empty).Trim();
+                settings.VoiceId_MaleYoung = (txtVoiceIdMaleYoung?.Text ?? string.Empty).Trim();
+                settings.VoiceId_MaleMature = (txtVoiceIdMaleMature?.Text ?? string.Empty).Trim();
+                settings.VoiceId_GirlChild = (txtVoiceIdGirlChild?.Text ?? string.Empty).Trim();
+                settings.VoiceId_BoyChild = (txtVoiceIdBoyChild?.Text ?? string.Empty).Trim();
                 settings.GeminiStyleTemplate = GetSelectedGeminiStyleTemplate().ToString();
                 // AutoResumeQueueOnStartup: giữ giá trị đã load từ file (mặc định false).
                 settings.AutoFetchAffiliateRevenueOnStartup = chkAutoFetchAffiliateRevenueOnStartup?.Checked ?? false;
@@ -8402,21 +8418,35 @@ namespace tiktok_Omni
                     return;
                 }
 
-                var endpoint = txtTtsEndpoint.Text.Trim();
+                var firstVoiceId = ResolveFirstSettingsVoiceId();
+                if (string.IsNullOrWhiteSpace(firstVoiceId))
+                {
+                    NotifySettingsApiTest(
+                        "TTS",
+                        false,
+                        false,
+                        "Chưa nhập Voice ID nào (Nữ trẻ, Nam trẻ, …) để test.");
+                    return;
+                }
+
+                var endpoint = ElevenLabsTtsHelper.NormalizeSettingsEndpoint(firstVoiceId);
+                if (string.IsNullOrWhiteSpace(endpoint) || !ElevenLabsTtsHelper.EndpointIncludesVoiceId(endpoint))
+                {
+                    NotifySettingsApiTest(
+                        "TTS",
+                        false,
+                        false,
+                        "Voice ID ElevenLabs không hợp lệ.");
+                    return;
+                }
+
                 if (LooksLikePlaceholderApiEndpoint(endpoint))
                 {
                     NotifySettingsApiTest(
                         "TTS",
                         false,
                         false,
-                        "Endpoint vẫn là mẫu (example.com) — không phải API thật.\r\n" +
-                        "Nhập URL + key từ gateway Text-to-Speech (OpenAI, ElevenLabs, Google Cloud TTS, v.v. — không dùng chung key Gemini).");
-                    return;
-                }
-
-                if (!IsValidHttpUrl(endpoint))
-                {
-                    NotifySettingsApiTest("TTS", false, false, "TTS Endpoint không phải URL http/https hợp lệ.");
+                        "Voice ID / endpoint vẫn là mẫu — nhập ID giọng ElevenLabs thật.");
                     return;
                 }
 

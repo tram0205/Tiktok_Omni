@@ -104,18 +104,25 @@ namespace tiktok_Omni
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = withButtons ? 4 : 2,
+                ColumnCount = withButtons ? 5 : 2,
                 RowCount = 1,
                 Margin = new Padding(0, 0, 0, 4),
                 Padding = Padding.Empty
             };
             // Label cố định trước → ô nhập co theo phần còn lại (mép phải thẳng hàng).
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SettingsVoiceLabelWidth));
-            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             if (withButtons)
             {
+                // Ô nhập chỉ chiếm 0.5 lần phần còn lại; 2 nút bám sát ngay sau ô nhập;
+                // phần đệm trống (nửa còn lại) đẩy xuống cuối cùng, sau 2 nút.
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
                 row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
                 row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            }
+            else
+            {
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             }
 
             row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -161,101 +168,136 @@ namespace tiktok_Omni
         }
 
         /// <summary>
-        /// Nhóm Voice/TTS: 2 cột canh đều full chiều rộng — TTS | Voice ID Triết lý.
+        /// Nhóm Voice/TTS: Khóa TTS (key) ở hàng đầu, bên dưới là lưới 3 cột x 2 hàng — 6 Voice ID dùng chung mọi tab video.
         /// </summary>
         private GroupBox BuildVoiceSettingsGroupBox()
         {
-            var grp = CreateSettingsGroupBox("Voice / TTS — dùng chung các tab video");
+            var grp = CreateSettingsGroupBox("Voice / TTS");
             grp.Name = "grpVoiceSettings";
             grp.Padding = new Padding(8, 12, 8, 10);
             grp.Margin = new Padding(0, 0, 0, 8);
 
-            var tbl = new TableLayoutPanel
+            var stack = new TableLayoutPanel
             {
-                Name = "tblVoiceTwoCols",
+                Name = "tblVoiceStack",
                 Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 2,
-                RowCount = 1,
-                Margin = Padding.Empty,
-                Padding = Padding.Empty
-            };
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-            // —— Cột 1: TTS ——
-            var colTts = new TableLayoutPanel
-            {
-                Name = "colVoiceTts",
-                Dock = DockStyle.Fill,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
                 RowCount = 3,
-                Margin = new Padding(0, 0, 30, 0),
+                Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
-            colTts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             for (var i = 0; i < 3; i++)
             {
-                colTts.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             }
 
-            colTts.Controls.Add(new Label
-            {
-                Text = "TTS (ElevenLabs)",
-                AutoSize = true,
-                Font = AppCaptionFont,
-                ForeColor = Color.FromArgb(200, 210, 225),
-                Margin = new Padding(0, 0, 0, 4),
-                Dock = DockStyle.Top
-            }, 0, 0);
-
-            txtTtsEndpoint = CreateVoiceStretchField("txtTtsEndpoint");
-            colTts.Controls.Add(CreateVoiceLabeledStretchField("TTS · URL", txtTtsEndpoint), 0, 1);
-            colTts.Controls.Add(CreateVoiceSecretStretchRow(
+            // —— Hàng 1: Khóa TTS ——
+            var keyRow = CreateVoiceSecretStretchRow(
                 "Khóa TTS",
                 "txtTtsApiKey",
                 out txtTtsApiKey,
                 out btnToggleTtsApiKey,
                 out btnTestTts,
-                btnTestTts_Click), 0, 2);
+                btnTestTts_Click);
+            keyRow.Margin = new Padding(0, 0, 0, 12);
+            stack.Controls.Add(keyRow, 0, 0);
 
-            // —— Cột 2: Voice ID Triết lý — 3 cột nhỏ, label phía trên mỗi ô ——
-            var colVoices = new TableLayoutPanel
+            // —— Hàng 2: tiêu đề Voice ID ——
+            stack.Controls.Add(new Label
             {
-                Name = "colVoicePhilosophy",
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1,
-                RowCount = 2,
-                Margin = Padding.Empty,
-                Padding = Padding.Empty
-            };
-            colVoices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            colVoices.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            colVoices.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-            colVoices.Controls.Add(new Label
-            {
-                Text = "Voice ID — Triết lý (theo mood)",
+                Text = "Voice ID — ElevenLabs",
                 AutoSize = true,
                 Font = AppCaptionFont,
                 ForeColor = Color.FromArgb(200, 210, 225),
                 Margin = new Padding(0, 0, 0, 6),
                 Dock = DockStyle.Top
-            }, 0, 0);
+            }, 0, 1);
 
-            txtVoiceIdMelancholic = CreateVoiceStretchField("txtVoiceIdMelancholic");
-            txtVoiceIdIntense = CreateVoiceStretchField("txtVoiceIdIntense");
-            txtVoiceIdCalm = CreateVoiceStretchField("txtVoiceIdCalm");
+            // —— Hàng 3: lưới 3 cột x 2 hàng — Nữ | Nam | Trẻ em ——
+            txtVoiceIdFemaleYoung = CreateVoiceStretchField("txtVoiceIdFemaleYoung");
+            txtVoiceIdFemaleMature = CreateVoiceStretchField("txtVoiceIdFemaleMature");
+            txtVoiceIdMaleYoung = CreateVoiceStretchField("txtVoiceIdMaleYoung");
+            txtVoiceIdMaleMature = CreateVoiceStretchField("txtVoiceIdMaleMature");
+            txtVoiceIdGirlChild = CreateVoiceStretchField("txtVoiceIdGirlChild");
+            txtVoiceIdBoyChild = CreateVoiceStretchField("txtVoiceIdBoyChild");
 
-            var tblMoodIds = new TableLayoutPanel
+            var tblPersonaIds = new TableLayoutPanel
             {
-                Name = "tblPhilosophyVoiceIds",
+                Name = "tblVoicePersonaIds",
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                RowCount = 2,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            for (var i = 0; i < 3; i++)
+            {
+                tblPersonaIds.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+            }
+
+            tblPersonaIds.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tblPersonaIds.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            const int columnGap = 50;
+
+            void AddPersonaColumn(int col, string topCaption, TextBox topField, string bottomCaption, TextBox bottomField, int rightGap)
+            {
+                var top = CreateVoiceInlineField(topCaption, topField);
+                var bottom = CreateVoiceInlineField(bottomCaption, bottomField);
+                top.Margin = new Padding(0, 0, rightGap, 8);
+                bottom.Margin = new Padding(0, 0, rightGap, 0);
+                tblPersonaIds.Controls.Add(top, col, 0);
+                tblPersonaIds.Controls.Add(bottom, col, 1);
+            }
+
+            AddPersonaColumn(0, "Nữ trẻ", txtVoiceIdFemaleYoung, "Nữ trung niên", txtVoiceIdFemaleMature, columnGap);
+            AddPersonaColumn(1, "Nam trẻ", txtVoiceIdMaleYoung, "Nam trung niên", txtVoiceIdMaleMature, columnGap);
+            AddPersonaColumn(2, "Bé gái", txtVoiceIdGirlChild, "Bé trai", txtVoiceIdBoyChild, 0);
+
+            stack.Controls.Add(tblPersonaIds, 0, 2);
+
+            grp.Controls.Add(stack);
+            return grp;
+        }
+
+        /// <summary>6 ô Voice ID persona theo đúng thứ tự ưu tiên fallback (Nữ trẻ → … → Bé trai).</summary>
+        private IEnumerable<TextBox> EnumerateVoicePersonaFields()
+        {
+            if (txtVoiceIdFemaleYoung != null) yield return txtVoiceIdFemaleYoung;
+            if (txtVoiceIdMaleYoung != null) yield return txtVoiceIdMaleYoung;
+            if (txtVoiceIdFemaleMature != null) yield return txtVoiceIdFemaleMature;
+            if (txtVoiceIdMaleMature != null) yield return txtVoiceIdMaleMature;
+            if (txtVoiceIdGirlChild != null) yield return txtVoiceIdGirlChild;
+            if (txtVoiceIdBoyChild != null) yield return txtVoiceIdBoyChild;
+        }
+
+        /// <summary>Voice ID đầu tiên có giá trị trong 6 ô persona — dùng làm endpoint mặc định (TtsEndpoint) nội bộ.</summary>
+        private string ResolveFirstSettingsVoiceId()
+        {
+            foreach (var field in EnumerateVoicePersonaFields())
+            {
+                var trimmed = (field.Text ?? string.Empty).Trim();
+                if (!string.IsNullOrEmpty(trimmed))
+                {
+                    return trimmed;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>Nhãn bên trái + ô nhập bên phải, cùng một dòng — dùng cho lưới 3 cột Voice ID persona.
+        /// Cột nhãn rộng gấp 4 lần mặc định cũ (108 → 432); cột ô nhập chỉ chiếm 0.6 lần phần còn lại
+        /// (40% còn lại bỏ trống làm khoảng đệm) nhờ cột đệm ẩn phía sau.</summary>
+        private Control CreateVoiceInlineField(string caption, TextBox field, int labelWidth = 262)
+        {
+            var row = new TableLayoutPanel
+            {
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -264,56 +306,28 @@ namespace tiktok_Omni
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
-            for (var i = 0; i < 3; i++)
-            {
-                tblMoodIds.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
-            }
-
-            tblMoodIds.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tblMoodIds.Controls.Add(CreateVoiceStackedField("Melanc", txtVoiceIdMelancholic, isLast: false), 0, 0);
-            tblMoodIds.Controls.Add(CreateVoiceStackedField("Intense", txtVoiceIdIntense, isLast: false), 1, 0);
-            tblMoodIds.Controls.Add(CreateVoiceStackedField("Calm", txtVoiceIdCalm, isLast: true), 2, 0);
-            colVoices.Controls.Add(tblMoodIds, 0, 1);
-
-            tbl.Controls.Add(colTts, 0, 0);
-            tbl.Controls.Add(colVoices, 1, 0);
-            grp.Controls.Add(tbl);
-            return grp;
-        }
-
-        /// <summary>Label phía trên + ô nhập bên dưới — dùng cho 3 cột Voice ID mood.</summary>
-        private Control CreateVoiceStackedField(string caption, TextBox field, bool isLast = false)
-        {
-            var stack = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1,
-                RowCount = 2,
-                Margin = new Padding(0, 0, isLast ? 0 : 10, 0),
-                Padding = Padding.Empty
-            };
-            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, labelWidth));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 72F));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28F));
+            row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var lbl = new Label
             {
                 Text = caption,
-                AutoSize = true,
+                AutoSize = false,
+                Dock = DockStyle.Fill,
                 Font = AppLabelFont,
                 ForeColor = Color.Gainsboro,
-                Dock = DockStyle.Top,
-                Margin = new Padding(0, 0, 0, 4)
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 0, 6, 0)
             };
 
             field.Dock = DockStyle.Fill;
-            field.Margin = Padding.Empty;
+            field.Margin = new Padding(0, 2, 0, 2);
 
-            stack.Controls.Add(lbl, 0, 0);
-            stack.Controls.Add(field, 0, 1);
-            return stack;
+            row.Controls.Add(lbl, 0, 0);
+            row.Controls.Add(field, 1, 0);
+            return row;
         }
 
         private TextBox CreateSettingField(string name, bool isSecret)
@@ -1730,39 +1744,27 @@ namespace tiktok_Omni
                 txtVeoApiKey,
                 "RapidAPI key (x-rapidapi-key) cho Google Veo 3.1 Text-to-Video — có thể trùng key TikTok RapidAPI nếu cùng tài khoản.");
 
-            if (txtTtsEndpoint != null)
-            {
-                tip.SetToolTip(
-                    txtTtsEndpoint,
-                    "URL API gateway TTS (POST JSON → audioUrl).\r\n" +
-                    "Cặp với «Khóa TTS» ngay bên dưới trong nhóm Voice / TTS.");
-            }
-
             tip.SetToolTip(
                 txtVeoEndpoint,
                 "Base URL RapidAPI Google Veo 3.1 (mặc định " + RapidApiGoogleVeoHelper.DefaultBaseUrl + ").\r\n" +
                 "Cặp với «Khóa RapidAPI Veo» ngay bên dưới trong cùng cột.");
 
-            if (txtVoiceIdMelancholic != null)
+            var personaHint = "Voice ID ElevenLabs cho giọng «{0}» — dùng chung mọi tab video khi chọn " +
+                               "giọng này (Showcase Audio hook/thân, sau này Triết lý/Reup).";
+            void SetPersonaTip(TextBox field, string label)
             {
-                tip.SetToolTip(
-                    txtVoiceIdMelancholic,
-                    "ElevenLabs voice_id cho mood melancholic / sad — tab Video Triết lý chọn tự động theo cột Mood.");
+                if (field != null)
+                {
+                    tip.SetToolTip(field, string.Format(personaHint, label));
+                }
             }
 
-            if (txtVoiceIdIntense != null)
-            {
-                tip.SetToolTip(
-                    txtVoiceIdIntense,
-                    "ElevenLabs voice_id cho mood intense / hopeful — tab Video Triết lý.");
-            }
-
-            if (txtVoiceIdCalm != null)
-            {
-                tip.SetToolTip(
-                    txtVoiceIdCalm,
-                    "ElevenLabs voice_id calm / reflective — tab Video Triết lý.");
-            }
+            SetPersonaTip(txtVoiceIdFemaleYoung, "Nữ trẻ");
+            SetPersonaTip(txtVoiceIdFemaleMature, "Nữ trung niên");
+            SetPersonaTip(txtVoiceIdMaleYoung, "Nam trẻ");
+            SetPersonaTip(txtVoiceIdMaleMature, "Nam trung niên");
+            SetPersonaTip(txtVoiceIdGirlChild, "Bé gái");
+            SetPersonaTip(txtVoiceIdBoyChild, "Bé trai");
         }
 
     }

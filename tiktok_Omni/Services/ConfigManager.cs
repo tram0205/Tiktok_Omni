@@ -549,7 +549,7 @@ namespace tiktok_Omni.Services
             settings.TwoCaptchaApiKey = (settings.TwoCaptchaApiKey ?? string.Empty).Trim();
             settings.VeoApiKey = (settings.VeoApiKey ?? string.Empty).Trim();
             settings.TtsApiKey = (settings.TtsApiKey ?? string.Empty).Trim();
-            settings.TtsEndpoint = (settings.TtsEndpoint ?? string.Empty).Trim();
+            settings.TtsEndpoint = ElevenLabsTtsHelper.NormalizeSettingsEndpoint(settings.TtsEndpoint ?? string.Empty);
             settings.TtsElevenLabsModel = (settings.TtsElevenLabsModel ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(settings.TtsElevenLabsModel)
                 || string.Equals(settings.TtsElevenLabsModel, "eleven_multilingual_v2", StringComparison.OrdinalIgnoreCase)
@@ -815,7 +815,7 @@ namespace tiktok_Omni.Services
         public string VeoApiKey { get; set; } = string.Empty;
         public string TtsApiKey { get; set; } = string.Empty;
         public string VeoEndpoint { get; set; } = RapidApiGoogleVeoHelper.DefaultBaseUrl;
-        public string TtsEndpoint { get; set; } = "https://api.example.com/v1/tts/synthesize";
+        public string TtsEndpoint { get; set; } = string.Empty;
 
         /// <summary>ElevenLabs model — mặc định eleven_v3 (language_code vi).</summary>
         public string TtsElevenLabsModel { get; set; } = "eleven_v3";
@@ -826,14 +826,32 @@ namespace tiktok_Omni.Services
         /// <summary>Lần cuối chọn engine TTS Showcase: EdgeTts | ElevenLabs.</summary>
         public string ShowcaseLastTtsEngine { get; set; } = "EdgeTts";
 
-        /// <summary>ElevenLabs voice_id cho mood melancholic / sad (tab Triết lý).</summary>
+        /// <summary>ElevenLabs voice_id cho mood melancholic / sad (tab Triết lý) — legacy, không còn UI.</summary>
         public string VoiceId_Melancholic { get; set; } = string.Empty;
 
-        /// <summary>ElevenLabs voice_id cho mood intense / hopeful (tab Triết lý).</summary>
+        /// <summary>ElevenLabs voice_id cho mood intense / hopeful (tab Triết lý) — legacy, không còn UI.</summary>
         public string VoiceId_Intense { get; set; } = string.Empty;
 
-        /// <summary>ElevenLabs voice_id cho mood calm / reflective và mặc định (tab Triết lý).</summary>
+        /// <summary>ElevenLabs voice_id cho mood calm / reflective và mặc định (tab Triết lý) — legacy, không còn UI.</summary>
         public string VoiceId_Calm { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id — Nữ trẻ. Dùng chung mọi tab video khi chọn persona giọng (ElevenVoicePersonaCatalog).</summary>
+        public string VoiceId_FemaleYoung { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id — Nữ trung niên.</summary>
+        public string VoiceId_FemaleMature { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id — Nam trẻ.</summary>
+        public string VoiceId_MaleYoung { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id — Nam trung niên.</summary>
+        public string VoiceId_MaleMature { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id — Bé gái.</summary>
+        public string VoiceId_GirlChild { get; set; } = string.Empty;
+
+        /// <summary>ElevenLabs voice_id — Bé trai.</summary>
+        public string VoiceId_BoyChild { get; set; } = string.Empty;
 
         /// <summary>ElevenLabs voice_id riêng cho hook Video reup (nhấn mạnh). Fallback: VoiceId_Intense → Endpoint.</summary>
         public string VoiceId_ReupHook { get; set; } = string.Empty;

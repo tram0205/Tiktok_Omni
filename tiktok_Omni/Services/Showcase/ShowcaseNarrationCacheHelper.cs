@@ -79,25 +79,84 @@ namespace tiktok_Omni.Services.Showcase
             ShowcaseTtsRenderOptions ttsOptions = null)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("timeline-hook-body-v11-showcase-edge-only");
+            sb.AppendLine("timeline-hook-body-v21-hook-style-custom-voice");
             ttsOptions = ttsOptions ?? new ShowcaseTtsRenderOptions();
-            var preset = ttsOptions.Preset;
-            sb.AppendLine("engine:" + ttsOptions.Engine);
-            sb.AppendLine("preset:" + (ttsOptions.VoicePresetId ?? string.Empty).Trim());
-            sb.AppendLine("voiceAge:" + ShowcaseVoicePresetDimensions.NormalizeAgeId(ttsOptions.VoiceAgeId));
-            sb.AppendLine("voiceLang:" + ShowcaseVoicePresetDimensions.NormalizeLanguageId(ttsOptions.VoiceLanguageId));
-            if (ttsOptions.Engine == TtsEngineKind.EdgeTts)
+            var hookSeg = ttsOptions.ForSegment(true);
+            var bodySeg = ttsOptions.ForSegment(false);
+            var hookPreset = hookSeg.Preset;
+            var bodyPreset = bodySeg.Preset;
+            sb.AppendLine("hookEngine:" + ttsOptions.HookEngine);
+            sb.AppendLine("bodyEngine:" + ttsOptions.BodyEngine);
+            sb.AppendLine("bodyMode:per-scene-no-gemini");
+            sb.AppendLine("hookPreset:" + (ttsOptions.VoicePresetId ?? string.Empty).Trim());
+            sb.AppendLine("bodyPreset:" + (ttsOptions.BodyVoicePresetId ?? string.Empty).Trim());
+            sb.AppendLine("hookVoiceAge:" + ShowcaseVoicePresetDimensions.NormalizeAgeId(ttsOptions.VoiceAgeId));
+            sb.AppendLine("hookVoiceLang:" + ShowcaseVoicePresetDimensions.NormalizeLanguageId(ttsOptions.VoiceLanguageId));
+            sb.AppendLine("bodyVoiceAge:" + ShowcaseVoicePresetDimensions.NormalizeAgeId(ttsOptions.BodyVoiceAgeId));
+            sb.AppendLine("bodyVoiceLang:" + ShowcaseVoicePresetDimensions.NormalizeLanguageId(ttsOptions.BodyVoiceLanguageId));
+            sb.AppendLine("hookStyle:" + ShowcaseEdgeProsodyHelper.NormalizeStoredHookStyleKey(ttsOptions.HookStyleKey));
+            sb.AppendLine("bodyStyle:" + ShowcaseEdgeProsodyHelper.NormalizeStoredHookStyleKey(ttsOptions.BodyStyleKey));
+            ShowcaseEdgeProsodyHelper.ResolveEffectiveOffsets(
+                ttsOptions.HookStyleKey,
+                ttsOptions.EdgeRateOffsetPercent,
+                ttsOptions.EdgePitchOffsetHz,
+                out var effHookRateOff,
+                out var effHookPitchOff);
+            sb.AppendLine("hookEdgeRateOff:" + effHookRateOff);
+            sb.AppendLine("hookEdgePitchOff:" + effHookPitchOff);
+            ShowcaseEdgeProsodyHelper.ResolveEffectiveOffsets(
+                ttsOptions.BodyStyleKey,
+                ttsOptions.BodyEdgeRateOffsetPercent,
+                ttsOptions.BodyEdgePitchOffsetHz,
+                out var effBodyRateOff,
+                out var effBodyPitchOff);
+            sb.AppendLine("bodyEdgeRateOff:" + effBodyRateOff);
+            sb.AppendLine("bodyEdgePitchOff:" + effBodyPitchOff);
+            if (!ShowcaseEdgeProsodyHelper.IsCustomStyle(ttsOptions.HookStyleKey))
             {
-                var edge = ShowcaseEdgeTtsVoiceResolver.Resolve(ttsOptions);
-                sb.AppendLine("edgeVoice:" + (edge.VoiceShortName ?? string.Empty));
-                sb.AppendLine("edgeRate:" + (edge.Rate ?? string.Empty));
+                sb.AppendLine("hookEdgeProsodyPreset:1");
+            }
+            else
+            {
+                sb.AppendLine("hookEdgeProsodyPreset:0");
             }
 
-            sb.AppendLine("voiceLen:" + preset.PiperLengthScale.ToString(CultureInfo.InvariantCulture));
-            sb.AppendLine("elMood:" + (preset?.ElevenLabsVoiceMood ?? string.Empty));
-            sb.AppendLine("elHook:" + (preset != null && preset.ElevenLabsEmphaticHook ? "1" : "0"));
-            sb.AppendLine("elBody:" + (preset != null && preset.ElevenLabsExpressiveBody ? "1" : "0"));
-            sb.AppendLine("elVoice:" + (ShowcaseTtsHelper.ResolveElevenLabsVoiceId(preset, settings) ?? string.Empty));
+            if (!ShowcaseEdgeProsodyHelper.IsCustomStyle(ttsOptions.BodyStyleKey))
+            {
+                sb.AppendLine("bodyEdgeProsodyPreset:1");
+            }
+            else
+            {
+                sb.AppendLine("bodyEdgeProsodyPreset:0");
+            }
+
+            if (ttsOptions.BodyEngine == TtsEngineKind.EdgeTts || ttsOptions.HookEngine == TtsEngineKind.EdgeTts)
+            {
+                var edgeHook = ShowcaseEdgeTtsVoiceResolver.Resolve(ttsOptions.ForSegment(true), emphaticHook: true, showcaseExpressiveBody: false);
+                var edgeBody = ShowcaseEdgeTtsVoiceResolver.Resolve(ttsOptions.ForSegment(false), emphaticHook: false, showcaseExpressiveBody: true);
+                sb.AppendLine("edgeVoice:" + (edgeBody.VoiceShortName ?? string.Empty));
+                sb.AppendLine("edgeHookRate:" + (edgeHook.Rate ?? string.Empty));
+                sb.AppendLine("edgeHookPitch:" + (edgeHook.Pitch ?? string.Empty));
+                sb.AppendLine("edgeHookVol:" + (edgeHook.Volume ?? string.Empty));
+                sb.AppendLine("edgeBodyRate:" + (edgeBody.Rate ?? string.Empty));
+                sb.AppendLine("edgeBodyPitch:" + (edgeBody.Pitch ?? string.Empty));
+                sb.AppendLine("edgeBodyVol:" + (edgeBody.Volume ?? string.Empty));
+            }
+
+            sb.AppendLine("hookVoiceLen:" + hookPreset.PiperLengthScale.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("bodyVoiceLen:" + bodyPreset.PiperLengthScale.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("hookElMood:" + (hookPreset?.ElevenLabsVoiceMood ?? string.Empty));
+            sb.AppendLine("bodyElMood:" + (bodyPreset?.ElevenLabsVoiceMood ?? string.Empty));
+            sb.AppendLine("elHook:" + (hookPreset != null && hookPreset.ElevenLabsEmphaticHook ? "1" : "0"));
+            sb.AppendLine("elBody:" + (bodyPreset != null && bodyPreset.ElevenLabsExpressiveBody ? "1" : "0"));
+            sb.AppendLine("hookElPersona:" + hookSeg.ElevenPersona);
+            sb.AppendLine("bodyElPersona:" + bodySeg.ElevenPersona);
+            sb.AppendLine("hookElTone:" + hookSeg.ElevenToneId);
+            sb.AppendLine("bodyElTone:" + bodySeg.ElevenToneId);
+            sb.AppendLine("hookElVoiceSettings:" + DescribeHookVoiceSettings(hookSeg));
+            sb.AppendLine("bodyElVoiceSettings:" + DescribeBodyVoiceSettings(bodySeg));
+            sb.AppendLine("hookElVoice:" + (ShowcaseTtsHelper.ResolveElevenLabsVoiceId(hookSeg, settings) ?? string.Empty));
+            sb.AppendLine("bodyElVoice:" + (ShowcaseTtsHelper.ResolveElevenLabsVoiceId(bodySeg, settings) ?? string.Empty));
             sb.AppendLine("wps:" + ShowcaseVoiceoverFitHelper.WordsPerSecond.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("hook:" + ElevenLabsTtsHelper.HookStability.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("body:" + ElevenLabsTtsHelper.ShowcaseBodyStability.ToString(CultureInfo.InvariantCulture));
@@ -118,6 +177,38 @@ namespace tiktok_Omni.Services.Showcase
                 var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
                 return BitConverter.ToString(bytes).Replace("-", string.Empty).ToLowerInvariant();
             }
+        }
+
+        /// <summary>Hook: "Tone giọng" đã bỏ — trigger là HookStyleKey = ⚙ Tùy chỉnh giọng. «role-default» nếu không.</summary>
+        private static string DescribeHookVoiceSettings(ShowcaseTtsRenderOptions segmentTts)
+        {
+            if (!ShowcaseElevenToneHelper.IsHookCustomVoiceStyle(segmentTts?.HookStyleKey))
+            {
+                return "role-default";
+            }
+
+            return segmentTts.ElevenCustomStabilityPercent + "/" +
+                   segmentTts.ElevenCustomSimilarityPercent + "/" +
+                   segmentTts.ElevenCustomStylePercent;
+        }
+
+        /// <summary>Thân: giữ cơ chế Tone giọng — «role-default» nếu Tone = Tự nhiên (không ghi đè, tránh cache đổi vô cớ).</summary>
+        private static string DescribeBodyVoiceSettings(ShowcaseTtsRenderOptions segmentTts)
+        {
+            if (!ShowcaseElevenToneHelper.HasVoiceSettingsOverride(segmentTts?.ElevenToneId))
+            {
+                return "role-default";
+            }
+
+            ShowcaseElevenToneHelper.ResolveEffectiveVoiceSettings(
+                segmentTts.ElevenToneId,
+                segmentTts.ElevenCustomStabilityPercent,
+                segmentTts.ElevenCustomSimilarityPercent,
+                segmentTts.ElevenCustomStylePercent,
+                out var stabilityPct,
+                out var similarityPct,
+                out var stylePct);
+            return stabilityPct + "/" + similarityPct + "/" + stylePct;
         }
 
         /// <summary>Hash kịch bản + cấu hình TTS — đổi hook/voiceover/CTA hoặc endpoint/model thì hash mới.</summary>

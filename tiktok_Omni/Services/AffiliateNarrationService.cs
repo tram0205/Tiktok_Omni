@@ -177,13 +177,32 @@ namespace tiktok_Omni.Services
             }
 
             showcaseTts = showcaseTts ?? new ShowcaseTtsRenderOptions();
-            var engine = showcaseTts.Engine;
-            TtsAvailabilityHelper.ValidateEngine(settings, engine);
-            if (engine == TtsEngineKind.EdgeTts)
+            TtsAvailabilityHelper.ValidateEngine(settings, showcaseTts.HookEngine);
+            TtsAvailabilityHelper.ValidateEngine(settings, showcaseTts.BodyEngine);
+            if (showcaseTts.HookEngine == TtsEngineKind.EdgeTts)
             {
-                var edge = ShowcaseEdgeTtsVoiceResolver.Resolve(showcaseTts);
-                log?.Invoke("[TTS] Preset Showcase: «" + showcaseTts.Preset.Label + "» · Edge "
-                            + edge.VoiceShortName + " " + edge.Rate + " · " + showcaseTts.VoiceLanguageId);
+                var styleName = ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey);
+                var edgeHook = ShowcaseEdgeTtsVoiceResolver.Resolve(showcaseTts, emphaticHook: true, showcaseExpressiveBody: false);
+                log?.Invoke("[TTS] Showcase hook: Edge · «" + styleName + "» · " + edgeHook.VoiceShortName);
+            }
+            else
+            {
+                log?.Invoke("[TTS] Showcase hook: ElevenLabs · «"
+                            + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey) + "».");
+            }
+
+            if (showcaseTts.BodyEngine == TtsEngineKind.EdgeTts)
+            {
+                var styleName = ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey);
+                var edgeBody = ShowcaseEdgeTtsVoiceResolver.Resolve(showcaseTts, emphaticHook: false, showcaseExpressiveBody: true);
+                log?.Invoke("[TTS] Showcase thân: Edge từng cảnh · «" + styleName + "» · " + edgeBody.VoiceShortName
+                            + " · " + showcaseTts.VoiceLanguageId);
+            }
+            else
+            {
+                log?.Invoke("[TTS] Showcase thân: ElevenLabs · «"
+                            + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.BodyStyleKey)
+                            + "» · từng cảnh.");
             }
 
             var ffmpeg = ResolveFfmpegPath(settings);
@@ -274,18 +293,14 @@ namespace tiktok_Omni.Services
                     throw new InvalidOperationException("Showcase cần thoại hook ở cảnh đầu tiên có lời.");
                 }
 
-                var hookNormalized = await NormalizeShowcaseTextAsync(
-                        hookSource,
-                        settings,
-                        showcaseTts.Engine,
-                        log,
-                        cancellationToken)
-                    .ConfigureAwait(false);
+                var hookNormalized = NormalizeShowcaseTextLocal(hookSource);
                 var hookPrepared = PrepareShowcaseSegmentText(
                     hookNormalized,
                     ShowcaseNarrationSegmentKind.Hook,
                     settings,
-                    showcaseTts.Engine);
+                    showcaseTts.HookEngine,
+                    showcaseTts,
+                    log);
                 hookPreparedText = hookPrepared;
                 var hookRaw = Path.Combine(workDirectory, "hook_raw.mp3");
                 hookRawPath = hookRaw;
@@ -298,6 +313,7 @@ namespace tiktok_Omni.Services
                         log,
                         cancellationToken,
                         showcaseTts,
+                        showcaseTts.HookEngine,
                         showcaseExpressiveBody: false)
                     .ConfigureAwait(false);
                 segmentFiles.Add(hookRaw);
@@ -328,36 +344,72 @@ namespace tiktok_Omni.Services
                     }
 
                     var bodyMerged = ShowcaseVoiceoverFitHelper.MergePassage(bodyParts);
+                    bodyPreparedText = bodyMerged;
                     if (!string.IsNullOrWhiteSpace(bodyMerged))
                     {
-                        var bodyNormalized = await NormalizeShowcaseTextAsync(
-                                bodyMerged,
+                        var bodySceneFiles = new List<string>();
+                        var bodyEngine = showcaseTts.BodyEngine;
+                        for (var bi = 0; bi < bodyParts.Count; bi++)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var partText = NormalizeShowcaseTextLocal(bodyParts[bi]);
+                            if (string.IsNullOrWhiteSpace(partText))
+                            {
+                                continue;
+                            }
+
+                            var isCtaPart = bi == bodyParts.Count - 1
+                                            && !string.IsNullOrWhiteSpace(ctaText)
+                                            && string.Equals(partText, ctaText.Trim(), StringComparison.OrdinalIgnoreCase);
+                            var segmentKind = isCtaPart
+                                ? ShowcaseNarrationSegmentKind.Cta
+                                : ShowcaseNarrationSegmentKind.Body;
+                            var prepared = PrepareShowcaseSegmentText(
+                                partText,
+                                segmentKind,
                                 settings,
-                                showcaseTts.Engine,
-                                log,
-                                cancellationToken)
-                            .ConfigureAwait(false);
-                        var bodyPrepared = PrepareShowcaseSegmentText(
-                            bodyNormalized,
-                            ShowcaseNarrationSegmentKind.Body,
-                            settings,
-                            showcaseTts.Engine);
-                        bodyPreparedText = bodyPrepared;
+                                bodyEngine,
+                                showcaseTts,
+                                log);
+                            var scenePath = Path.Combine(
+                                workDirectory,
+                                "body_scene_" + (bi + 1).ToString("D2", CultureInfo.InvariantCulture) + ".mp3");
+                            tempFiles.Add(scenePath);
+                            log?.Invoke("[TTS] Showcase thân cảnh " + (bi + 1) + "/" + bodyParts.Count
+                                        + " (" + (bodyEngine == TtsEngineKind.EdgeTts ? "Edge" : "ElevenLabs") + ")…");
+                            await GenerateVoiceSegmentAsync(
+                                    prepared,
+                                    emphaticHook: isCtaPart,
+                                    settings,
+                                    scenePath,
+                                    log,
+                                    cancellationToken,
+                                    showcaseTts,
+                                    bodyEngine,
+                                    showcaseExpressiveBody: !isCtaPart)
+                                .ConfigureAwait(false);
+                            bodySceneFiles.Add(scenePath);
+                        }
+
+                        if (bodySceneFiles.Count == 0)
+                        {
+                            throw new InvalidOperationException("Showcase thân không có đoạn thoại hợp lệ.");
+                        }
+
                         var bodyRaw = Path.Combine(workDirectory, "body_passage_raw.mp3");
                         bodyRawPath = bodyRaw;
                         tempFiles.Add(bodyRaw);
-                        log?.Invoke("[TTS] Showcase thân+CTA: 1 lần TTS (" + bodyParts.Count +
-                                    " cảnh gom) — ghép liền sau hook");
-                        await GenerateVoiceSegmentAsync(
-                                bodyPrepared,
-                                emphaticHook: false,
-                                settings,
-                                bodyRaw,
-                                log,
-                                cancellationToken,
-                                showcaseTts,
-                                showcaseExpressiveBody: true)
-                            .ConfigureAwait(false);
+                        if (bodySceneFiles.Count == 1)
+                        {
+                            File.Copy(bodySceneFiles[0], bodyRaw, true);
+                        }
+                        else
+                        {
+                            log?.Invoke("[TTS] Showcase: ghép " + bodySceneFiles.Count + " cảnh thân (FFmpeg)…");
+                            await ConcatAudioPartsAsync(bodySceneFiles, bodyRaw, ffmpeg, log, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
+
                         segmentFiles.Add(bodyRaw);
                     }
                     else
@@ -423,6 +475,11 @@ namespace tiktok_Omni.Services
             }
         }
 
+        private static string NormalizeShowcaseTextLocal(string text)
+        {
+            return VietnameseTtsTextNormalizer.SanitizeForElevenLabsRequest(text);
+        }
+
         private async Task<string> NormalizeShowcaseTextAsync(
             string text,
             AppSettings settings,
@@ -454,7 +511,9 @@ namespace tiktok_Omni.Services
             string text,
             ShowcaseNarrationSegmentKind kind,
             AppSettings settings,
-            TtsEngineKind engine = TtsEngineKind.ElevenLabs)
+            TtsEngineKind engine,
+            ShowcaseTtsRenderOptions showcaseTts = null,
+            Action<string> log = null)
         {
             var line = (text ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(line))
@@ -462,19 +521,82 @@ namespace tiktok_Omni.Services
                 return line;
             }
 
-            if (engine != TtsEngineKind.ElevenLabs && engine != TtsEngineKind.EdgeTts)
+            if (engine == TtsEngineKind.ElevenLabs)
             {
-                return line;
+                var elevenKind = kind == ShowcaseNarrationSegmentKind.Hook
+                    ? ShowcaseElevenLabsTextHelper.SegmentKind.Hook
+                    : kind == ShowcaseNarrationSegmentKind.Cta
+                        ? ShowcaseElevenLabsTextHelper.SegmentKind.Cta
+                        : ShowcaseElevenLabsTextHelper.SegmentKind.Body;
+                return ShowcaseElevenLabsTextHelper.PrepareSegmentText(
+                    line,
+                    elevenKind,
+                    settings,
+                    showcaseTts,
+                    log);
             }
 
-            switch (kind)
+            if (engine == TtsEngineKind.EdgeTts)
             {
-                case ShowcaseNarrationSegmentKind.Hook:
-                case ShowcaseNarrationSegmentKind.Cta:
-                    return ElevenLabsTtsHelper.ApplyHookDeliveryPauses(line);
-                default:
-                    return line;
+                switch (kind)
+                {
+                    case ShowcaseNarrationSegmentKind.Hook:
+                    case ShowcaseNarrationSegmentKind.Cta:
+                        return ElevenLabsTtsHelper.ApplyHookDeliveryPauses(line);
+                    default:
+                        return line;
+                }
             }
+
+            return line;
+        }
+
+        private async Task GenerateVoiceSegmentAsync(
+            string text,
+            bool emphaticHook,
+            AppSettings settings,
+            string outputAudioFile,
+            Action<string> log,
+            CancellationToken cancellationToken,
+            ShowcaseTtsRenderOptions showcaseTts,
+            TtsEngineKind engine,
+            bool showcaseExpressiveBody = false)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                throw new ArgumentException("Narration text is required.", nameof(text));
+            }
+
+            showcaseTts = showcaseTts ?? new ShowcaseTtsRenderOptions();
+            TtsAvailabilityHelper.ValidateEngine(settings, engine);
+
+            var mode = engine == TtsEngineKind.EdgeTts
+                ? emphaticHook
+                    ? "Edge nhấn · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey)
+                    : showcaseExpressiveBody
+                        ? "Edge thân êm · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey)
+                        : "Edge · " + showcaseTts.Preset.Label
+                : emphaticHook
+                    ? "ElevenLabs nhấn · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey) + "»"
+                    : showcaseExpressiveBody
+                        ? "ElevenLabs thân · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.BodyStyleKey) + "»"
+                        : "ElevenLabs kể chuyện";
+            log?.Invoke("[TTS] Sinh giọng — " + mode + "…");
+            var audioRef = await _videoService.GenerateAudioAsync(
+                text,
+                settings,
+                cancellationToken,
+                engine,
+                showcaseTts,
+                emphaticHook: emphaticHook,
+                showcaseExpressiveBody: showcaseExpressiveBody,
+                logAction: log).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(audioRef))
+            {
+                throw new InvalidOperationException("TTS returned empty audio.");
+            }
+
+            await PersistAudioResultAsync(audioRef, outputAudioFile, cancellationToken).ConfigureAwait(false);
         }
 
         private async Task GenerateVoiceSegmentAsync(
@@ -487,37 +609,17 @@ namespace tiktok_Omni.Services
             ShowcaseTtsRenderOptions showcaseTts,
             bool showcaseExpressiveBody = false)
         {
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                throw new ArgumentException("Narration text is required.", nameof(text));
-            }
-
-            showcaseTts = showcaseTts ?? new ShowcaseTtsRenderOptions();
-            TtsAvailabilityHelper.ValidateEngine(settings, showcaseTts.Engine);
-
-            var mode = showcaseTts.Engine == TtsEngineKind.EdgeTts
-                ? "Edge · " + showcaseTts.Preset.Label
-                : emphaticHook
-                    ? "ElevenLabs nhấn (hook/CTA)"
-                    : showcaseExpressiveBody
-                        ? "ElevenLabs thân"
-                        : "ElevenLabs kể chuyện";
-            log?.Invoke("[TTS] Sinh giọng — " + mode + "…");
-            var audioRef = await _videoService.GenerateAudioAsync(
+            var engine = emphaticHook ? showcaseTts.HookEngine : showcaseTts.BodyEngine;
+            await GenerateVoiceSegmentAsync(
                 text,
+                emphaticHook,
                 settings,
+                outputAudioFile,
+                log,
                 cancellationToken,
-                showcaseTts.Engine,
                 showcaseTts,
-                emphaticHook: emphaticHook,
-                showcaseExpressiveBody: showcaseExpressiveBody,
-                logAction: log).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(audioRef))
-            {
-                throw new InvalidOperationException("TTS returned empty audio.");
-            }
-
-            await PersistAudioResultAsync(audioRef, outputAudioFile, cancellationToken).ConfigureAwait(false);
+                engine,
+                showcaseExpressiveBody).ConfigureAwait(false);
         }
 
         private async Task GenerateVoiceSegmentAsync(
@@ -540,6 +642,7 @@ namespace tiktok_Omni.Services
                 log,
                 cancellationToken,
                 opts,
+                engine,
                 showcaseExpressiveBody).ConfigureAwait(false);
         }
 

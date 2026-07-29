@@ -44,6 +44,48 @@ namespace tiktok_Omni.Services.Showcase
 
         public string VoiceLanguageId { get; set; } = string.Empty;
 
+        public string HookElevenPersona { get; set; } = string.Empty;
+
+        public string VoiceToneId { get; set; } = string.Empty;
+
+        public int ElevenCustomStabilityPercent { get; set; }
+
+        public int ElevenCustomSimilarityPercent { get; set; }
+
+        public int ElevenCustomStylePercent { get; set; }
+
+        public string BodyTtsEngine { get; set; } = string.Empty;
+
+        public string HookTtsEngine { get; set; } = string.Empty;
+
+        public string HookStyleKey { get; set; } = string.Empty;
+
+        public int EdgeRateOffsetPercent { get; set; }
+
+        public int EdgePitchOffsetHz { get; set; }
+
+        public string BodyVoicePresetId { get; set; } = string.Empty;
+
+        public string BodyVoiceAgeId { get; set; } = string.Empty;
+
+        public string BodyVoiceLanguageId { get; set; } = string.Empty;
+
+        public string BodyElevenPersona { get; set; } = string.Empty;
+
+        public string BodyVoiceToneId { get; set; } = string.Empty;
+
+        public int BodyElevenCustomStabilityPercent { get; set; }
+
+        public int BodyElevenCustomSimilarityPercent { get; set; }
+
+        public int BodyElevenCustomStylePercent { get; set; }
+
+        public string BodyStyleKey { get; set; } = string.Empty;
+
+        public int BodyEdgeRateOffsetPercent { get; set; }
+
+        public int BodyEdgePitchOffsetHz { get; set; }
+
         public double TransitionSeconds { get; set; } = 0.6;
 
         public string OutputAspectId { get; set; } = ShowcaseOutputAspectPresets.DefaultId;
@@ -97,9 +139,30 @@ namespace tiktok_Omni.Services.Showcase
                 MusicVolume = video.ShowcaseMusicVolume >= 0 ? video.ShowcaseMusicVolume : 14,
                 NarrationSpeedPercent = ShowcaseNarrationSpeedHelper.ResolveEffectiveSpeedPercent(video.ShowcaseNarrationSpeedPercent),
                 TtsEngine = video.ShowcaseTtsEngine ?? string.Empty,
+                HookTtsEngine = video.ShowcaseHookTtsEngine ?? string.Empty,
+                BodyTtsEngine = video.ShowcaseBodyTtsEngine ?? string.Empty,
                 VoicePresetId = video.ShowcaseVoicePresetId ?? string.Empty,
                 VoiceAgeId = video.ShowcaseVoiceAgeId ?? string.Empty,
                 VoiceLanguageId = video.ShowcaseVoiceLanguageId ?? string.Empty,
+                HookElevenPersona = video.ShowcaseHookElevenPersona ?? string.Empty,
+                VoiceToneId = video.ShowcaseVoiceToneId ?? string.Empty,
+                ElevenCustomStabilityPercent = video.ShowcaseElevenCustomStabilityPercent,
+                ElevenCustomSimilarityPercent = video.ShowcaseElevenCustomSimilarityPercent,
+                ElevenCustomStylePercent = video.ShowcaseElevenCustomStylePercent,
+                HookStyleKey = video.ShowcaseHookStyleKey ?? string.Empty,
+                EdgeRateOffsetPercent = video.ShowcaseEdgeRateOffsetPercent,
+                EdgePitchOffsetHz = video.ShowcaseEdgePitchOffsetHz,
+                BodyVoicePresetId = video.ShowcaseBodyVoicePresetId ?? string.Empty,
+                BodyVoiceAgeId = video.ShowcaseBodyVoiceAgeId ?? string.Empty,
+                BodyVoiceLanguageId = video.ShowcaseBodyVoiceLanguageId ?? string.Empty,
+                BodyElevenPersona = video.ShowcaseBodyElevenPersona ?? string.Empty,
+                BodyVoiceToneId = video.ShowcaseBodyVoiceToneId ?? string.Empty,
+                BodyElevenCustomStabilityPercent = video.ShowcaseBodyElevenCustomStabilityPercent,
+                BodyElevenCustomSimilarityPercent = video.ShowcaseBodyElevenCustomSimilarityPercent,
+                BodyElevenCustomStylePercent = video.ShowcaseBodyElevenCustomStylePercent,
+                BodyStyleKey = video.ShowcaseBodyStyleKey ?? string.Empty,
+                BodyEdgeRateOffsetPercent = video.ShowcaseBodyEdgeRateOffsetPercent,
+                BodyEdgePitchOffsetHz = video.ShowcaseBodyEdgePitchOffsetHz,
                 TransitionSeconds = ShowcaseTransitionHelper.ClampSeconds(appSettings?.VideoTransitionDurationSeconds ?? 0.6d),
                 OutputAspectId = ShowcaseOutputAspectPresets.ResolveId(
                     video.ShowcaseOutputAspectId,
@@ -126,9 +189,30 @@ namespace tiktok_Omni.Services.Showcase
             var video = new ShowcaseVideoItem
             {
                 ShowcaseTtsEngine = renderSettings?.TtsEngine ?? string.Empty,
+                ShowcaseHookTtsEngine = renderSettings?.HookTtsEngine ?? string.Empty,
+                ShowcaseBodyTtsEngine = renderSettings?.BodyTtsEngine ?? string.Empty,
                 ShowcaseVoicePresetId = renderSettings?.VoicePresetId ?? string.Empty,
                 ShowcaseVoiceAgeId = renderSettings?.VoiceAgeId ?? string.Empty,
-                ShowcaseVoiceLanguageId = renderSettings?.VoiceLanguageId ?? string.Empty
+                ShowcaseVoiceLanguageId = renderSettings?.VoiceLanguageId ?? string.Empty,
+                ShowcaseHookElevenPersona = renderSettings?.HookElevenPersona ?? string.Empty,
+                ShowcaseVoiceToneId = renderSettings?.VoiceToneId ?? string.Empty,
+                ShowcaseElevenCustomStabilityPercent = renderSettings?.ElevenCustomStabilityPercent ?? 0,
+                ShowcaseElevenCustomSimilarityPercent = renderSettings?.ElevenCustomSimilarityPercent ?? 0,
+                ShowcaseElevenCustomStylePercent = renderSettings?.ElevenCustomStylePercent ?? 0,
+                ShowcaseHookStyleKey = renderSettings?.HookStyleKey ?? string.Empty,
+                ShowcaseEdgeRateOffsetPercent = renderSettings?.EdgeRateOffsetPercent ?? 0,
+                ShowcaseEdgePitchOffsetHz = renderSettings?.EdgePitchOffsetHz ?? 0,
+                ShowcaseBodyVoicePresetId = renderSettings?.BodyVoicePresetId ?? string.Empty,
+                ShowcaseBodyVoiceAgeId = renderSettings?.BodyVoiceAgeId ?? string.Empty,
+                ShowcaseBodyVoiceLanguageId = renderSettings?.BodyVoiceLanguageId ?? string.Empty,
+                ShowcaseBodyElevenPersona = renderSettings?.BodyElevenPersona ?? string.Empty,
+                ShowcaseBodyVoiceToneId = renderSettings?.BodyVoiceToneId ?? string.Empty,
+                ShowcaseBodyElevenCustomStabilityPercent = renderSettings?.BodyElevenCustomStabilityPercent ?? 0,
+                ShowcaseBodyElevenCustomSimilarityPercent = renderSettings?.BodyElevenCustomSimilarityPercent ?? 0,
+                ShowcaseBodyElevenCustomStylePercent = renderSettings?.BodyElevenCustomStylePercent ?? 0,
+                ShowcaseBodyStyleKey = renderSettings?.BodyStyleKey ?? string.Empty,
+                ShowcaseBodyEdgeRateOffsetPercent = renderSettings?.BodyEdgeRateOffsetPercent ?? 0,
+                ShowcaseBodyEdgePitchOffsetHz = renderSettings?.BodyEdgePitchOffsetHz ?? 0
             };
             return ShowcaseTtsHelper.ResolveFromVideo(video, appSettings);
         }

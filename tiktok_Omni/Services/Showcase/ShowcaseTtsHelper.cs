@@ -27,6 +27,8 @@ namespace tiktok_Omni.Services.Showcase
                 video.ShowcaseTtsEngine = EngineEdgeTts;
             }
 
+            SyncHookBodyEnginesFromLegacy(video);
+
             if (string.IsNullOrWhiteSpace(video.ShowcaseVoicePresetId))
             {
                 video.ShowcaseVoicePresetId = ShowcaseVoicePresetCatalog.DefaultPresetId;
@@ -49,6 +51,162 @@ namespace tiktok_Omni.Services.Showcase
             {
                 video.ShowcaseVoiceLanguageId = ShowcaseVoicePresetDimensions.NormalizeLanguageId(video.ShowcaseVoiceLanguageId);
             }
+
+            video.ShowcaseVoiceToneId = ShowcaseElevenToneHelper.NormalizeToneId(video.ShowcaseVoiceToneId);
+            EnsureCustomToneDefaults(
+                () => video.ShowcaseElevenCustomStabilityPercent,
+                v => video.ShowcaseElevenCustomStabilityPercent = v,
+                () => video.ShowcaseElevenCustomSimilarityPercent,
+                v => video.ShowcaseElevenCustomSimilarityPercent = v,
+                () => video.ShowcaseElevenCustomStylePercent,
+                v => video.ShowcaseElevenCustomStylePercent = v);
+
+            if (string.IsNullOrWhiteSpace(video.ShowcaseHookStyleKey))
+            {
+                video.ShowcaseHookStyleKey = HookStyleCatalog.StyleHuongdan;
+            }
+            else
+            {
+                video.ShowcaseHookStyleKey = ShowcaseEdgeProsodyHelper.NormalizeStoredHookStyleKey(video.ShowcaseHookStyleKey);
+            }
+
+            SyncBodyVoiceFromHookWhenEmpty(video);
+
+            ShowcaseEdgeProsodyHelper.EnsureVideoDefaults(video);
+        }
+
+        public static void SyncBodyVoiceFromHookWhenEmpty(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(video.ShowcaseBodyVoicePresetId))
+            {
+                video.ShowcaseBodyVoicePresetId = video.ShowcaseVoicePresetId;
+            }
+
+            if (string.IsNullOrWhiteSpace(video.ShowcaseBodyVoiceAgeId))
+            {
+                video.ShowcaseBodyVoiceAgeId = video.ShowcaseVoiceAgeId;
+            }
+
+            if (string.IsNullOrWhiteSpace(video.ShowcaseBodyVoiceLanguageId))
+            {
+                video.ShowcaseBodyVoiceLanguageId = video.ShowcaseVoiceLanguageId;
+            }
+
+            video.ShowcaseBodyVoiceToneId = ShowcaseElevenToneHelper.NormalizeToneId(video.ShowcaseBodyVoiceToneId);
+            EnsureCustomToneDefaults(
+                () => video.ShowcaseBodyElevenCustomStabilityPercent,
+                v => video.ShowcaseBodyElevenCustomStabilityPercent = v,
+                () => video.ShowcaseBodyElevenCustomSimilarityPercent,
+                v => video.ShowcaseBodyElevenCustomSimilarityPercent = v,
+                () => video.ShowcaseBodyElevenCustomStylePercent,
+                v => video.ShowcaseBodyElevenCustomStylePercent = v);
+
+            if (string.IsNullOrWhiteSpace(video.ShowcaseBodyStyleKey))
+            {
+                video.ShowcaseBodyStyleKey = HookStyleCatalog.StyleKechuyen;
+            }
+            else
+            {
+                video.ShowcaseBodyStyleKey =
+                    ShowcaseEdgeProsodyHelper.NormalizeStoredHookStyleKey(video.ShowcaseBodyStyleKey);
+            }
+
+            video.ShowcaseBodyEdgeRateOffsetPercent =
+                ShowcaseEdgeProsodyHelper.ClampRateOffset(video.ShowcaseBodyEdgeRateOffsetPercent);
+            video.ShowcaseBodyEdgePitchOffsetHz =
+                ShowcaseEdgeProsodyHelper.ClampPitchOffset(video.ShowcaseBodyEdgePitchOffsetHz);
+        }
+
+        /// <summary>Video cũ chưa từng chỉnh Tùy chỉnh → cả 3 số = 0 (mặc định int) → nạp 50/75/15 hợp lý thay vì 0.00/0.00/0.00.</summary>
+        private static void EnsureCustomToneDefaults(
+            Func<int> getStability,
+            Action<int> setStability,
+            Func<int> getSimilarity,
+            Action<int> setSimilarity,
+            Func<int> getStyle,
+            Action<int> setStyle)
+        {
+            if (getStability() <= 0 && getSimilarity() <= 0 && getStyle() <= 0)
+            {
+                setStability(50);
+                setSimilarity(75);
+                setStyle(15);
+                return;
+            }
+
+            setStability(ShowcaseElevenToneHelper.ClampPercent(getStability()));
+            setSimilarity(ShowcaseElevenToneHelper.ClampPercent(getSimilarity()));
+            setStyle(ShowcaseElevenToneHelper.ClampPercent(getStyle()));
+        }
+
+        public static void SyncHookBodyEnginesFromLegacy(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            var legacy = (video.ShowcaseTtsEngine ?? string.Empty).Trim();
+            var hookRaw = (video.ShowcaseHookTtsEngine ?? string.Empty).Trim();
+            var bodyRaw = (video.ShowcaseBodyTtsEngine ?? string.Empty).Trim();
+
+            if (string.IsNullOrEmpty(hookRaw) && string.IsNullOrEmpty(bodyRaw)
+                && !string.IsNullOrEmpty(legacy)
+                && !string.Equals(legacy, EngineAskOnCreate, StringComparison.OrdinalIgnoreCase))
+            {
+                video.ShowcaseHookTtsEngine = NormalizeEngineStorageId(legacy);
+                video.ShowcaseBodyTtsEngine = NormalizeEngineStorageId(legacy);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(hookRaw))
+            {
+                video.ShowcaseHookTtsEngine = string.IsNullOrEmpty(bodyRaw)
+                    ? EngineEdgeTts
+                    : NormalizeEngineStorageId(bodyRaw);
+            }
+            else
+            {
+                video.ShowcaseHookTtsEngine = NormalizeEngineStorageId(hookRaw);
+            }
+
+            if (string.IsNullOrEmpty(bodyRaw))
+            {
+                video.ShowcaseBodyTtsEngine = NormalizeEngineStorageId(video.ShowcaseHookTtsEngine);
+            }
+            else
+            {
+                video.ShowcaseBodyTtsEngine = NormalizeEngineStorageId(bodyRaw);
+            }
+        }
+
+        public static string NormalizeEngineStorageId(string raw)
+        {
+            raw = (raw ?? string.Empty).Trim();
+            if (string.Equals(raw, EnginePiperOfflineLegacy, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(raw, "PiperOffline", StringComparison.OrdinalIgnoreCase))
+            {
+                return EngineEdgeTts;
+            }
+
+            if (string.Equals(raw, EngineElevenLabs, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(raw, TtsEngineKind.ElevenLabs.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return EngineElevenLabs;
+            }
+
+            if (string.Equals(raw, EngineEdgeTts, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(raw, TtsEngineKind.EdgeTts.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return EngineEdgeTts;
+            }
+
+            return EngineEdgeTts;
         }
 
         public static ShowcaseTtsRenderOptions ResolveFromVideo(ShowcaseVideoItem video, AppSettings settings)
@@ -58,13 +216,38 @@ namespace tiktok_Omni.Services.Showcase
             dims.AgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(video.ShowcaseVoiceAgeId);
             dims.LanguageId = ShowcaseVoicePresetDimensions.NormalizeLanguageId(video.ShowcaseVoiceLanguageId);
             var resolvedPresetId = ShowcaseVoicePresetDimensions.ResolvePresetId(dims);
-            var engine = ParseEngine(video.ShowcaseTtsEngine, settings);
+
+            var bodyDims = ShowcaseVoicePresetDimensions.GetForPreset(video.ShowcaseBodyVoicePresetId);
+            bodyDims.AgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(video.ShowcaseBodyVoiceAgeId);
+            bodyDims.LanguageId = ShowcaseVoicePresetDimensions.NormalizeLanguageId(video.ShowcaseBodyVoiceLanguageId);
+            var resolvedBodyPresetId = ShowcaseVoicePresetDimensions.ResolvePresetId(bodyDims);
+
             return new ShowcaseTtsRenderOptions
             {
-                Engine = engine,
+                HookEngine = ParseEngine(video.ShowcaseHookTtsEngine, settings),
+                BodyEngine = ParseEngine(video.ShowcaseBodyTtsEngine, settings),
                 VoicePresetId = resolvedPresetId,
                 VoiceAgeId = dims.AgeId,
-                VoiceLanguageId = dims.LanguageId
+                VoiceLanguageId = dims.LanguageId,
+                HookElevenPersona = ElevenVoicePersonaCatalog.Normalize(video.ShowcaseHookElevenPersona),
+                HookVoiceToneId = ShowcaseElevenToneHelper.NormalizeToneId(video.ShowcaseVoiceToneId),
+                HookElevenCustomStabilityPercent = ShowcaseElevenToneHelper.ClampPercent(video.ShowcaseElevenCustomStabilityPercent),
+                HookElevenCustomSimilarityPercent = ShowcaseElevenToneHelper.ClampPercent(video.ShowcaseElevenCustomSimilarityPercent),
+                HookElevenCustomStylePercent = ShowcaseElevenToneHelper.ClampPercent(video.ShowcaseElevenCustomStylePercent),
+                HookStyleKey = ShowcaseEdgeProsodyHelper.NormalizeStoredHookStyleKey(video.ShowcaseHookStyleKey),
+                EdgeRateOffsetPercent = video.ShowcaseEdgeRateOffsetPercent,
+                EdgePitchOffsetHz = video.ShowcaseEdgePitchOffsetHz,
+                BodyVoicePresetId = resolvedBodyPresetId,
+                BodyVoiceAgeId = bodyDims.AgeId,
+                BodyVoiceLanguageId = bodyDims.LanguageId,
+                BodyElevenPersona = ElevenVoicePersonaCatalog.Normalize(video.ShowcaseBodyElevenPersona),
+                BodyVoiceToneId = ShowcaseElevenToneHelper.NormalizeToneId(video.ShowcaseBodyVoiceToneId),
+                BodyElevenCustomStabilityPercent = ShowcaseElevenToneHelper.ClampPercent(video.ShowcaseBodyElevenCustomStabilityPercent),
+                BodyElevenCustomSimilarityPercent = ShowcaseElevenToneHelper.ClampPercent(video.ShowcaseBodyElevenCustomSimilarityPercent),
+                BodyElevenCustomStylePercent = ShowcaseElevenToneHelper.ClampPercent(video.ShowcaseBodyElevenCustomStylePercent),
+                BodyStyleKey = ShowcaseEdgeProsodyHelper.NormalizeStoredHookStyleKey(video.ShowcaseBodyStyleKey),
+                BodyEdgeRateOffsetPercent = video.ShowcaseBodyEdgeRateOffsetPercent,
+                BodyEdgePitchOffsetHz = video.ShowcaseBodyEdgePitchOffsetHz
             };
         }
 
@@ -96,6 +279,20 @@ namespace tiktok_Omni.Services.Showcase
                 StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>Ưu tiên persona chọn tay (ElevenVoicePersonaCatalog); rỗng thì fallback logic mood cũ.</summary>
+        public static string ResolveElevenLabsVoiceId(ShowcaseTtsRenderOptions segmentTts, AppSettings settings)
+        {
+            segmentTts = segmentTts ?? new ShowcaseTtsRenderOptions();
+            var personaVoice = ElevenVoicePersonaCatalog.ResolveVoiceId(segmentTts.ElevenPersona, settings);
+            if (!string.IsNullOrWhiteSpace(personaVoice))
+            {
+                return personaVoice;
+            }
+
+            return ResolveElevenLabsVoiceId(segmentTts.Preset, settings);
+        }
+
+        /// <summary>Legacy — mood preset (calm/intense) → VoiceId_Intense/Calm. Dùng khi chưa chọn persona.</summary>
         public static string ResolveElevenLabsVoiceId(ShowcaseVoicePresetDefinition preset, AppSettings settings)
         {
             preset = preset ?? ShowcaseVoicePresetCatalog.GetById(ShowcaseVoicePresetCatalog.DefaultPresetId);
@@ -118,23 +315,10 @@ namespace tiktok_Omni.Services.Showcase
             return null;
         }
 
-        private static TtsEngineKind ParseEngine(string raw, AppSettings settings)
+        public static TtsEngineKind ParseEngine(string raw, AppSettings settings)
         {
-            raw = (raw ?? string.Empty).Trim();
-            if (string.Equals(raw, EnginePiperOfflineLegacy, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(raw, "PiperOffline", StringComparison.OrdinalIgnoreCase))
-            {
-                return TtsEngineKind.EdgeTts;
-            }
-
-            if (string.Equals(raw, EngineEdgeTts, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(raw, TtsEngineKind.EdgeTts.ToString(), StringComparison.OrdinalIgnoreCase))
-            {
-                return TtsEngineKind.EdgeTts;
-            }
-
-            if (string.Equals(raw, EngineElevenLabs, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(raw, TtsEngineKind.ElevenLabs.ToString(), StringComparison.OrdinalIgnoreCase))
+            raw = NormalizeEngineStorageId(raw);
+            if (string.Equals(raw, EngineElevenLabs, StringComparison.OrdinalIgnoreCase))
             {
                 return TtsEngineKind.ElevenLabs;
             }

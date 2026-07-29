@@ -137,12 +137,67 @@ namespace tiktok_Omni.Services.Showcase
 
         public string ShowcaseTtsEngine { get; set; } = string.Empty;
 
+        /// <summary>EdgeTts | ElevenLabs — hook (cảnh đầu).</summary>
+        public string ShowcaseHookTtsEngine { get; set; } = string.Empty;
+
+        /// <summary>EdgeTts | ElevenLabs — thân từng cảnh.</summary>
+        public string ShowcaseBodyTtsEngine { get; set; } = string.Empty;
+
         public string ShowcaseVoicePresetId { get; set; } = string.Empty;
 
         /// <summary>Id dải tuổi UI (ShowcaseVoicePresetDimensions.Age.*).</summary>
         public string ShowcaseVoiceAgeId { get; set; } = string.Empty;
 
         public string ShowcaseVoiceLanguageId { get; set; } = string.Empty;
+
+        /// <summary>Giọng ElevenLabs cố định (ElevenVoicePersonaCatalog) cho hook — rỗng = mặc định theo preset/Cài đặt.</summary>
+        public string ShowcaseHookElevenPersona { get; set; } = string.Empty;
+
+        /// <summary>Tone giọng hook (ShowcaseVoicePresetDimensions.Tone.*) — ảnh hưởng voice_settings/audio tag ElevenLabs.</summary>
+        public string ShowcaseVoiceToneId { get; set; } = string.Empty;
+
+        /// <summary>3 số Tùy chỉnh hook khi ShowcaseVoiceToneId = Tone.Custom — % (0-100).</summary>
+        public int ShowcaseElevenCustomStabilityPercent { get; set; }
+
+        public int ShowcaseElevenCustomSimilarityPercent { get; set; }
+
+        public int ShowcaseElevenCustomStylePercent { get; set; }
+
+        /// <summary>Phong cách hook (HookStyleCatalog) — Edge prosody hook nhấn / thân êm.</summary>
+        public string ShowcaseHookStyleKey { get; set; } = string.Empty;
+
+        /// <summary>Offset rate Edge ±% (trên preset giọng).</summary>
+        public int ShowcaseEdgeRateOffsetPercent { get; set; }
+
+        /// <summary>Offset pitch Edge ±Hz.</summary>
+        public int ShowcaseEdgePitchOffsetHz { get; set; }
+
+        /// <summary>Preset Eleven / chiều giọng — thân (độc lập hook).</summary>
+        public string ShowcaseBodyVoicePresetId { get; set; } = string.Empty;
+
+        public string ShowcaseBodyVoiceAgeId { get; set; } = string.Empty;
+
+        public string ShowcaseBodyVoiceLanguageId { get; set; } = string.Empty;
+
+        /// <summary>Giọng ElevenLabs cố định (ElevenVoicePersonaCatalog) cho thân — rỗng = mặc định theo preset/Cài đặt.</summary>
+        public string ShowcaseBodyElevenPersona { get; set; } = string.Empty;
+
+        /// <summary>Tone giọng thân (ShowcaseVoicePresetDimensions.Tone.*) — ảnh hưởng voice_settings/audio tag ElevenLabs.</summary>
+        public string ShowcaseBodyVoiceToneId { get; set; } = string.Empty;
+
+        /// <summary>3 số Tùy chỉnh thân khi ShowcaseBodyVoiceToneId = Tone.Custom — % (0-100).</summary>
+        public int ShowcaseBodyElevenCustomStabilityPercent { get; set; }
+
+        public int ShowcaseBodyElevenCustomSimilarityPercent { get; set; }
+
+        public int ShowcaseBodyElevenCustomStylePercent { get; set; }
+
+        /// <summary>Phong cách Edge cho thân.</summary>
+        public string ShowcaseBodyStyleKey { get; set; } = string.Empty;
+
+        public int ShowcaseBodyEdgeRateOffsetPercent { get; set; }
+
+        public int ShowcaseBodyEdgePitchOffsetHz { get; set; }
 
         public string ShowcaseMusicLabel { get; set; } = string.Empty;
 

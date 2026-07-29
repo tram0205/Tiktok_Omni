@@ -5,7 +5,25 @@ namespace tiktok_Omni.Services.Showcase
 {
     public static class ShowcaseEdgeTtsVoiceResolver
     {
-        public static EdgeTtsSynthesisOptions Resolve(ShowcaseTtsRenderOptions options)
+        public static EdgeTtsSynthesisOptions Resolve(
+            ShowcaseTtsRenderOptions options,
+            bool emphaticHook = false,
+            bool showcaseExpressiveBody = true)
+        {
+            var voiceBase = ResolveVoiceBase(options);
+            voiceBase = ShowcaseEdgeProsodyHelper.ApplyUserOffsets(
+                voiceBase,
+                options?.HookStyleKey,
+                options?.EdgeRateOffsetPercent ?? 0,
+                options?.EdgePitchOffsetHz ?? 0);
+            return ShowcaseEdgeHookStyleProsody.ApplySegmentProsody(
+                voiceBase,
+                options?.HookStyleKey,
+                emphaticHook,
+                showcaseExpressiveBody);
+        }
+
+        public static EdgeTtsSynthesisOptions ResolveVoiceBase(ShowcaseTtsRenderOptions options)
         {
             options = options ?? new ShowcaseTtsRenderOptions();
             var presetId = (options.VoicePresetId ?? ShowcaseVoicePresetCatalog.DefaultPresetId).Trim();

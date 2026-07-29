@@ -55,6 +55,8 @@ namespace tiktok_Omni.Services.Showcase
             public const string Philosophy = "philosophy";
             public const string Narrator = "narrator";
             public const string Playful = "playful";
+            /// <summary>Tùy chỉnh — người dùng tự kéo stability/similarity/style (ElevenLabs). Xem <see cref="ShowcaseElevenToneHelper"/>.</summary>
+            public const string Custom = "tuy_chinh";
         }
 
         public sealed class VoiceDimensionChoice
@@ -74,7 +76,7 @@ namespace tiktok_Omni.Services.Showcase
         {
             public string GenderId { get; set; } = Gender.Female;
             public string AgeId { get; set; } = Age.Adult26_35;
-            public string LanguageId { get; set; } = Language.ViSouth;
+            public string LanguageId { get; set; } = Language.ViGeneral;
             public string ToneId { get; set; } = Tone.Natural;
         }
 
@@ -101,16 +103,13 @@ namespace tiktok_Omni.Services.Showcase
 
         private static readonly IReadOnlyList<VoiceDimensionChoice> LanguageOptions = new[]
         {
-            new VoiceDimensionChoice(Language.ViSouth, "Tiếng Việt — miền Nam"),
-            new VoiceDimensionChoice(Language.ViNorth, "Tiếng Việt — miền Bắc"),
-            new VoiceDimensionChoice(Language.ViCentral, "Tiếng Việt — miền Trung"),
-            new VoiceDimensionChoice(Language.ViGeneral, "Tiếng Việt — phát âm chung"),
-            new VoiceDimensionChoice(Language.EnUs, "English — US (ElevenLabs)"),
-            new VoiceDimensionChoice(Language.EnGb, "English — UK (ElevenLabs)"),
-            new VoiceDimensionChoice(Language.ZhCn, "中文 — 简体 (ElevenLabs)"),
-            new VoiceDimensionChoice(Language.JaJp, "日本語 (ElevenLabs)"),
-            new VoiceDimensionChoice(Language.KoKr, "한국어 (ElevenLabs)"),
-            new VoiceDimensionChoice(Language.ThTh, "ภาษาไทย (ElevenLabs)")
+            new VoiceDimensionChoice(Language.ViGeneral, "Tiếng Việt"),
+            new VoiceDimensionChoice(Language.EnUs, "Tiếng Anh — Mỹ"),
+            new VoiceDimensionChoice(Language.EnGb, "Tiếng Anh — Anh"),
+            new VoiceDimensionChoice(Language.ZhCn, "Tiếng Trung — giản thể"),
+            new VoiceDimensionChoice(Language.JaJp, "Tiếng Nhật"),
+            new VoiceDimensionChoice(Language.KoKr, "Tiếng Hàn"),
+            new VoiceDimensionChoice(Language.ThTh, "Tiếng Thái")
         };
 
         private static readonly Dictionary<string, string> ForeignLanguagePresetIds =
@@ -133,7 +132,8 @@ namespace tiktok_Omni.Services.Showcase
             new VoiceDimensionChoice(Tone.Cheerful, "Vui vẻ — nhanh nhịp"),
             new VoiceDimensionChoice(Tone.Sweet, "Ngọt ngào"),
             new VoiceDimensionChoice(Tone.Philosophy, "Triết lý — chậm rãi"),
-            new VoiceDimensionChoice(Tone.Narrator, "Kể chuyện — trung tính")
+            new VoiceDimensionChoice(Tone.Narrator, "Kể chuyện — trung tính"),
+            new VoiceDimensionChoice(Tone.Custom, "⚙ Tùy chỉnh (chỉnh stability/similarity/style tay)")
         };
 
         private static readonly Dictionary<string, VoiceDimensionSet> ByPresetId = BuildMap();
@@ -170,12 +170,51 @@ namespace tiktok_Omni.Services.Showcase
         public static IReadOnlyList<VoiceDimensionChoice> ListLanguageOptions() => LanguageOptions;
         public static IReadOnlyList<VoiceDimensionChoice> ListToneOptions() => ToneOptions;
 
+        /// <summary>Map tuổi + tone → giới tính preset (UI không còn chọn giới tính / miền).</summary>
+        public static string InferGenderIdForPresetResolution(string toneId, string ageId)
+        {
+            toneId = Norm(toneId);
+            ageId = NormalizeAgeId(ageId);
+            switch (toneId)
+            {
+                case Tone.WarmDeep:
+                    return Gender.Male;
+                case Tone.Cheerful:
+                case Tone.Philosophy:
+                case Tone.Narrator:
+                    return Gender.Neutral;
+                default:
+                    return Gender.Female;
+            }
+        }
+
+        public static VoiceDimensionSet BuildFromVoiceUi(string ageId, string languageId, string toneId)
+        {
+            ageId = NormalizeAgeId(ageId);
+            languageId = NormalizeLanguageId(languageId);
+            toneId = string.IsNullOrWhiteSpace(toneId) ? Tone.Natural : Norm(toneId);
+            return new VoiceDimensionSet
+            {
+                GenderId = InferGenderIdForPresetResolution(toneId, ageId),
+                AgeId = ageId,
+                LanguageId = languageId,
+                ToneId = toneId
+            };
+        }
+
         public static string NormalizeLanguageId(string languageId)
         {
             languageId = Norm(languageId);
             if (string.IsNullOrEmpty(languageId))
             {
-                return Language.ViSouth;
+                return Language.ViGeneral;
+            }
+
+            if (languageId == Language.ViSouth
+                || languageId == Language.ViNorth
+                || languageId == Language.ViCentral)
+            {
+                return Language.ViGeneral;
             }
 
             if (LanguageOptions.Any(o => string.Equals(o.Id, languageId, StringComparison.OrdinalIgnoreCase))
@@ -184,7 +223,7 @@ namespace tiktok_Omni.Services.Showcase
                 return languageId;
             }
 
-            return Language.ViSouth;
+            return Language.ViGeneral;
         }
 
         /// <summary>Edge TTS miễn phí — hiện map neural tiếng Việt (Hoài My / Nam Minh).</summary>
@@ -346,7 +385,6 @@ namespace tiktok_Omni.Services.Showcase
                 dims.LanguageId = NormalizeLanguageId(voiceLanguageId);
             }
 
-            var g = ShortGender(LabelOf(GenderOptions, dims.GenderId));
             var age = ShortAgeLabel(LabelOf(AgeOptions, dims.AgeId));
             var lang = ShortLanguage(LabelOf(LanguageOptions, dims.LanguageId));
             if (ForeignLanguagePresetIds.ContainsKey(dims.LanguageId))
@@ -357,10 +395,10 @@ namespace tiktok_Omni.Services.Showcase
             if (dims.ToneId != Tone.Natural)
             {
                 var t = ShortTone(LabelOf(ToneOptions, dims.ToneId));
-                return g + " · " + lang + " · " + age + " · " + t;
+                return lang + " · " + age + " · " + t;
             }
 
-            return g + " · " + lang + " · " + age;
+            return lang + " · " + age;
         }
 
         private static Dictionary<string, float> BuildAgeLengthMultipliers()
@@ -561,6 +599,11 @@ namespace tiktok_Omni.Services.Showcase
         private static string ShortLanguage(string label)
         {
             label = (label ?? string.Empty).Trim();
+            if (string.Equals(label, "Tiếng Việt", StringComparison.Ordinal))
+            {
+                return "VI";
+            }
+
             if (label.StartsWith("Tiếng Việt — miền Nam", StringComparison.Ordinal))
             {
                 return "MN";

@@ -29,20 +29,17 @@ namespace tiktok_Omni
         private NumericUpDown _numNarrationSpeed;
         private Label _lblLibrary;
         private ComboBox _cbTtsEngine;
-        private ComboBox _cbGender;
-        private ComboBox _cbAge;
-        private ComboBox _cbLanguage;
-        private ComboBox _cbTone;
+        private ComboBox _cbHookTtsEngine;
+        private ComboBox _cbBodyTtsEngine;
         private Label _lblVoiceSummary;
-        private Label _lblAge;
-        private Label _lblLanguage;
-        private Label _lblTone;
-        private TableLayoutPanel _voiceFieldsTable;
         private bool _voiceUiLock;
+        private TabPage _voiceTabPage;
+        private FlowLayoutPanel _voiceTabRoot;
+        private TableLayoutPanel _voiceTabFooter;
 
-        private const int FieldLabelColumnWidth = 346;
-        private const int DialogClientWidth = 1584;
-        private const int DialogClientHeight = 1104;
+        private const int FieldLabelColumnWidth = 519;
+        private const int DialogClientWidth = 2376;
+        private const int DialogClientHeight = 1656;
         private const int DialogOuterPaddingH = 43;
         private const int DialogOuterPaddingTop = 38;
         private const int DialogOuterPaddingBottom = 34;
@@ -110,7 +107,18 @@ namespace tiktok_Omni
                 _video.ShowcaseMusicVolume = _settings?.VideoMusicVolume ?? 14;
                 _video.ShowcaseNarrationSpeedPercent = ShowcaseNarrationSpeedHelper.DefaultManualSpeedPercent;
                 _video.ShowcaseTtsEngine = ShowcaseTtsHelper.EngineEdgeTts;
+                _video.ShowcaseHookTtsEngine = ShowcaseTtsHelper.EngineElevenLabs;
+                _video.ShowcaseBodyTtsEngine = ShowcaseTtsHelper.EngineEdgeTts;
                 _video.ShowcaseVoicePresetId = ShowcaseVoicePresetCatalog.DefaultPresetId;
+                _video.ShowcaseHookStyleKey = HookStyleCatalog.StyleHuongdan;
+                _video.ShowcaseBodyStyleKey = HookStyleCatalog.StyleKechuyen;
+                _video.ShowcaseEdgeRateOffsetPercent = 0;
+                _video.ShowcaseEdgePitchOffsetHz = 0;
+                _video.ShowcaseBodyEdgeRateOffsetPercent = 0;
+                _video.ShowcaseBodyEdgePitchOffsetHz = 0;
+                _video.ShowcaseBodyVoicePresetId = string.Empty;
+                _video.ShowcaseBodyVoiceAgeId = string.Empty;
+                _video.ShowcaseBodyVoiceLanguageId = string.Empty;
                 _video.ShowcaseSfxMasterEnabled = true;
                 _video.ShowcaseCtaSfxFile = string.Empty;
                 _video.ShowcaseCtaSfxEnabled = false;
@@ -378,36 +386,13 @@ namespace tiktok_Omni
                 Padding = new Padding(0)
             };
 
-            _cbTtsEngine = CreateDropDownCombo();
-            _cbTtsEngine.Items.Add(new TtsEngineListItem(ShowcaseTtsHelper.EngineEdgeTts, "Edge TTS (miễn phí, tiếng Việt neural — mặc định)"));
-            _cbTtsEngine.Items.Add(new TtsEngineListItem(ShowcaseTtsHelper.EngineElevenLabs, "ElevenLabs online (chất lượng cao)"));
-            _cbTtsEngine.Items.Add(new TtsEngineListItem(ShowcaseTtsHelper.EngineAskOnCreate, "Hỏi engine khi bấm «Tạo audio»"));
-            _cbTtsEngine.SelectedIndexChanged += (_, __) =>
-            {
-                ApplyVoiceDimensionFieldsForEngine();
-                OnVoiceDimensionChanged();
-            };
-
-            _cbGender = CreateDropDownCombo();
-            _cbAge = CreateDropDownCombo();
-            _cbAge.MaxDropDownItems = 12;
-            _cbLanguage = CreateDropDownCombo();
-            _cbTone = CreateDropDownCombo();
-            FillDimensionCombo(_cbGender, ShowcaseVoicePresetDimensions.ListGenderOptions());
-            FillDimensionCombo(_cbAge, ShowcaseVoicePresetDimensions.ListAgeOptions());
-            FillDimensionCombo(_cbLanguage, ShowcaseVoicePresetDimensions.ListLanguageOptions());
-            FillDimensionCombo(_cbTone, ShowcaseVoicePresetDimensions.ListToneOptions());
-
-            void DimChanged(object s, EventArgs e) => OnVoiceDimensionChanged();
-            _cbGender.SelectedIndexChanged += DimChanged;
-            _cbAge.SelectedIndexChanged += DimChanged;
-            _cbLanguage.SelectedIndexChanged += DimChanged;
-            _cbTone.SelectedIndexChanged += DimChanged;
+            _cbTtsEngine = CreateSegmentEngineCombo();
+            _cbTtsEngine.Visible = false;
 
             _lblVoiceSummary = new Label
             {
                 AutoSize = true,
-                MaximumSize = new Size(1080, 0),
+                MaximumSize = new Size(2100, 0),
                 ForeColor = Color.FromArgb(190, 198, 212),
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 Margin = new Padding(0, 10, 0, 4)
@@ -416,7 +401,7 @@ namespace tiktok_Omni
             var speedNote = new Label
             {
                 AutoSize = true,
-                MaximumSize = new Size(1056, 0),
+                MaximumSize = new Size(2100, 0),
                 ForeColor = Color.FromArgb(140, 148, 162),
                 Font = new Font("Segoe UI", 9.5F),
                 Text = "Khi render: app áp dụng % bạn chọn lên thoại, rồi tự tua nhanh bên dài hơn (clip hoặc audio) để khớp khi ghép.",
@@ -458,35 +443,23 @@ namespace tiktok_Omni
                 Margin = new Padding(8, 8, 0, 0)
             });
 
-            var tbl = new TableLayoutPanel
+            var columnsPanel = BuildHookBodyVoiceColumnsPanel();
+
+            var footer = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 ColumnCount = 2,
-                RowCount = 9,
-                BackColor = BackColor
+                RowCount = 4,
+                BackColor = BackColor,
+                Margin = new Padding(0, 16, 0, 0)
             };
-            _voiceFieldsTable = tbl;
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, FieldLabelColumnWidth));
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            for (var i = 0; i < 9; i++)
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, FieldLabelColumnWidth));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            for (var i = 0; i < 4; i++)
             {
-                tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                footer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             }
-
-            tbl.Controls.Add(MkLbl("Nguồn TTS"), 0, 0);
-            tbl.Controls.Add(_cbTtsEngine, 1, 0);
-            tbl.Controls.Add(MkLbl("Giới tính / vai"), 0, 1);
-            tbl.Controls.Add(_cbGender, 1, 1);
-            _lblAge = MkLbl("Độ tuổi");
-            tbl.Controls.Add(_lblAge, 0, 2);
-            tbl.Controls.Add(_cbAge, 1, 2);
-            _lblLanguage = MkLbl("Ngôn ngữ / vùng");
-            tbl.Controls.Add(_lblLanguage, 0, 3);
-            tbl.Controls.Add(_cbLanguage, 1, 3);
-            _lblTone = MkLbl("Tone giọng");
-            tbl.Controls.Add(_lblTone, 0, 4);
-            tbl.Controls.Add(_cbTone, 1, 4);
 
             var summaryHost = new FlowLayoutPanel
             {
@@ -494,13 +467,12 @@ namespace tiktok_Omni
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
                 AutoSize = true,
-                BackColor = BackColor,
-                Margin = new Padding(0, 8, 0, 0)
+                BackColor = BackColor
             };
             summaryHost.Controls.Add(_lblVoiceSummary);
-            tbl.Controls.Add(MkLbl("Kết quả", ContentAlignment.TopLeft), 0, 5);
-            tbl.Controls.Add(summaryHost, 1, 5);
-            tbl.Controls.Add(MkLbl("Tốc độ clip", ContentAlignment.TopLeft), 0, 6);
+            footer.Controls.Add(MkLbl("Kết quả", ContentAlignment.TopLeft), 0, 0);
+            footer.Controls.Add(summaryHost, 1, 0);
+            footer.Controls.Add(MkLbl("Tốc độ clip", ContentAlignment.TopLeft), 0, 1);
             var speedHost = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -510,7 +482,7 @@ namespace tiktok_Omni
             };
             speedHost.Controls.Add(speedNote);
             speedHost.Controls.Add(speedRow);
-            tbl.Controls.Add(speedHost, 1, 6);
+            footer.Controls.Add(speedHost, 1, 1);
 
             if (_generateNarrationAsync != null)
             {
@@ -537,8 +509,8 @@ namespace tiktok_Omni
                     }
                 };
 
-                tbl.Controls.Add(MkLbl("Tạo file", ContentAlignment.TopLeft), 0, 7);
-                tbl.Controls.Add(_btnGenerateNarration, 1, 7);
+                footer.Controls.Add(MkLbl("Tạo file", ContentAlignment.TopLeft), 0, 2);
+                footer.Controls.Add(_btnGenerateNarration, 1, 2);
             }
 
             if (_listenNarrationAsync != null)
@@ -558,29 +530,63 @@ namespace tiktok_Omni
                     }
                 };
 
-                tbl.Controls.Add(MkLbl("Thử nghe"), 0, 8);
-                tbl.Controls.Add(_btnListenNarration, 1, 8);
+                footer.Controls.Add(MkLbl("Thử nghe"), 0, 3);
+                footer.Controls.Add(_btnListenNarration, 1, 3);
             }
 
-            tab.Controls.Add(tbl);
+            _voiceTabFooter = footer;
+
+            _voiceTabRoot = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                BackColor = BackColor
+            };
+            _voiceTabRoot.Controls.Add(columnsPanel);
+            _voiceTabRoot.Controls.Add(footer);
+            _voiceTabPage = tab;
+            tab.Controls.Add(_voiceTabRoot);
             tab.Resize += (_, __) => ApplyVoiceTabLayout(tab);
             Load += (_, __) => ApplyVoiceTabLayout(tab);
         }
 
+        private static int VoiceTabInnerWidth(TabPage tab)
+        {
+            if (tab == null)
+            {
+                return 1200;
+            }
+
+            return Math.Max(900, tab.ClientSize.Width - tab.Padding.Horizontal);
+        }
+
         private void ApplyVoiceTabLayout(TabPage tab)
         {
-            if (_voiceFieldsTable == null || tab == null)
+            if (tab == null || _lblVoiceSummary == null)
             {
                 return;
             }
 
-            var innerW = Math.Max(860, tab.ClientSize.Width - tab.Padding.Horizontal);
-            _voiceFieldsTable.Width = innerW;
-            var wrapW = Math.Max(620, innerW - FieldLabelColumnWidth - 28);
-            if (_lblVoiceSummary != null)
+            var innerW = VoiceTabInnerWidth(tab);
+            if (_voiceTabRoot != null)
             {
-                _lblVoiceSummary.MaximumSize = new Size(wrapW, 0);
+                _voiceTabRoot.Width = innerW;
+                _voiceTabRoot.MinimumSize = new Size(innerW, 0);
             }
+
+            if (_voiceTabFooter != null)
+            {
+                _voiceTabFooter.AutoSize = false;
+                _voiceTabFooter.Width = innerW;
+                _voiceTabFooter.MinimumSize = new Size(innerW, 0);
+                _voiceTabFooter.PerformLayout();
+                _voiceTabFooter.Height = _voiceTabFooter.PreferredSize.Height;
+            }
+
+            ApplyVoiceSegmentLayoutFromTab(innerW);
+            _lblVoiceSummary.MaximumSize = new Size(Math.Max(900, innerW - FieldLabelColumnWidth - 40), 0);
         }
 
         private void PopulateMusicComboItems()
@@ -675,36 +681,54 @@ namespace tiktok_Omni
             _video.ShowcaseNarrationSpeedPercent =
                 ShowcaseNarrationSpeedHelper.ClampManualPercent((int)_numNarrationSpeed.Value);
 
-            if (_cbTtsEngine.SelectedItem is TtsEngineListItem engineItem)
+            if (_hookVoice != null)
             {
-                _video.ShowcaseTtsEngine = engineItem.Id;
+                SaveVoiceSegmentToVideo(_hookVoice);
             }
 
-            _video.ShowcaseVoicePresetId = ResolvePresetIdFromUi();
-            if (IsEdgeEngineSelected())
+            if (_bodyVoice != null)
             {
-                var edgePreset = ShowcaseVoicePresetCatalog.GetById(_video.ShowcaseVoicePresetId);
-                var edgeDims = ShowcaseVoicePresetDimensions.GetForPreset(edgePreset.Id);
-                _video.ShowcaseVoiceAgeId = edgeDims.AgeId;
-                _video.ShowcaseVoiceLanguageId = edgeDims.LanguageId;
-            }
-            else
-            {
-                _video.ShowcaseVoiceAgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(SelectedDimensionId(_cbAge));
-                _video.ShowcaseVoiceLanguageId =
-                    ShowcaseVoicePresetDimensions.NormalizeLanguageId(SelectedDimensionId(_cbLanguage));
+                SaveVoiceSegmentToVideo(_bodyVoice);
             }
 
-            var engineId = (_cbTtsEngine.SelectedItem as TtsEngineListItem)?.Id ?? ShowcaseTtsHelper.EngineEdgeTts;
-            if (string.Equals(engineId, ShowcaseTtsHelper.EngineEdgeTts, StringComparison.OrdinalIgnoreCase)
-                && !ShowcaseVoicePresetDimensions.SupportsEdgeTts(_video.ShowcaseVoiceLanguageId))
+            _video.ShowcaseTtsEngine = _video.ShowcaseBodyTtsEngine;
+
+            var hookLang = _video.ShowcaseVoiceLanguageId;
+            var bodyLang = _video.ShowcaseBodyVoiceLanguageId;
+            if (string.Equals(_video.ShowcaseHookTtsEngine, ShowcaseTtsHelper.EngineEdgeTts, StringComparison.OrdinalIgnoreCase)
+                && !ShowcaseVoicePresetDimensions.SupportsEdgeTts(hookLang))
             {
                 MessageBox.Show(this,
-                    "Edge TTS hiện chỉ hỗ trợ tiếng Việt — chọn ElevenLabs cho preset ngôn ngữ ngoại.",
+                    "Edge hook cần tiếng Việt — đổi hook sang ElevenLabs hoặc preset Việt.",
                     "Audio thoại",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return false;
+            }
+
+            if (string.Equals(_video.ShowcaseBodyTtsEngine, ShowcaseTtsHelper.EngineEdgeTts, StringComparison.OrdinalIgnoreCase)
+                && !ShowcaseVoicePresetDimensions.SupportsEdgeTts(bodyLang))
+            {
+                MessageBox.Show(this,
+                    "Edge thân cần tiếng Việt — chọn ElevenLabs cho thân hoặc preset Việt.",
+                    "Audio thoại",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return false;
+            }
+
+            if (string.Equals(_video.ShowcaseHookTtsEngine, ShowcaseTtsHelper.EngineElevenLabs, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(_video.ShowcaseBodyTtsEngine, ShowcaseTtsHelper.EngineElevenLabs, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TtsAvailabilityHelper.IsElevenLabsConfigured(_settings))
+                {
+                    MessageBox.Show(this,
+                        "ElevenLabs chưa cấu hình — thêm TTS API Key + Endpoint trong Cài đặt.",
+                        "Audio thoại",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return false;
+                }
             }
 
             ShowcaseMusicHelper.RefreshMusicLabel(_video);
@@ -719,24 +743,20 @@ namespace tiktok_Omni
         private void LoadVoiceControlsFromVideo()
         {
             ShowcaseTtsHelper.EnsureVideoDefaults(_video, _settings);
-            SelectEngineCombo((_video.ShowcaseTtsEngine ?? string.Empty).Trim());
+            SelectEngineCombo((_video.ShowcaseBodyTtsEngine ?? ShowcaseTtsHelper.EngineEdgeTts).Trim());
 
             _voiceUiLock = true;
             try
             {
-                var dims = ShowcaseVoicePresetDimensions.GetForPreset(_video.ShowcaseVoicePresetId);
-                var ageId = ShowcaseVoicePresetDimensions.NormalizeAgeId(
-                    string.IsNullOrWhiteSpace(_video.ShowcaseVoiceAgeId)
-                        ? dims.AgeId
-                        : _video.ShowcaseVoiceAgeId);
-                SelectDimensionCombo(_cbGender, ShowcaseVoicePresetDimensions.NormalizeGenderId(dims.GenderId));
-                SelectDimensionCombo(_cbAge, ageId);
-                var langId = ShowcaseVoicePresetDimensions.NormalizeLanguageId(
-                    string.IsNullOrWhiteSpace(_video.ShowcaseVoiceLanguageId)
-                        ? dims.LanguageId
-                        : _video.ShowcaseVoiceLanguageId);
-                SelectDimensionCombo(_cbLanguage, langId);
-                SelectDimensionCombo(_cbTone, dims.ToneId);
+                if (_hookVoice != null)
+                {
+                    LoadVoiceSegmentFromVideo(_hookVoice);
+                }
+
+                if (_bodyVoice != null)
+                {
+                    LoadVoiceSegmentFromVideo(_bodyVoice);
+                }
             }
             finally
             {
@@ -745,38 +765,74 @@ namespace tiktok_Omni
 
             ApplyVoiceDimensionFieldsForEngine();
             RefreshVoiceSummaryAndHint();
+            ApplyVoiceSegmentLayoutFromTab(VoiceTabInnerWidth(_voiceTabPage));
         }
-
-        private string SelectedTtsEngineId() =>
-            (_cbTtsEngine.SelectedItem as TtsEngineListItem)?.Id ?? ShowcaseTtsHelper.EngineEdgeTts;
-
-        private bool IsEdgeEngineSelected() =>
-            string.Equals(SelectedTtsEngineId(), ShowcaseTtsHelper.EngineEdgeTts, StringComparison.OrdinalIgnoreCase);
 
         private void ApplyVoiceDimensionFieldsForEngine()
         {
-            var edge = IsEdgeEngineSelected();
-            SetVoiceTableRowVisible(2, !edge);
-            SetVoiceTableRowVisible(3, !edge);
-            SetVoiceTableRowVisible(4, !edge);
+            ApplySegmentColumnVisibility(_hookVoice);
+            ApplySegmentColumnVisibility(_bodyVoice);
+            ApplyVoiceSegmentLayoutFromTab(VoiceTabInnerWidth(_voiceTabPage));
         }
 
-        private void SetVoiceTableRowVisible(int row, bool visible)
+        private void ApplySegmentColumnVisibility(VoiceSegmentUi seg)
         {
-            if (_voiceFieldsTable == null)
+            if (seg == null)
             {
                 return;
             }
 
-            _voiceFieldsTable.RowStyles[row].SizeType = visible ? SizeType.AutoSize : SizeType.Absolute;
-            _voiceFieldsTable.RowStyles[row].Height = visible ? 0f : 0f;
-            foreach (Control c in _voiceFieldsTable.Controls)
+            var eleven = SegmentIsEleven(seg);
+            var edge = SegmentIsEdge(seg);
+            SetSegmentTableRowVisible(seg, 1, eleven);
+            SetSegmentTableRowVisible(seg, 2, eleven);
+            // Hook: "Tone giọng" bị bỏ hẳn — "Phong cách hook" lo hết cảm xúc + rate/pitch/stability tuỳ chỉnh.
+            SetSegmentTableRowVisible(seg, 3, eleven && !seg.IsHook);
+            var showCustomToneRow = seg.IsHook
+                ? SegmentElevenCustomVoiceStyle(seg)
+                : (eleven && ShowcaseElevenToneHelper.IsCustomTone(SelectedDimensionId(seg.CbTone)));
+            var showStyleRow = edge || (eleven && seg.IsHook);
+            // Hook: Style (row 4) nằm TRÊN Tinh chỉnh giọng (row 5) — đảo lại so với Thân (Tone → Tinh chỉnh → Style).
+            var styleRow = seg.IsHook ? 4 : 5;
+            var customToneRow = seg.IsHook ? 5 : 4;
+            SetSegmentTableRowVisible(seg, styleRow, showStyleRow);
+            SetSegmentTableRowVisible(seg, customToneRow, showCustomToneRow);
+            SetSegmentTableRowVisible(seg, 6, edge);
+            if (seg.LblStyle != null)
             {
-                if (_voiceFieldsTable.GetRow(c) == row)
-                {
-                    c.Visible = visible;
-                }
+                seg.LblStyle.Text = edge ? "Phong cách Edge" : "Phong cách hook";
             }
+
+            RefreshSegmentStyleComboItems(seg);
+
+            var rate = seg.IsHook ? _video.ShowcaseEdgeRateOffsetPercent : _video.ShowcaseBodyEdgeRateOffsetPercent;
+            var pitch = seg.IsHook ? _video.ShowcaseEdgePitchOffsetHz : _video.ShowcaseBodyEdgePitchOffsetHz;
+            ApplySegmentEdgeProsodyUi(seg, rate, pitch);
+
+            var stability = seg.IsHook ? _video.ShowcaseElevenCustomStabilityPercent : _video.ShowcaseBodyElevenCustomStabilityPercent;
+            var similarity = seg.IsHook ? _video.ShowcaseElevenCustomSimilarityPercent : _video.ShowcaseBodyElevenCustomSimilarityPercent;
+            var style = seg.IsHook ? _video.ShowcaseElevenCustomStylePercent : _video.ShowcaseBodyElevenCustomStylePercent;
+            ApplySegmentCustomToneUi(seg, stability, similarity, style);
+            SyncSegmentShellHeight(seg);
+        }
+
+        private void RefreshVoiceSummaryAndHint()
+        {
+            if (_hookVoice == null || _bodyVoice == null)
+            {
+                return;
+            }
+
+            _lblVoiceSummary.Text = "Hook: " + SegmentSummaryLine(_hookVoice, _video, isHook: true)
+                                    + "\r\nThân: " + SegmentSummaryLine(_bodyVoice, _video, isHook: false);
+        }
+
+        private static void FillSegmentEngineCombo(ComboBox combo)
+        {
+            combo.Items.Clear();
+            combo.Items.Add(new TtsEngineListItem(ShowcaseTtsHelper.EngineEdgeTts, "Edge TTS (Microsoft, tiếng Việt)"));
+            combo.Items.Add(new TtsEngineListItem(ShowcaseTtsHelper.EngineElevenLabs, "ElevenLabs (API, đa ngôn ngữ)"));
+            combo.SelectedIndex = 0;
         }
 
         private void OnVoiceDimensionChanged()
@@ -789,51 +845,58 @@ namespace tiktok_Omni
             RefreshVoiceSummaryAndHint();
         }
 
-        private void RefreshVoiceSummaryAndHint()
+        private static string SegmentEngineLabel(string engineId)
         {
-            if (IsEdgeEngineSelected())
+            if (string.Equals(engineId, ShowcaseTtsHelper.EngineElevenLabs, StringComparison.OrdinalIgnoreCase))
             {
-                var presetId = ShowcaseVoicePresetDimensions.ResolveEdgePresetIdFromGender(
-                    SelectedDimensionId(_cbGender));
-                var preset = ShowcaseVoicePresetCatalog.GetById(presetId);
-                var voice = string.Equals(presetId, "male_south_young", StringComparison.OrdinalIgnoreCase)
-                    ? "Nam Minh"
-                    : "Hoài My";
-                _lblVoiceSummary.Text = "Edge TTS: " + preset.Label + " · giọng " + voice;
-                return;
+                return "ElevenLabs";
             }
 
-            var set = CurrentDimensionSet();
-            var resolved = ShowcaseVoicePresetDimensions.ResolvePresetId(set);
-            var resolvedPreset = ShowcaseVoicePresetCatalog.GetById(resolved);
-            var exact = ShowcaseVoicePresetDimensions.TryResolveExactPresetId(set, out _);
-            var ageLabel = ShowcaseVoicePresetDimensions.ListAgeOptions()
-                .FirstOrDefault(a => string.Equals(a.Id, set.AgeId, StringComparison.OrdinalIgnoreCase))?.Label;
-
-            _lblVoiceSummary.Text = "Áp dụng: " + resolvedPreset.Label
-                                    + (string.IsNullOrWhiteSpace(ageLabel) ? string.Empty : " · " + ageLabel)
-                                    + (exact ? string.Empty : " (gần nhất — chỉnh tone/vùng)");
+            return "Edge TTS";
         }
 
-        private string ResolvePresetIdFromUi()
+        private static string SelectedSegmentEngineId(ComboBox combo) =>
+            (combo.SelectedItem as TtsEngineListItem)?.Id ?? ShowcaseTtsHelper.EngineEdgeTts;
+
+        private static Label CreateEdgeProsodyValueLabel() => new Label
         {
-            if (IsEdgeEngineSelected())
+            AutoSize = true,
+            MaximumSize = new Size((int)Math.Round(88 * 1.3f), 0),
+            TextAlign = ContentAlignment.TopRight,
+            ForeColor = Color.FromArgb(190, 198, 212),
+            Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+            Text = "±0%",
+            Margin = Padding.Empty
+        };
+
+        private ComboBox CreateSegmentEngineCombo()
+        {
+            var combo = CreateDropDownCombo();
+            FillSegmentEngineCombo(combo);
+            return combo;
+        }
+
+        private void SelectSegmentEngineCombo(ComboBox combo, string engineId)
+        {
+            engineId = ShowcaseTtsHelper.NormalizeEngineStorageId(engineId);
+            if (string.IsNullOrWhiteSpace(engineId))
             {
-                return ShowcaseVoicePresetDimensions.ResolveEdgePresetIdFromGender(
-                    SelectedDimensionId(_cbGender));
+                engineId = ShowcaseTtsHelper.EngineEdgeTts;
             }
 
-            return ShowcaseVoicePresetDimensions.ResolvePresetId(CurrentDimensionSet());
-        }
-
-        private ShowcaseVoicePresetDimensions.VoiceDimensionSet CurrentDimensionSet() =>
-            new ShowcaseVoicePresetDimensions.VoiceDimensionSet
+            var idx = 0;
+            for (var i = 0; i < combo.Items.Count; i++)
             {
-                GenderId = ShowcaseVoicePresetDimensions.NormalizeGenderId(SelectedDimensionId(_cbGender)),
-                AgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(SelectedDimensionId(_cbAge)),
-                LanguageId = ShowcaseVoicePresetDimensions.NormalizeLanguageId(SelectedDimensionId(_cbLanguage)),
-                ToneId = SelectedDimensionId(_cbTone)
-            };
+                if (combo.Items[i] is TtsEngineListItem item &&
+                    string.Equals(item.Id, engineId, StringComparison.OrdinalIgnoreCase))
+                {
+                    idx = i;
+                    break;
+                }
+            }
+
+            combo.SelectedIndex = combo.Items.Count > 0 ? idx : -1;
+        }
 
         private void SelectEngineCombo(string engineId)
         {
@@ -882,6 +945,20 @@ namespace tiktok_Omni
         private static string SelectedDimensionId(ComboBox combo) =>
             (combo.SelectedItem as ShowcaseVoicePresetDimensions.VoiceDimensionChoice)?.Id ?? string.Empty;
 
+        private sealed class HookStyleListItem
+        {
+            public HookStyleListItem(string key, string label)
+            {
+                Key = key;
+                Label = label;
+            }
+
+            public string Key { get; }
+            public string Label { get; }
+
+            public override string ToString() => Label;
+        }
+
         private sealed class TtsEngineListItem
         {
             public TtsEngineListItem(string id, string label)
@@ -903,8 +980,8 @@ namespace tiktok_Omni
             ForeColor = Color.WhiteSmoke,
             Font = new Font("Segoe UI", 10.5F),
             Height = 48,
-            Width = 768,
-            DropDownWidth = 864,
+            Width = 1152,
+            DropDownWidth = 1200,
             Margin = new Padding(0, 8, 0, 16),
             IntegralHeight = false
         };

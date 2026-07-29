@@ -1,5 +1,6 @@
 using System;
 using System.Text.RegularExpressions;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services
 {
@@ -18,6 +19,13 @@ namespace tiktok_Omni.Services
         public const string LegacyTurboModel = "eleven_turbo_v2_5";
 
         public const string DefaultLanguageCode = "vi";
+
+        /// <summary>URL POST TTS mặc định — phần sau path là voice_id.</summary>
+        public const string DefaultTextToSpeechEndpointPrefix = "https://api.elevenlabs.io/v1/text-to-speech/";
+
+        private static readonly Regex VoiceIdPattern = new Regex(
+            @"^[A-Za-z0-9_-]{10,64}$",
+            RegexOptions.CultureInvariant);
 
         public const double DefaultStability = 0.5;
 
@@ -185,20 +193,61 @@ namespace tiktok_Omni.Services
             };
         }
 
-        private static object ResolveVoiceSettings(bool emphaticHook, bool showcaseExpressiveBody)
+        private static object ResolveVoiceSettings(
+            bool emphaticHook,
+            bool showcaseExpressiveBody,
+            ShowcaseTtsRenderOptions segmentTts = null)
         {
+            object baseSettings = emphaticHook
+                ? CreateVietnameseHookVoiceSettings()
+                : showcaseExpressiveBody
+                    ? CreateShowcaseBodyVoiceSettings()
+                    : CreateVietnameseNarrationVoiceSettings();
+
+            if (segmentTts == null)
+            {
+                return baseSettings;
+            }
+
             if (emphaticHook)
             {
-                return CreateVietnameseHookVoiceSettings();
+                // Hook: "Tone giọng" đã bị bỏ — trigger là "Phong cách hook" = ⚙ Tùy chỉnh giọng.
+                if (!ShowcaseElevenToneHelper.IsHookCustomVoiceStyle(segmentTts.HookStyleKey))
+                {
+                    return baseSettings;
+                }
+
+                return BuildVoiceSettingsObject(
+                    segmentTts.ElevenCustomStabilityPercent,
+                    segmentTts.ElevenCustomSimilarityPercent,
+                    segmentTts.ElevenCustomStylePercent);
             }
 
-            if (showcaseExpressiveBody)
+            // Thân/Narration: giữ nguyên cơ chế Tone giọng.
+            var toneId = segmentTts.ElevenToneId;
+            if (!ShowcaseElevenToneHelper.HasVoiceSettingsOverride(toneId))
             {
-                return CreateShowcaseBodyVoiceSettings();
+                return baseSettings;
             }
 
-            return CreateVietnameseNarrationVoiceSettings();
+            ShowcaseElevenToneHelper.ResolveEffectiveVoiceSettings(
+                toneId,
+                segmentTts.ElevenCustomStabilityPercent,
+                segmentTts.ElevenCustomSimilarityPercent,
+                segmentTts.ElevenCustomStylePercent,
+                out var stabilityPercent,
+                out var similarityPercent,
+                out var stylePercent);
+
+            return BuildVoiceSettingsObject(stabilityPercent, similarityPercent, stylePercent);
         }
+
+        private static object BuildVoiceSettingsObject(int stabilityPercent, int similarityPercent, int stylePercent) => new
+        {
+            stability = stabilityPercent / 100.0,
+            similarity_boost = similarityPercent / 100.0,
+            style = stylePercent / 100.0
+        };
 
         /// <summary>JSON body POST /text-to-speech/{voice_id} — luôn có language_code vi.</summary>
         public static object BuildPayload(
@@ -207,13 +256,14 @@ namespace tiktok_Omni.Services
             bool emphaticHook,
             string voiceId = null,
             bool showcaseExpressiveBody = false,
-            string languageCodeOverride = null)
+            string languageCodeOverride = null,
+            ShowcaseTtsRenderOptions segmentTts = null)
         {
             var sanitized = VietnameseTtsTextNormalizer.SanitizeForElevenLabsRequest(text);
             var cleanText = emphaticHook || showcaseExpressiveBody
                 ? sanitized
                 : ApplyDeepPauses(sanitized);
-            var voiceSettings = ResolveVoiceSettings(emphaticHook, showcaseExpressiveBody);
+            var voiceSettings = ResolveVoiceSettings(emphaticHook, showcaseExpressiveBody, segmentTts);
             var lang = (languageCodeOverride ?? string.Empty).Trim().ToLowerInvariant();
             if (string.IsNullOrEmpty(lang))
             {
@@ -292,6 +342,89 @@ namespace tiktok_Omni.Services
         public static object BuildPayload(string text, bool emphaticHook)
         {
             return BuildPayload(text, settings: null, emphaticHook);
+        }
+
+        public static bool IsElevenLabsEndpoint(string endpoint) =>
+            (endpoint ?? string.Empty).IndexOf("elevenlabs.io", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <summary>Chuẩn hóa ô Cài đặt (voice_id hoặc URL cũ) → URL đầy đủ ElevenLabs.</summary>
+        public static string NormalizeSettingsEndpoint(string endpointOrVoiceId)
+        {
+            var raw = (endpointOrVoiceId ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(raw))
+            {
+                return string.Empty;
+            }
+
+            if (raw.IndexOf("example.com", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return string.Empty;
+            }
+
+            var extracted = ExtractVoiceIdFromEndpoint(raw);
+            if (!string.IsNullOrEmpty(extracted) &&
+                (IsElevenLabsEndpoint(raw) || raw.IndexOf("text-to-speech", StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                return DefaultTextToSpeechEndpointPrefix + extracted;
+            }
+
+            if (!raw.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                var id = raw.Trim().Trim('/');
+                if (IsPlausibleVoiceId(id))
+                {
+                    return DefaultTextToSpeechEndpointPrefix + id;
+                }
+            }
+
+            if (IsElevenLabsEndpoint(raw))
+            {
+                return raw;
+            }
+
+            return raw;
+        }
+
+        /// <summary>Hiển thị ô Cài đặt — chỉ voice_id nếu là ElevenLabs.</summary>
+        public static string FormatSettingsVoiceIdField(string storedEndpoint)
+        {
+            var normalized = NormalizeSettingsEndpoint(storedEndpoint);
+            if (string.IsNullOrEmpty(normalized))
+            {
+                return string.Empty;
+            }
+
+            if (IsElevenLabsEndpoint(normalized))
+            {
+                return ExtractVoiceIdFromEndpoint(normalized) ?? string.Empty;
+            }
+
+            var legacyId = ExtractVoiceIdFromEndpoint(storedEndpoint);
+            return !string.IsNullOrEmpty(legacyId) ? legacyId : (storedEndpoint ?? string.Empty).Trim();
+        }
+
+        public static bool IsPlausibleVoiceId(string voiceId)
+        {
+            voiceId = (voiceId ?? string.Empty).Trim();
+            return voiceId.Length > 0 && VoiceIdPattern.IsMatch(voiceId);
+        }
+
+        /// <summary>Kiểm tra giá trị ô Voice ID trước khi lưu (rỗng = hợp lệ).</summary>
+        public static bool IsValidSettingsVoiceField(string endpointOrVoiceId)
+        {
+            var raw = (endpointOrVoiceId ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(raw))
+            {
+                return true;
+            }
+
+            if (raw.IndexOf("example.com", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            var normalized = NormalizeSettingsEndpoint(raw);
+            return IsElevenLabsEndpoint(normalized) && EndpointIncludesVoiceId(normalized);
         }
     }
 }

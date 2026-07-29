@@ -4,9 +4,12 @@ namespace tiktok_Omni
 {
     public partial class Form1
     {
-        private TextBox txtVoiceIdMelancholic;
-        private TextBox txtVoiceIdIntense;
-        private TextBox txtVoiceIdCalm;
+        private TextBox txtVoiceIdFemaleYoung;
+        private TextBox txtVoiceIdFemaleMature;
+        private TextBox txtVoiceIdMaleYoung;
+        private TextBox txtVoiceIdMaleMature;
+        private TextBox txtVoiceIdGirlChild;
+        private TextBox txtVoiceIdBoyChild;
         private TextBox txtTikTokRapidApiKey;
         private Button btnToggleTikTokRapidApiKey;
         private Button btnTestTikTokRapidApi;

@@ -725,12 +725,14 @@ namespace tiktok_Omni
                             }
                         }
 
-                        ttsOptions.Engine = batchAskEngine.Value;
+                        ttsOptions.HookEngine = batchAskEngine.Value;
+                        ttsOptions.BodyEngine = batchAskEngine.Value;
                     }
 
                     try
                     {
-                        TtsAvailabilityHelper.ValidateEngine(settings, ttsOptions.Engine);
+                        TtsAvailabilityHelper.ValidateEngine(settings, ttsOptions.HookEngine);
+                        TtsAvailabilityHelper.ValidateEngine(settings, ttsOptions.BodyEngine);
                     }
                     catch (Exception ex)
                     {

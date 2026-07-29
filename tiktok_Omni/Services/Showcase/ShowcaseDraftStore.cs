@@ -86,11 +86,53 @@ namespace tiktok_Omni.Services
 
         public string ShowcaseTtsEngine { get; set; } = string.Empty;
 
+        public string ShowcaseHookTtsEngine { get; set; } = string.Empty;
+
+        public string ShowcaseBodyTtsEngine { get; set; } = string.Empty;
+
         public string ShowcaseVoicePresetId { get; set; } = string.Empty;
 
         public string ShowcaseVoiceAgeId { get; set; } = string.Empty;
 
         public string ShowcaseVoiceLanguageId { get; set; } = string.Empty;
+
+        public string ShowcaseHookElevenPersona { get; set; } = string.Empty;
+
+        public string ShowcaseVoiceToneId { get; set; } = string.Empty;
+
+        public int ShowcaseElevenCustomStabilityPercent { get; set; }
+
+        public int ShowcaseElevenCustomSimilarityPercent { get; set; }
+
+        public int ShowcaseElevenCustomStylePercent { get; set; }
+
+        public string ShowcaseHookStyleKey { get; set; } = string.Empty;
+
+        public int ShowcaseEdgeRateOffsetPercent { get; set; }
+
+        public int ShowcaseEdgePitchOffsetHz { get; set; }
+
+        public string ShowcaseBodyVoicePresetId { get; set; } = string.Empty;
+
+        public string ShowcaseBodyVoiceAgeId { get; set; } = string.Empty;
+
+        public string ShowcaseBodyVoiceLanguageId { get; set; } = string.Empty;
+
+        public string ShowcaseBodyElevenPersona { get; set; } = string.Empty;
+
+        public string ShowcaseBodyVoiceToneId { get; set; } = string.Empty;
+
+        public int ShowcaseBodyElevenCustomStabilityPercent { get; set; }
+
+        public int ShowcaseBodyElevenCustomSimilarityPercent { get; set; }
+
+        public int ShowcaseBodyElevenCustomStylePercent { get; set; }
+
+        public string ShowcaseBodyStyleKey { get; set; } = string.Empty;
+
+        public int ShowcaseBodyEdgeRateOffsetPercent { get; set; }
+
+        public int ShowcaseBodyEdgePitchOffsetHz { get; set; }
 
         public bool ShowcaseSfxMasterEnabled { get; set; } = true;
 
@@ -253,9 +295,30 @@ namespace tiktok_Omni.Services
                 ShowcaseMusicVolume = video.ShowcaseMusicVolume,
                 ShowcaseNarrationSpeedPercent = video.ShowcaseNarrationSpeedPercent,
                 ShowcaseTtsEngine = video.ShowcaseTtsEngine ?? string.Empty,
+                ShowcaseHookTtsEngine = video.ShowcaseHookTtsEngine ?? string.Empty,
+                ShowcaseBodyTtsEngine = video.ShowcaseBodyTtsEngine ?? string.Empty,
                 ShowcaseVoicePresetId = video.ShowcaseVoicePresetId ?? string.Empty,
                 ShowcaseVoiceAgeId = video.ShowcaseVoiceAgeId ?? string.Empty,
                 ShowcaseVoiceLanguageId = video.ShowcaseVoiceLanguageId ?? string.Empty,
+                ShowcaseHookElevenPersona = video.ShowcaseHookElevenPersona ?? string.Empty,
+                ShowcaseVoiceToneId = video.ShowcaseVoiceToneId ?? string.Empty,
+                ShowcaseElevenCustomStabilityPercent = video.ShowcaseElevenCustomStabilityPercent,
+                ShowcaseElevenCustomSimilarityPercent = video.ShowcaseElevenCustomSimilarityPercent,
+                ShowcaseElevenCustomStylePercent = video.ShowcaseElevenCustomStylePercent,
+                ShowcaseHookStyleKey = video.ShowcaseHookStyleKey ?? string.Empty,
+                ShowcaseEdgeRateOffsetPercent = video.ShowcaseEdgeRateOffsetPercent,
+                ShowcaseEdgePitchOffsetHz = video.ShowcaseEdgePitchOffsetHz,
+                ShowcaseBodyVoicePresetId = video.ShowcaseBodyVoicePresetId ?? string.Empty,
+                ShowcaseBodyVoiceAgeId = video.ShowcaseBodyVoiceAgeId ?? string.Empty,
+                ShowcaseBodyVoiceLanguageId = video.ShowcaseBodyVoiceLanguageId ?? string.Empty,
+                ShowcaseBodyElevenPersona = video.ShowcaseBodyElevenPersona ?? string.Empty,
+                ShowcaseBodyVoiceToneId = video.ShowcaseBodyVoiceToneId ?? string.Empty,
+                ShowcaseBodyElevenCustomStabilityPercent = video.ShowcaseBodyElevenCustomStabilityPercent,
+                ShowcaseBodyElevenCustomSimilarityPercent = video.ShowcaseBodyElevenCustomSimilarityPercent,
+                ShowcaseBodyElevenCustomStylePercent = video.ShowcaseBodyElevenCustomStylePercent,
+                ShowcaseBodyStyleKey = video.ShowcaseBodyStyleKey ?? string.Empty,
+                ShowcaseBodyEdgeRateOffsetPercent = video.ShowcaseBodyEdgeRateOffsetPercent,
+                ShowcaseBodyEdgePitchOffsetHz = video.ShowcaseBodyEdgePitchOffsetHz,
                 ShowcaseSfxMasterEnabled = video.ShowcaseSfxMasterEnabled,
                 ShowcaseHookSfxFile = video.ShowcaseHookSfxFile ?? string.Empty,
                 ShowcaseHookSfxEnabled = video.ShowcaseHookSfxEnabled,
@@ -325,9 +388,30 @@ namespace tiktok_Omni.Services
                 ShowcaseMusicVolume = entry.ShowcaseMusicVolume >= 0 ? entry.ShowcaseMusicVolume : 14,
                 ShowcaseNarrationSpeedPercent = entry.ShowcaseNarrationSpeedPercent,
                 ShowcaseTtsEngine = entry.ShowcaseTtsEngine ?? string.Empty,
+                ShowcaseHookTtsEngine = entry.ShowcaseHookTtsEngine ?? string.Empty,
+                ShowcaseBodyTtsEngine = entry.ShowcaseBodyTtsEngine ?? string.Empty,
                 ShowcaseVoicePresetId = entry.ShowcaseVoicePresetId ?? string.Empty,
                 ShowcaseVoiceAgeId = entry.ShowcaseVoiceAgeId ?? string.Empty,
                 ShowcaseVoiceLanguageId = entry.ShowcaseVoiceLanguageId ?? string.Empty,
+                ShowcaseHookElevenPersona = entry.ShowcaseHookElevenPersona ?? string.Empty,
+                ShowcaseVoiceToneId = entry.ShowcaseVoiceToneId ?? string.Empty,
+                ShowcaseElevenCustomStabilityPercent = entry.ShowcaseElevenCustomStabilityPercent,
+                ShowcaseElevenCustomSimilarityPercent = entry.ShowcaseElevenCustomSimilarityPercent,
+                ShowcaseElevenCustomStylePercent = entry.ShowcaseElevenCustomStylePercent,
+                ShowcaseHookStyleKey = entry.ShowcaseHookStyleKey ?? string.Empty,
+                ShowcaseEdgeRateOffsetPercent = entry.ShowcaseEdgeRateOffsetPercent,
+                ShowcaseEdgePitchOffsetHz = entry.ShowcaseEdgePitchOffsetHz,
+                ShowcaseBodyVoicePresetId = entry.ShowcaseBodyVoicePresetId ?? string.Empty,
+                ShowcaseBodyVoiceAgeId = entry.ShowcaseBodyVoiceAgeId ?? string.Empty,
+                ShowcaseBodyVoiceLanguageId = entry.ShowcaseBodyVoiceLanguageId ?? string.Empty,
+                ShowcaseBodyElevenPersona = entry.ShowcaseBodyElevenPersona ?? string.Empty,
+                ShowcaseBodyVoiceToneId = entry.ShowcaseBodyVoiceToneId ?? string.Empty,
+                ShowcaseBodyElevenCustomStabilityPercent = entry.ShowcaseBodyElevenCustomStabilityPercent,
+                ShowcaseBodyElevenCustomSimilarityPercent = entry.ShowcaseBodyElevenCustomSimilarityPercent,
+                ShowcaseBodyElevenCustomStylePercent = entry.ShowcaseBodyElevenCustomStylePercent,
+                ShowcaseBodyStyleKey = entry.ShowcaseBodyStyleKey ?? string.Empty,
+                ShowcaseBodyEdgeRateOffsetPercent = entry.ShowcaseBodyEdgeRateOffsetPercent,
+                ShowcaseBodyEdgePitchOffsetHz = entry.ShowcaseBodyEdgePitchOffsetHz,
                 ShowcaseSfxMasterEnabled = entry.ShowcaseSfxMasterEnabled,
                 ShowcaseHookSfxFile = entry.ShowcaseHookSfxFile ?? string.Empty,
                 ShowcaseHookSfxEnabled = entry.ShowcaseHookSfxEnabled,
