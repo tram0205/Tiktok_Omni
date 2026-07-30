@@ -55,6 +55,10 @@ namespace tiktok_Omni.Services
         public string LastRenderOutputPath { get; set; } = string.Empty;
         public string LastRenderError { get; set; } = string.Empty;
 
+        // ===== Thứ tự hiển thị trên lưới (STT) =====
+        [JsonIgnore]
+        public int OrderNumber { get; set; }
+
         // ===== Engagement metrics (lấy từ TikWM API qua nút "Lấy số liệu") =====
         /// <summary>Tổng view của video (TikWM data.play_count).</summary>
         public long PlayCount { get; set; }
@@ -185,7 +189,9 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction,
             ConfigManager configManager = null,
-            string runningProfileName = null)
+            string runningProfileName = null,
+            string overrideHuntMethod = null,
+            bool? overrideFallbackToBrowser = null)
         {
             if (string.IsNullOrWhiteSpace(keywords))
             {
@@ -205,7 +211,9 @@ namespace tiktok_Omni.Services
                 cancellationToken,
                 logAction,
                 configManager,
-                runningProfileName);
+                runningProfileName,
+                overrideHuntMethod,
+                overrideFallbackToBrowser);
         }
 
         internal Task<List<AffiliateCandidate>> HuntTikTokPlatformAsync(
@@ -215,12 +223,15 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction,
             ConfigManager configManager,
-            string runningProfileName)
+            string runningProfileName,
+            string overrideHuntMethod = null,
+            bool? overrideFallbackToBrowser = null)
         {
             return Task.Run(
                 () => HuntCoreAsync(
                     keywords, maxResults, searchMode,
-                    cancellationToken, logAction, configManager, runningProfileName),
+                    cancellationToken, logAction, configManager, runningProfileName,
+                    overrideHuntMethod, overrideFallbackToBrowser),
                 cancellationToken);
         }
 
@@ -527,7 +538,9 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction,
             ConfigManager configManager,
-            string runningProfileName)
+            string runningProfileName,
+            string overrideHuntMethod = null,
+            bool? overrideFallbackToBrowser = null)
         {
             var wanted = NormalizePlatformIds(platformIds);
             if (wanted.Count == 0)
@@ -567,7 +580,9 @@ namespace tiktok_Omni.Services
                 ConfigManager = configManager,
                 RunningProfileName = runningProfileName,
                 Log = logAction,
-                YtDlpPath = ytDlpPath
+                YtDlpPath = ytDlpPath,
+                TikTokHuntMethod = overrideHuntMethod ?? string.Empty,
+                TikTokRapidApiFallbackToBrowser = overrideFallbackToBrowser ?? true
             };
 
             var merged = new List<AffiliateCandidate>();
@@ -688,7 +703,9 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> logAction,
             ConfigManager configManager,
-            string runningProfileName)
+            string runningProfileName,
+            string overrideHuntMethod = null,
+            bool? overrideFallbackToBrowser = null)
         {
             if (searchMode == AffiliateSearchMode.Shop)
             {
@@ -707,7 +724,7 @@ namespace tiktok_Omni.Services
                 huntSettings = await configManager.LoadAsync().ConfigureAwait(false);
             }
 
-            if (ShouldHuntTikTokVideoViaRapidApi(huntSettings))
+            if (ShouldHuntTikTokVideoViaRapidApi(huntSettings, overrideHuntMethod))
             {
                 try
                 {
@@ -719,12 +736,12 @@ namespace tiktok_Omni.Services
                         logAction,
                         runningProfileName).ConfigureAwait(false);
                 }
-                catch (Exception ex) when (huntSettings?.AffiliateTikTokApiFallbackBrowser ?? true)
+                catch (Exception ex) when (ResolveTikTokFallbackToBrowser(huntSettings, overrideFallbackToBrowser))
                 {
                     logAction?.Invoke($"[Affiliate] RapidAPI lỗi ({ex.Message}) — chuyển sang Playwright…");
                 }
             }
-            else if (IsRapidApiHuntMode(huntSettings) && string.IsNullOrWhiteSpace(huntSettings?.TikTokRapidApiKey))
+            else if (IsRapidApiHuntMode(huntSettings, overrideHuntMethod) && string.IsNullOrWhiteSpace(huntSettings?.TikTokRapidApiKey))
             {
                 logAction?.Invoke("[Affiliate] Chế độ RapidAPI nhưng chưa có key — dùng Playwright.");
             }
@@ -879,15 +896,37 @@ namespace tiktok_Omni.Services
             }
         }
 
-        private static bool IsRapidApiHuntMode(AppSettings settings) =>
-            settings != null &&
-            string.Equals(
-                (settings.AffiliateTikTokVideoHuntMode ?? string.Empty).Trim(),
-                TikTokVideoHuntModes.RapidApi,
-                StringComparison.OrdinalIgnoreCase);
+        private static bool IsRapidApiHuntMode(AppSettings settings, string overrideHuntMethod = null) =>
+            TikTokHuntMethods.IsRapidApi(ResolveTikTokHuntMethod(settings, overrideHuntMethod));
 
-        private static bool ShouldHuntTikTokVideoViaRapidApi(AppSettings settings) =>
-            IsRapidApiHuntMode(settings) && !string.IsNullOrWhiteSpace(settings.TikTokRapidApiKey);
+        private static bool ShouldHuntTikTokVideoViaRapidApi(AppSettings settings, string overrideHuntMethod = null) =>
+            IsRapidApiHuntMode(settings, overrideHuntMethod) && !string.IsNullOrWhiteSpace(settings?.TikTokRapidApiKey);
+
+        private static bool ResolveTikTokFallbackToBrowser(AppSettings settings, bool? overrideFallbackToBrowser) =>
+            overrideFallbackToBrowser
+            ?? settings?.AffiliateTikTokApiFallbackBrowser
+            ?? settings?.TikTokRapidApiFallbackToBrowser
+            ?? true;
+
+        private static string ResolveTikTokHuntMethod(AppSettings settings, string overrideHuntMethod)
+        {
+            if (!string.IsNullOrWhiteSpace(overrideHuntMethod))
+            {
+                return overrideHuntMethod.Trim();
+            }
+
+            if (settings == null)
+            {
+                return TikTokVideoHuntModes.Browser;
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.TikTokHuntMethod))
+            {
+                return settings.TikTokHuntMethod.Trim();
+            }
+
+            return (settings.AffiliateTikTokVideoHuntMode ?? string.Empty).Trim();
+        }
 
         private async Task<List<AffiliateCandidate>> HuntVideoViaRapidApiAsync(
             string keywords,
@@ -4356,14 +4395,15 @@ return bestScore >= 20 ? best : null;") as IWebElement;
             const string js = @"() => {
                 const results = [];
                 try {
-                    const items = document.querySelectorAll('div[data-e2e=""search_video-item""]');
+                    // Thử nhiều selector khác nhau đề phòng TikTok thay đổi cấu trúc DOM
+                    const items = document.querySelectorAll('div[data-e2e=""search_video-item""], div[class*=""DivVideoCardContainer""], div[class*=""search-item""], div[class*=""VideoCard""]');
                     for (const item of items) {
                         const videoLinkEl = item.querySelector('a[href*=""/video/""]');
                         if (!videoLinkEl) continue;
-                        const authorEl = item.querySelector('a[data-e2e=""search-video-user-link""], p[data-e2e=""search-user-unique-id""]');
+                        const authorEl = item.querySelector('a[data-e2e=""search-video-user-link""], p[data-e2e=""search-user-unique-id""], a[class*=""UniqueId""], a[href*=""/@""]');
 
                         // Lấy nội dung Caption (raw), sau đó tách hashtag và làm sạch làm ProductName
-                        const descEl = item.querySelector('div[data-e2e=""search-video-desc""]');
+                        const descEl = item.querySelector('div[data-e2e=""search-video-desc""], div[class*=""DivDesContainer""], div[class*=""desc""], h1, h2');
                         let desc = '';
                         if (descEl) {
                             desc = (descEl.innerText || '').trim() || (descEl.textContent || '').trim();

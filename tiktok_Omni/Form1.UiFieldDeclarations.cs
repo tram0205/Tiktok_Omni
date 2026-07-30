@@ -10,9 +10,6 @@ namespace tiktok_Omni
         private TextBox txtVoiceIdMaleMature;
         private TextBox txtVoiceIdGirlChild;
         private TextBox txtVoiceIdBoyChild;
-        private TextBox txtTikTokRapidApiKey;
-        private Button btnToggleTikTokRapidApiKey;
-        private Button btnTestTikTokRapidApi;
 
         private Panel pnlReupGridToolbar;
         private Button btnVideoReupOpenOutput;

@@ -24,6 +24,8 @@ namespace tiktok_Omni.Services.Affiliate
             CancellationToken cancellationToken)
         {
             var mode = context?.TikTokSearchMode ?? AffiliateSearchMode.Video;
+            
+            // Truyền thông tin TikTokHuntMethod và Fallback sang HuntTikTokPlatformAsync
             var results = await _hunter.HuntTikTokPlatformAsync(
                 keyword,
                 limit,
@@ -31,7 +33,9 @@ namespace tiktok_Omni.Services.Affiliate
                 cancellationToken,
                 context?.Log,
                 context?.ConfigManager,
-                context?.RunningProfileName).ConfigureAwait(false);
+                context?.RunningProfileName,
+                context?.TikTokHuntMethod,
+                context?.TikTokRapidApiFallbackToBrowser).ConfigureAwait(false);
 
             foreach (var c in results ?? Enumerable.Empty<AffiliateCandidate>())
             {

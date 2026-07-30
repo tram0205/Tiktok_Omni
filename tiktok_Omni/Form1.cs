@@ -120,6 +120,7 @@ namespace tiktok_Omni
         private TextBox txtAiModel;
         private TextBox txtAiApiKey;
         private TextBox txtTwoCaptchaApiKey;
+        private TextBox txtTikTokRapidApiKey;
         private TextBox txtVeoApiKey;
         private TextBox txtTtsApiKey;
         private TextBox txtVeoEndpoint;
@@ -127,10 +128,12 @@ namespace tiktok_Omni
         private TextBox txtYtDlpPath;
         private Button btnToggleAiApiKey;
         private Button btnToggleTwoCaptchaApiKey;
+        private Button btnToggleTikTokRapidApiKey;
         private Button btnToggleVeoApiKey;
         private Button btnToggleTtsApiKey;
         private Button btnTestAi;
         private Button btnTestTwoCaptcha;
+        private Button btnTestTikTokRapidApi;
         private Button btnTestVeo;
         private Button btnTestTts;
         private Button btnBrowseFfmpegPath;
@@ -268,6 +271,8 @@ namespace tiktok_Omni
         private CheckBox chkAffiliateOnlyHighQuality;
         private CheckBox chkAffiliateRankByEngagement;
         private NumericUpDown numAffiliateBufferMultiplier;
+        private ComboBox cbTikTokHuntMethod;
+        private CheckBox chkTikTokApiFallbackBrowser;
         private DataGridView dgvAffiliateResults;
         private BindingList<AffiliateCandidate> _affiliateBindingList;
         private List<AffiliateCandidate> _affiliateAllResults = new List<AffiliateCandidate>();
@@ -327,6 +332,8 @@ namespace tiktok_Omni
             new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         private CancellationTokenSource _affiliateCategorizeCts;
         private readonly VideoReupDraftStore _videoReupDraftStore = new VideoReupDraftStore();
+        private readonly AffiliateDraftStore _affiliateDraftStore = new AffiliateDraftStore();
+        private readonly HuntProductDraftStore _huntProductDraftStore = new HuntProductDraftStore();
         private System.Windows.Forms.Timer _videoReupDraftTimer;
         private bool _videoReupDraftDirty;
         private Dictionary<string, bool> _systemHealth = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
@@ -422,6 +429,8 @@ namespace tiktok_Omni
                 FlushVideoReupDraftToDisk();
                 FlushSlideshowDraftToDisk();
                 FlushShowcaseDraftToDisk();
+                FlushAffiliateDraftToDisk();
+                FlushHuntProductDraftToDisk();
                 FlushAffiliateHuntResultsOnExit();
                 SaveSchedule();
                 PersistWarmupQueueOnAppExit();
@@ -916,7 +925,6 @@ namespace tiktok_Omni
 
             btnHuntAffiliates.Enabled = false;
             btnExportAffiliateCsv.Enabled = false;
-            btnStopHunt.Enabled = true;
             SaveAffiliateHuntResultsToDisk();
             _affiliateBindingList.Clear();
             _affiliateAllResults = new List<AffiliateCandidate>();
@@ -966,7 +974,13 @@ namespace tiktok_Omni
                     BufferMultiplier = numAffiliateBufferMultiplier != null
                         ? (double)numAffiliateBufferMultiplier.Value
                         : huntSettings.AffiliateHuntBufferMultiplier,
-                    StorageRootPath = huntSettings.StorageRootPath ?? string.Empty
+                    StorageRootPath = huntSettings.StorageRootPath ?? string.Empty,
+                    TikTokHuntMethod = cbTikTokHuntMethod != null && cbTikTokHuntMethod.SelectedIndex >= 0
+                        ? (cbTikTokHuntMethod.SelectedIndex == 0 ? TikTokHuntMethods.RapidApi : TikTokHuntMethods.Browser)
+                        : huntSettings.TikTokHuntMethod,
+                    TikTokRapidApiFallbackToBrowser = chkTikTokApiFallbackBrowser != null
+                        ? chkTikTokApiFallbackBrowser.Checked
+                        : huntSettings.TikTokRapidApiFallbackToBrowser
                 };
 
                 var job = new OmniJob
@@ -1438,6 +1452,15 @@ namespace tiktok_Omni
                         col.FillWeight = 12;
                         col.MinimumWidth = 90;
                         col.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
+                        break;
+                    case "OrderNumber":
+                        col.HeaderText = "STT";
+                        col.ToolTipText = "Số thứ tự dòng";
+                        col.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                        col.Visible = true;
+                        col.FillWeight = 4;
+                        col.MinimumWidth = 36;
+                        col.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
                         break;
                 }
             }
@@ -4211,6 +4234,14 @@ namespace tiktok_Omni
             }
 
             SortAffiliateCandidatesByViewsDescending(rows);
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                if (rows[i] != null)
+                {
+                    rows[i].OrderNumber = i + 1;
+                }
+            }
 
             foreach (var item in rows)
             {
@@ -7113,6 +7144,79 @@ namespace tiktok_Omni
             _videoReupDraftDirty = false;
         }
 
+        private void FlushAffiliateDraftToDisk()
+        {
+            if (_affiliateAllResults == null)
+            {
+                return;
+            }
+
+            _affiliateDraftStore.Save(_affiliateAllResults);
+        }
+
+        private void FlushHuntProductDraftToDisk()
+        {
+            if (_huntProductBindingList == null)
+            {
+                return;
+            }
+
+            _huntProductDraftStore.Save(_huntProductBindingList.ToList());
+        }
+
+        private void LoadAffiliateDraftIntoGrid()
+        {
+            if (_affiliateAllResults == null || _affiliateBindingList == null)
+            {
+                return;
+            }
+
+            var rows = _affiliateDraftStore.Load();
+            if (rows.Count == 0)
+            {
+                return;
+            }
+
+            _affiliateAllResults.Clear();
+            _affiliateAllResults.AddRange(rows);
+            RefreshAffiliateGridByQualityFilter();
+            Log($"[Affiliate] Đã khôi phục {rows.Count} dòng kết quả từ draft_affiliate.json.");
+        }
+
+        private void LoadHuntProductDraftIntoGrid()
+        {
+            if (_huntProductBindingList == null)
+            {
+                return;
+            }
+
+            var rows = _huntProductDraftStore.Load();
+            if (rows.Count == 0)
+            {
+                return;
+            }
+
+            _huntProductBindingList.RaiseListChangedEvents = false;
+            try
+            {
+                _huntProductBindingList.Clear();
+                foreach (var row in rows)
+                {
+                    if (row != null)
+                    {
+                        _huntProductBindingList.Add(row);
+                    }
+                }
+            }
+            finally
+            {
+                _huntProductBindingList.RaiseListChangedEvents = true;
+                _huntProductBindingList.ResetBindings();
+            }
+
+            Log($"[Săn SP] Đã khôi phục {rows.Count} dòng sản phẩm từ draft_hunt_product.json.");
+        }
+
         private void LoadVideoReupDraftIntoGrid()
         {
             if (_videoReupBindingList == null)
@@ -7775,6 +7879,8 @@ namespace tiktok_Omni
                 LoadVideoReupDraftIntoGrid();
                 LoadSlideshowDraftIntoBuffer();
                 LoadShowcaseDraftIntoBuffer();
+                LoadAffiliateDraftIntoGrid();
+                LoadHuntProductDraftIntoGrid();
                 LoadSchedule();
                 _jobWorkerService?.RefreshConcurrencyLimit();
             }
@@ -8013,6 +8119,7 @@ namespace tiktok_Omni
                 txtAiModel.Text = settings.AiModel;
                 txtAiApiKey.Text = settings.AiApiKey;
                 txtTwoCaptchaApiKey.Text = settings.TwoCaptchaApiKey;
+                txtTikTokRapidApiKey.Text = settings.TikTokRapidApiKey;
                 txtVeoApiKey.Text = settings.VeoApiKey;
                 txtTtsApiKey.Text = settings.TtsApiKey;
                 txtVeoEndpoint.Text = settings.VeoEndpoint;
@@ -8119,6 +8226,20 @@ namespace tiktok_Omni
                     numAffiliateBufferMultiplier.Value = (decimal)m;
                 }
 
+                if (cbTikTokHuntMethod != null)
+                {
+                    var methodIndex = TikTokHuntMethods.IsRapidApi(settings.TikTokHuntMethod) ? 0 : 1;
+                    if (methodIndex >= 0 && methodIndex < cbTikTokHuntMethod.Items.Count)
+                    {
+                        cbTikTokHuntMethod.SelectedIndex = methodIndex;
+                    }
+                }
+
+                if (chkTikTokApiFallbackBrowser != null)
+                {
+                    chkTikTokApiFallbackBrowser.Checked = settings.TikTokRapidApiFallbackToBrowser;
+                }
+
                 UpdateAffiliateRankControlsEnabledState();
                 if (numMaxConcurrentJobs != null)
                 {
@@ -8178,6 +8299,7 @@ namespace tiktok_Omni
                 settings.AiModel = txtAiModel.Text.Trim();
                 settings.AiApiKey = txtAiApiKey.Text.Trim();
                 settings.TwoCaptchaApiKey = txtTwoCaptchaApiKey.Text.Trim();
+                settings.TikTokRapidApiKey = txtTikTokRapidApiKey.Text.Trim();
                 settings.VeoApiKey = txtVeoApiKey.Text.Trim();
                 settings.TtsApiKey = txtTtsApiKey.Text.Trim();
                 settings.VeoEndpoint = txtVeoEndpoint.Text.Trim();
@@ -8215,6 +8337,33 @@ namespace tiktok_Omni
                 settings.VideoTextSize = numAiTextSize == null ? settings.VideoTextSize : (int)numAiTextSize.Value;
                 settings.VideoMusicVolume = numAiMusicVolume == null ? settings.VideoMusicVolume : (int)numAiMusicVolume.Value;
                 settings.Profiles = BuildProxyProfilesFromGrid();
+
+                if (chkAffiliateRankByEngagement != null)
+                {
+                    settings.AffiliateRankByEngagementEnabled = chkAffiliateRankByEngagement.Checked;
+                }
+
+                if (numAffiliateBufferMultiplier != null)
+                {
+                    settings.AffiliateHuntBufferMultiplier = (double)numAffiliateBufferMultiplier.Value;
+                }
+
+                if (chkAffiliateAutoEnrich != null)
+                {
+                    settings.AffiliateAutoEnrichEnabled = chkAffiliateAutoEnrich.Checked;
+                }
+
+                if (cbTikTokHuntMethod != null && cbTikTokHuntMethod.SelectedIndex >= 0)
+                {
+                    settings.TikTokHuntMethod = cbTikTokHuntMethod.SelectedIndex == 0
+                        ? TikTokHuntMethods.RapidApi
+                        : TikTokHuntMethods.Browser;
+                }
+
+                if (chkTikTokApiFallbackBrowser != null)
+                {
+                    settings.TikTokRapidApiFallbackToBrowser = chkTikTokApiFallbackBrowser.Checked;
+                }
 
                 await _configManager.SaveAsync(settings);
                 RefreshRunningProfileOptions(settings);
@@ -8340,6 +8489,49 @@ namespace tiktok_Omni
             {
                 btnTestTwoCaptcha.Text = prevText;
                 btnTestTwoCaptcha.Enabled = true;
+            }
+        }
+
+        private async void btnTestTikTokRapidApi_Click(object sender, EventArgs e)
+        {
+            btnTestTikTokRapidApi.Enabled = false;
+            var prevText = btnTestTikTokRapidApi.Text;
+            btnTestTikTokRapidApi.Text = "…";
+            try
+            {
+                if (string.IsNullOrWhiteSpace(txtTikTokRapidApiKey.Text))
+                {
+                    NotifySettingsApiTest("TikTok RapidAPI", false, false, "Chưa nhập TikTok RapidAPI Key.");
+                    return;
+                }
+
+                var service = new TikTokRapidApiService();
+                var ok = await service.TestConnectionAsync(txtTikTokRapidApiKey.Text.Trim(), CancellationToken.None)
+                    .ConfigureAwait(true);
+                if (!ok)
+                {
+                    NotifySettingsApiTest(
+                        "TikTok RapidAPI",
+                        false,
+                        true,
+                        "API phản hồi nhưng không trả về video mẫu. Kiểm tra quota hoặc thử lại sau.");
+                    return;
+                }
+
+                NotifySettingsApiTest(
+                    "TikTok RapidAPI (tiktok-api23)",
+                    true,
+                    false,
+                    "Key hoạt động — đã lấy được video mẫu từ RapidAPI.");
+            }
+            catch (Exception ex)
+            {
+                NotifySettingsApiTest("TikTok RapidAPI", false, false, FormatApiTestException(ex));
+            }
+            finally
+            {
+                btnTestTikTokRapidApi.Text = prevText;
+                btnTestTikTokRapidApi.Enabled = true;
             }
         }
 

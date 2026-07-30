@@ -9,7 +9,6 @@ namespace tiktok_Omni.Services
     public sealed class SlideshowDraftDocument
     {
         public List<AiVideoGenInputItem> Products { get; set; } = new List<AiVideoGenInputItem>();
-
         public string SharedScript { get; set; } = string.Empty;
     }
 
@@ -59,6 +58,7 @@ namespace tiktok_Omni.Services
                 .Where(p => p != null)
                 .Select(NormalizeProduct)
                 .ToList();
+            doc.SharedScript = doc.SharedScript ?? string.Empty;
 
             try
             {
@@ -73,6 +73,11 @@ namespace tiktok_Omni.Services
 
         private static AiVideoGenInputItem NormalizeProduct(AiVideoGenInputItem item)
         {
+            if (item == null)
+            {
+                return new AiVideoGenInputItem();
+            }
+
             item.ProfileName = ProfileScopedPaths.ResolveProfileName(item.ProfileName);
             item.SourceKeyword = (item.SourceKeyword ?? string.Empty).Trim();
             item.ProductName = (item.ProductName ?? string.Empty).Trim();
@@ -81,6 +86,7 @@ namespace tiktok_Omni.Services
             item.Hashtags = (item.Hashtags ?? string.Empty).Trim();
             item.Price = (item.Price ?? string.Empty).Trim();
             item.ImageUrl = (item.ImageUrl ?? string.Empty).Trim();
+            item.CustomerReviews = (item.CustomerReviews ?? string.Empty).Trim();
             return item;
         }
     }

@@ -995,6 +995,7 @@ namespace tiktok_Omni
                 _huntProductBindingList.Remove(item);
             }
 
+            FlushHuntProductDraftToDisk();
             Log("Đã xóa " + toRemove.Count + " dòng sản phẩm.");
         }
 

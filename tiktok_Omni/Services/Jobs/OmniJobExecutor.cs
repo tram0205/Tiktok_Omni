@@ -139,7 +139,9 @@ namespace tiktok_Omni.Services.Jobs
                     cancellationToken,
                     ui.Log,
                     _configManager,
-                    profile).ConfigureAwait(false);
+                    profile,
+                    payload.TikTokHuntMethod,
+                    payload.TikTokRapidApiFallbackToBrowser).ConfigureAwait(false);
 
                 var batch = results ?? new List<AffiliateCandidate>();
                 foreach (var c in batch)
@@ -153,6 +155,46 @@ namespace tiktok_Omni.Services.Jobs
                             c.SourceKeyword = kw;
                         }
                     }
+                }
+
+
+                var huntWindow = TimeSpan.FromDays(7);
+                var freshBatch = new List<AffiliateCandidate>();
+                var skipped = 0;
+                foreach (var c in batch)
+                {
+                    if (c == null)
+                    {
+                        continue;
+                    }
+
+                    var url = (c.VideoUrl ?? string.Empty).Trim();
+
+                    // Chỉ lọc trùng lịch sử nếu KHÔNG dùng RapidAPI (vì RapidAPI luôn cần ra đúng số lượng yêu cầu)
+                    var isRapid = string.Equals(payload.TikTokHuntMethod, "RapidApi", StringComparison.OrdinalIgnoreCase);
+                    if (!isRapid && !string.IsNullOrWhiteSpace(url) && _huntHistoryStore.ContainsRecent(url, huntWindow))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    freshBatch.Add(c);
+                    if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        _huntHistoryStore.Record(url, profile, kw);
+                    }
+                }
+
+                if (skipped > 0)
+                {
+                    ui.Log($"[Hunt] Bỏ qua {skipped} URL đã quét trong 7 ngày (hunt_history).");
+                }
+
+                batch = freshBatch;
+                if (batch.Count == 0 && skipped > 0 && (results?.Count ?? 0) > 0)
+                {
+                    batch = results;
+                    ui.Log($"[Hunt] Toàn bộ kết quả mới trùng lịch sử 7 ngày. Tự động hiển thị lại {batch.Count} video đã có trong lịch sử lên lưới để bạn sử dụng.");
                 }
 
                 if (rankTikTokVideo && batch.Count > 0 && _rankAffiliateBatch != null)

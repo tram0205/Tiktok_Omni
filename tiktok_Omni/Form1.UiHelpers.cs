@@ -292,51 +292,5 @@ namespace tiktok_Omni
                 Log($"Hook Clips: không mở được Explorer — {ex.Message}");
             }
         }
-
-        private async void btnTestTikTokRapidApi_Click(object sender, EventArgs e)
-        {
-            if (btnTestTikTokRapidApi != null)
-            {
-                btnTestTikTokRapidApi.Enabled = false;
-            }
-
-            try
-            {
-                var key = txtTikTokRapidApiKey?.Text?.Trim() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    NotifySettingsApiTest("TikTok RapidAPI", false, false, "Chưa nhập TikTok RapidAPI key.");
-                    return;
-                }
-
-                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-                var svc = new TikTokApiService();
-                var results = await svc.SearchVideosAsync(
-                    "tiktok",
-                    1,
-                    key,
-                    settings.TikTokRapidApiHost,
-                    Log,
-                    CancellationToken.None).ConfigureAwait(true);
-
-                NotifySettingsApiTest(
-                    "TikTok RapidAPI",
-                    true,
-                    false,
-                    "Key hoạt động.\r\nHost: " + (settings.TikTokRapidApiHost ?? TikTokApiService.DefaultRapidApiHost) +
-                    "\r\nMẫu: " + (results?.Count ?? 0) + " kết quả.");
-            }
-            catch (Exception ex)
-            {
-                NotifySettingsApiTest("TikTok RapidAPI", false, false, FormatApiTestException(ex));
-            }
-            finally
-            {
-                if (btnTestTikTokRapidApi != null)
-                {
-                    btnTestTikTokRapidApi.Enabled = true;
-                }
-            }
-        }
     }
 }

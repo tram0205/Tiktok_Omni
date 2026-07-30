@@ -449,6 +449,10 @@ namespace tiktok_Omni.Services
             return profile;
         }
 
+        /// <summary>
+        /// Lưu cấu hình ngoài thư mục bin\Debug (tránh mất key khi Rebuild/Clean).
+        /// Tự migrate từ appsettings.json cạnh .exe nếu có.
+        /// </summary>
         private static string GetConfigPath()
         {
             return AppDataPaths.PersistentFile(ConfigFileName);
@@ -738,7 +742,19 @@ namespace tiktok_Omni.Services
                 ? "RapidApi"
                 : "Browser";
 
+            settings.TikTokHuntMethod = NormalizeTikTokHuntMethod(settings.TikTokHuntMethod);
+
             return settings;
+        }
+
+        private static string NormalizeTikTokHuntMethod(string method)
+        {
+            if (TikTokHuntMethods.IsRapidApi(method))
+            {
+                return TikTokHuntMethods.RapidApi;
+            }
+
+            return TikTokHuntMethods.Browser;
         }
 
         private static AutomationProfile ResolveProfile(AppSettings settings, string runningProfileName)
@@ -998,11 +1014,17 @@ namespace tiktok_Omni.Services
         /// <summary>Mã quốc gia cho GET /api/trending/top-products (mặc định VN).</summary>
         public string TikTokRapidApiCountryCode { get; set; } = "VN";
 
-        /// <summary>Browser hoặc RapidApi — chế độ săn video TikTok.</summary>
+        /// <summary>Browser hoặc RapidApi — chế độ săn video TikTok (UI compact).</summary>
         public string AffiliateTikTokVideoHuntMode { get; set; } = "Browser";
 
         /// <summary>Khi RapidAPI lỗi, tự chuyển sang Playwright (nếu tắt thì báo lỗi).</summary>
         public bool AffiliateTikTokApiFallbackBrowser { get; set; } = true;
+
+        /// <summary>Phương thức săn TikTok Video: RapidApi hoặc Browser (UI hunt row).</summary>
+        public string TikTokHuntMethod { get; set; } = TikTokHuntMethods.RapidApi;
+
+        /// <summary>Khi RapidAPI lỗi, tự chuyển sang Playwright/Chrome (UI hunt row).</summary>
+        public bool TikTokRapidApiFallbackToBrowser { get; set; } = true;
 
         public List<AutomationProfile> Profiles { get; set; } = new List<AutomationProfile>();
     }
@@ -1011,6 +1033,15 @@ namespace tiktok_Omni.Services
     public sealed class ProfileComboEntry
     {
         public string Name { get; set; } = string.Empty;
+    }
+
+    public static class TikTokHuntMethods
+    {
+        public const string RapidApi = "RapidApi";
+        public const string Browser = "Browser";
+
+        public static bool IsRapidApi(string method) =>
+            string.Equals(method, RapidApi, StringComparison.OrdinalIgnoreCase);
     }
 
     public class AutomationProfile

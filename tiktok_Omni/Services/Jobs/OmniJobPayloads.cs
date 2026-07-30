@@ -24,6 +24,8 @@ namespace tiktok_Omni.Services.Jobs
         public bool RankByEngagement { get; set; }
         public double BufferMultiplier { get; set; } = 2.5d;
         public string StorageRootPath { get; set; } = string.Empty;
+        public string TikTokHuntMethod { get; set; } = string.Empty;
+        public bool TikTokRapidApiFallbackToBrowser { get; set; } = true;
     }
 
     public sealed class RenderVideoJobPayload

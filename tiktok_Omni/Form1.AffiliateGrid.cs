@@ -281,6 +281,11 @@ namespace tiktok_Omni
             {
                 numAffiliateBufferMultiplier.Enabled = rankOn;
             }
+
+            if (chkTikTokApiFallbackBrowser != null)
+            {
+                chkTikTokApiFallbackBrowser.Enabled = cbTikTokHuntMethod?.SelectedIndex == 0;
+            }
         }
 
         private void ScheduleAffiliateHuntPrefsSave()
@@ -303,17 +308,35 @@ namespace tiktok_Omni
                         settings.AffiliateTikTokVideoHuntMode = ResolveAffiliateTikTokHuntModeFromUi();
                         settings.AffiliateTikTokApiFallbackBrowser = chkAffiliateTikTokApiFallbackBrowser?.Checked ?? true;
 
+                        if (cbTikTokHuntMethod != null && cbTikTokHuntMethod.SelectedIndex >= 0)
+                        {
+                            settings.TikTokHuntMethod = cbTikTokHuntMethod.SelectedIndex == 0
+                                ? TikTokHuntMethods.RapidApi
+                                : TikTokHuntMethods.Browser;
+                        }
+
+                        if (chkTikTokApiFallbackBrowser != null)
+                        {
+                            settings.TikTokRapidApiFallbackToBrowser = chkTikTokApiFallbackBrowser.Checked;
+                        }
+
                         await _configManager.SaveAsync(settings).ConfigureAwait(true);
                     }
                     catch (Exception ex)
                     {
-                        Log("[Affiliate] Không lưu được cài đặt xếp hạng: " + ex.Message);
+                        Log("[Affiliate] Không lưu được cài đặt săn/xếp hạng: " + ex.Message);
                     }
                 };
             }
 
             _affiliateHuntPrefsSaveTimer.Stop();
             _affiliateHuntPrefsSaveTimer.Start();
+        }
+
+        private void cbTikTokHuntMethod_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            UpdateAffiliateRankControlsEnabledState();
+            ScheduleAffiliateHuntPrefsSave();
         }
 
         private void chkAffiliateRankByEngagement_CheckedChanged(object sender, EventArgs e)

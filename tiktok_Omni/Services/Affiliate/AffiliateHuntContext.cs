@@ -9,5 +9,7 @@ namespace tiktok_Omni.Services.Affiliate
         public string RunningProfileName { get; set; }
         public Action<string> Log { get; set; }
         public string YtDlpPath { get; set; }
+        public string TikTokHuntMethod { get; set; } = string.Empty;
+        public bool TikTokRapidApiFallbackToBrowser { get; set; } = true;
     }
 }

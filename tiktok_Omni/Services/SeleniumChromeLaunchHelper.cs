@@ -456,21 +456,39 @@ namespace tiktok_Omni.Services
         {
             PrepareChromeDriverService(service);
 
-            var driver = new ChromeDriver(service, options);
-            var argList = options?.Arguments;
-            var isHeadless = argList != null &&
-                argList.Any(a => a != null && a.StartsWith("--headless", StringComparison.OrdinalIgnoreCase));
-            if (isHeadless)
+            try
             {
-                logAction?.Invoke(
-                    "[SELENIUM] Chrome headless đã khởi động (quét nền — không có cửa sổ hiển thị).");
-            }
-            else
-            {
-                logAction?.Invoke("[SELENIUM] Chrome đã mở thành công.");
-            }
+                var driver = new ChromeDriver(service, options);
+                var argList = options?.Arguments;
+                var isHeadless = argList != null &&
+                    argList.Any(a => a != null && a.StartsWith("--headless", StringComparison.OrdinalIgnoreCase));
+                if (isHeadless)
+                {
+                    logAction?.Invoke(
+                        "[SELENIUM] Chrome headless đã khởi động (quét nền — không có cửa sổ hiển thị).");
+                }
+                else
+                {
+                    logAction?.Invoke("[SELENIUM] Chrome đã mở thành công.");
+                }
 
-            return driver;
+                return driver;
+            }
+            catch (Exception ex)
+            {
+                logAction?.Invoke("[SELENIUM] LỖI KHỞI ĐỘNG TRÌNH DUYỆT CHROME!");
+                logAction?.Invoke("[SELENIUM] Chi tiết lỗi hệ thống: " + ex.Message);
+                logAction?.Invoke("[SELENIUM] ==================================================");
+                logAction?.Invoke("[SELENIUM] HƯỚNG DẪN SỬA LỖI (Dành cho máy mới chuyển dự án):");
+                logAction?.Invoke("[SELENIUM] 1. Mở Google Chrome trên máy của bạn, bấm vào menu 3 chấm -> Trợ giúp (Help) -> Giới thiệu về Google Chrome (About Chrome) để xem phiên bản Chrome hiện tại (ví dụ: 126.0.xxx).");
+                logAction?.Invoke("[SELENIUM] 2. Truy cập trang web: https://googlechromelabs.github.io/chrome-for-testing/");
+                logAction?.Invoke("[SELENIUM] 3. Tải file 'chromedriver-win64.zip' (hoặc win32) khớp với phiên bản Chrome của bạn.");
+                logAction?.Invoke("[SELENIUM] 4. Giải nén và copy file 'chromedriver.exe'.");
+                logAction?.Invoke("[SELENIUM] 5. Dán file 'chromedriver.exe' vào thư mục chạy của ứng dụng (cùng cấp với file tiktok_Omni.exe, thường là thư mục bin\\Debug\\net472\\).");
+                logAction?.Invoke("[SELENIUM] 6. Tắt hoàn toàn các tiến trình Chrome chạy ngầm trong Task Manager (nếu có) rồi chạy lại ứng dụng.");
+                logAction?.Invoke("[SELENIUM] ==================================================");
+                throw;
+            }
         }
     }
 }

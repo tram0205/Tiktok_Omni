@@ -320,6 +320,7 @@ namespace tiktok_Omni
             SortAffiliateCandidatesByViewsDescending(huntBatch);
             MergeAffiliateHuntResultsIntoAll(_affiliateAllResults, huntBatch, keyword);
             SortAffiliateCandidatesByViewsDescending(_affiliateAllResults);
+            FlushAffiliateDraftToDisk();
             RefreshAffiliateGridByQualityFilter();
             _affiliateBindingList?.ResetBindings();
             dgvAffiliateResults?.Invalidate();
