@@ -78,7 +78,8 @@ namespace tiktok_Omni.Services
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(ctaText))
+            if (!string.IsNullOrWhiteSpace(ctaText)
+                && ShowcaseCtaDedupHelper.ShouldAppendCtaToBody(bodyParts, ctaText))
             {
                 bodyParts.Add(ctaText.Trim());
             }
@@ -333,14 +334,10 @@ namespace tiktok_Omni.Services
                         }
                     }
 
-                    if (!string.IsNullOrWhiteSpace(ctaText))
+                    if (!string.IsNullOrWhiteSpace(ctaText)
+                        && ShowcaseCtaDedupHelper.ShouldAppendCtaToBody(bodyParts, ctaText))
                     {
-                        var cta = ctaText.Trim();
-                        var mergedPreview = ShowcaseVoiceoverFitHelper.MergePassage(bodyParts);
-                        if (mergedPreview.IndexOf(cta, StringComparison.OrdinalIgnoreCase) < 0)
-                        {
-                            bodyParts.Add(cta);
-                        }
+                        bodyParts.Add(ctaText.Trim());
                     }
 
                     var bodyMerged = ShowcaseVoiceoverFitHelper.MergePassage(bodyParts);
@@ -810,14 +807,10 @@ namespace tiktok_Omni.Services
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(ctaText))
+            if (!string.IsNullOrWhiteSpace(ctaText)
+                && ShowcaseCtaDedupHelper.ShouldAppendCtaToBody(bodyParts, ctaText))
             {
-                var cta = ctaText.Trim();
-                var mergedPreview = ShowcaseVoiceoverFitHelper.MergePassage(bodyParts);
-                if (mergedPreview.IndexOf(cta, StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    bodyParts.Add(cta);
-                }
+                bodyParts.Add(ctaText.Trim());
             }
 
             return bodyParts;
@@ -911,14 +904,7 @@ namespace tiktok_Omni.Services
 
             if (engine == TtsEngineKind.EdgeTts)
             {
-                switch (kind)
-                {
-                    case ShowcaseNarrationSegmentKind.Hook:
-                    case ShowcaseNarrationSegmentKind.Cta:
-                        return ElevenLabsTtsHelper.ApplyHookDeliveryPauses(line);
-                    default:
-                        return line;
-                }
+                return line;
             }
 
             return line;

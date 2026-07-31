@@ -157,6 +157,22 @@ namespace tiktok_Omni.Services.Showcase
             string zoomStyleId,
             ShowcaseOutputAspectPreset canvas)
         {
+            return BuildVideoFilter(
+                clipDurationSeconds,
+                clipIndex,
+                zoomStyleId,
+                canvas,
+                ShowcaseZoomSpeedCatalog.DefaultId);
+        }
+
+        public static string BuildVideoFilter(
+            double clipDurationSeconds,
+            int clipIndex,
+            string zoomStyleId,
+            ShowcaseOutputAspectPreset canvas,
+            string zoomSpeedId,
+            ShowcaseZoomAspectFitMode aspectFitMode = ShowcaseZoomAspectFitMode.Crop)
+        {
             canvas = canvas ?? ShowcaseOutputAspectPresets.Vertical9x16;
             var w = canvas.Width;
             var h = canvas.Height;
@@ -171,7 +187,7 @@ namespace tiktok_Omni.Services.Showcase
 
             var safeDuration = Math.Max(2.0d, clipDurationSeconds);
             var durationText = safeDuration.ToString("0.00", CultureInfo.InvariantCulture);
-            var delta = 0.14d + ((Math.Max(0, clipIndex) % 3) * 0.04d);
+            var (delta, panTravel) = ShowcaseZoomSpeedCatalog.GetMotionParameters(zoomSpeedId, clipIndex);
             var deltaText = delta.ToString("0.00", CultureInfo.InvariantCulture);
             var progress = $"min(1\\,max(0\\,t/{durationText}))";
 
@@ -181,62 +197,72 @@ namespace tiktok_Omni.Services.Showcase
             string panY;
 
             var deltaPan = (delta * 0.92d).ToString("0.00", CultureInfo.InvariantCulture);
-            const string panTravel = "2.15";
+            var zoomFactor = $"1+{deltaText}*{progress}";
+            var zoomFactorPullOut = $"1+{deltaText}*(1-{progress})";
+            var zoomFactorPan = $"1+{deltaPan}*{progress}";
 
             switch (style)
             {
                 case PullOut:
-                    scaleExpr = $"{wText}*(1+{deltaText}*(1-{progress}))";
-                    scaleExprY = $"{hText}*(1+{deltaText}*(1-{progress}))";
+                    scaleExpr = $"iw*({zoomFactorPullOut})";
+                    scaleExprY = $"ih*({zoomFactorPullOut})";
                     panX = "(in_w-out_w)/2";
                     panY = "(in_h-out_h)/2";
                     break;
                 case PanLeft:
-                    scaleExpr = $"{wText}*(1+{deltaPan}*{progress})";
-                    scaleExprY = $"{hText}*(1+{deltaPan}*{progress})";
+                    scaleExpr = $"iw*({zoomFactorPan})";
+                    scaleExprY = $"ih*({zoomFactorPan})";
                     panX = $"(in_w-out_w)/2 + ((in_w-out_w)/{panTravel})*{progress}";
                     panY = "(in_h-out_h)/2";
                     break;
                 case PanRight:
-                    scaleExpr = $"{wText}*(1+{deltaPan}*{progress})";
-                    scaleExprY = $"{hText}*(1+{deltaPan}*{progress})";
+                    scaleExpr = $"iw*({zoomFactorPan})";
+                    scaleExprY = $"ih*({zoomFactorPan})";
                     panX = $"(in_w-out_w)/2 - ((in_w-out_w)/{panTravel})*{progress}";
                     panY = "(in_h-out_h)/2";
                     break;
                 case PanUp:
-                    scaleExpr = $"{wText}*(1+{deltaPan}*{progress})";
-                    scaleExprY = $"{hText}*(1+{deltaPan}*{progress})";
+                    scaleExpr = $"iw*({zoomFactorPan})";
+                    scaleExprY = $"ih*({zoomFactorPan})";
                     panX = "(in_w-out_w)/2";
                     panY = $"(in_h-out_h)/2 + ((in_h-out_h)/{panTravel})*{progress}";
                     break;
                 case PanDown:
-                    scaleExpr = $"{wText}*(1+{deltaPan}*{progress})";
-                    scaleExprY = $"{hText}*(1+{deltaPan}*{progress})";
+                    scaleExpr = $"iw*({zoomFactorPan})";
+                    scaleExprY = $"ih*({zoomFactorPan})";
                     panX = "(in_w-out_w)/2";
                     panY = $"(in_h-out_h)/2 - ((in_h-out_h)/{panTravel})*{progress}";
                     break;
                 case Drift:
                     scaleExpr = clipIndex % 2 == 0
-                        ? $"{wText}*(1+{deltaText}*{progress})"
-                        : $"{wText}*(1+{deltaText}*(1-{progress}))";
+                        ? $"iw*({zoomFactor})"
+                        : $"iw*({zoomFactorPullOut})";
                     scaleExprY = clipIndex % 2 == 0
-                        ? $"{hText}*(1+{deltaText}*{progress})"
-                        : $"{hText}*(1+{deltaText}*(1-{progress}))";
+                        ? $"ih*({zoomFactor})"
+                        : $"ih*({zoomFactorPullOut})";
                     panX = $"(in_w-out_w)/2 + ((in_w-out_w)/5)*sin(2*PI*t/{durationText})";
                     panY = $"(in_h-out_h)/2 + ((in_h-out_h)/6)*cos(2*PI*t/{durationText})";
                     break;
                 case PushIn:
                 default:
-                    scaleExpr = $"{wText}*(1+{deltaText}*{progress})";
-                    scaleExprY = $"{hText}*(1+{deltaText}*{progress})";
+                    scaleExpr = $"iw*({zoomFactor})";
+                    scaleExprY = $"ih*({zoomFactor})";
                     panX = "(in_w-out_w)/2";
                     panY = "(in_h-out_h)/2";
                     break;
             }
 
+            var kenBurns = $"scale='{scaleExpr}':'{scaleExprY}':eval=frame," +
+                           $"crop={wText}:{hText}:x='{panX}':y='{panY}',setsar=1";
+
+            if (aspectFitMode == ShowcaseZoomAspectFitMode.BlurPad)
+            {
+                return ShowcaseZoomAspectFitHelper.BuildBlurPadCompositePrefix(w, h) + kenBurns;
+            }
+
             return ShowcaseOutputAspectPresets.FormatScaleIncrease(w, h) + "," +
-                   $"scale='{scaleExpr}':'{scaleExprY}':eval=frame," +
-                   $"crop={wText}:{hText}:x='{panX}':y='{panY}',setsar=1";
+                   ShowcaseOutputAspectPresets.FormatScaleCrop(w, h) + ",setsar=1," +
+                   kenBurns;
         }
     }
 }

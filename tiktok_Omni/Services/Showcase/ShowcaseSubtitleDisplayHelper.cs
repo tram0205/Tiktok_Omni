@@ -552,20 +552,16 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             var cta = (ctaText ?? string.Empty).Trim();
-            if (cta.Length > 0)
+            if (cta.Length > 0
+                && ShowcaseCtaDedupHelper.ShouldAppendCtaToBody(segments.Select(s => s.Source), cta))
             {
-                var bodyParts = segments.Select(s => s.Source).ToList();
-                var mergedPreview = ShowcaseVoiceoverFitHelper.MergePassage(bodyParts);
-                if (mergedPreview.IndexOf(cta, StringComparison.OrdinalIgnoreCase) < 0)
+                var ctaDisplay = string.IsNullOrWhiteSpace(plan.Cta) ? cta : plan.Cta.Trim();
+                segments.Add(new BodySegment
                 {
-                    var ctaDisplay = string.IsNullOrWhiteSpace(plan.Cta) ? cta : plan.Cta.Trim();
-                    segments.Add(new BodySegment
-                    {
-                        Source = cta,
-                        Display = ctaDisplay,
-                        Animation = plan?.CtaAnimation ?? string.Empty
-                    });
-                }
+                    Source = cta,
+                    Display = ctaDisplay,
+                    Animation = plan?.CtaAnimation ?? string.Empty
+                });
             }
 
             return segments;

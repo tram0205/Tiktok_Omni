@@ -76,6 +76,39 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>Chờ process thoát; quá <paramref name="timeoutSeconds"/> thì kill và ném <see cref="TimeoutException"/>.</summary>
+        public static async Task WaitUntilExitWithTimeoutAsync(
+            Process process,
+            CancellationToken cancellationToken,
+            int timeoutSeconds,
+            int pollIntervalMs = 100)
+        {
+            if (process == null)
+            {
+                throw new ArgumentNullException(nameof(process));
+            }
+
+            if (timeoutSeconds <= 0)
+            {
+                await WaitUntilExitAsync(process, cancellationToken, pollIntervalMs).ConfigureAwait(false);
+                return;
+            }
+
+            using (var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds)))
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token))
+            {
+                try
+                {
+                    await WaitUntilExitAsync(process, linked.Token, pollIntervalMs).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    TryKillProcess(process);
+                    throw new TimeoutException("Process did not exit within " + timeoutSeconds + " seconds.");
+                }
+            }
+        }
+
         private static void TryKillProcess(Process process)
         {
             try

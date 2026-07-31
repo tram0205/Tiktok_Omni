@@ -255,9 +255,9 @@ namespace tiktok_Omni
                 tblPersonaIds.Controls.Add(bottom, col, 1);
             }
 
-            AddPersonaColumn(0, "Nữ trẻ", txtVoiceIdFemaleYoung, "Nữ trung niên", txtVoiceIdFemaleMature, columnGap);
-            AddPersonaColumn(1, "Nam trẻ", txtVoiceIdMaleYoung, "Nam trung niên", txtVoiceIdMaleMature, columnGap);
-            AddPersonaColumn(2, "Bé gái", txtVoiceIdGirlChild, "Bé trai", txtVoiceIdBoyChild, 0);
+            AddPersonaColumn(0, "Nữ trẻ (MN)", txtVoiceIdFemaleYoung, "Nữ TN (MN)", txtVoiceIdFemaleMature, columnGap);
+            AddPersonaColumn(1, "Nam trẻ (MN)", txtVoiceIdMaleYoung, "Nam TN (MN)", txtVoiceIdMaleMature, columnGap);
+            AddPersonaColumn(2, "Bé gái (MN)", txtVoiceIdGirlChild, "Bé trai (MN)", txtVoiceIdBoyChild, 0);
 
             stack.Controls.Add(tblPersonaIds, 0, 2);
 
@@ -1759,12 +1759,12 @@ namespace tiktok_Omni
                 }
             }
 
-            SetPersonaTip(txtVoiceIdFemaleYoung, "Nữ trẻ");
-            SetPersonaTip(txtVoiceIdFemaleMature, "Nữ trung niên");
-            SetPersonaTip(txtVoiceIdMaleYoung, "Nam trẻ");
-            SetPersonaTip(txtVoiceIdMaleMature, "Nam trung niên");
-            SetPersonaTip(txtVoiceIdGirlChild, "Bé gái");
-            SetPersonaTip(txtVoiceIdBoyChild, "Bé trai");
+            SetPersonaTip(txtVoiceIdFemaleYoung, "Nữ trẻ — miền Nam (ElevenLabs)");
+            SetPersonaTip(txtVoiceIdFemaleMature, "Nữ trung niên — miền Nam");
+            SetPersonaTip(txtVoiceIdMaleYoung, "Nam trẻ — miền Nam");
+            SetPersonaTip(txtVoiceIdMaleMature, "Nam trung niên — miền Nam");
+            SetPersonaTip(txtVoiceIdGirlChild, "Bé gái — miền Nam");
+            SetPersonaTip(txtVoiceIdBoyChild, "Bé trai — miền Nam");
         }
 
     }

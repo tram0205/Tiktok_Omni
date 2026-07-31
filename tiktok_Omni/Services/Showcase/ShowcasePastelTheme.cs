@@ -17,6 +17,8 @@ namespace tiktok_Omni.Services.Showcase
         private static readonly Color JellyPinkBright = Color.FromArgb(212, 88, 132);
         private static readonly Color JellyTeal = Color.FromArgb(42, 142, 162);
         private static readonly Color JellyTealBright = Color.FromArgb(52, 158, 178);
+        private static readonly Color JellyAmber = Color.FromArgb(176, 128, 44);
+        private static readonly Color JellyAmberBright = Color.FromArgb(198, 148, 56);
 
         private static readonly Color ScriptSen = Color.FromArgb(178, 68, 96);
         private static readonly Color ScriptSenCap = Color.FromArgb(196, 82, 108);
@@ -44,6 +46,15 @@ namespace tiktok_Omni.Services.Showcase
         public static readonly Color ThemeFrame = BlendOnShell(JellyTeal, JellyFrameStrength);
         public static readonly Color ThemeCap = BlendOnShell(JellyTealBright, JellyAccentStrength);
         public static readonly Color ThemeListSelection = JellyTealBright;
+
+        // Kiểu video — vàng jelly
+        public static readonly Color FormatHeader = BlendOnShell(JellyAmber, JellyAccentStrength);
+        public static readonly Color FormatFrame = BlendOnShell(JellyAmber, JellyFrameStrength);
+        public static readonly Color FormatCap = BlendOnShell(JellyAmberBright, JellyAccentStrength);
+        public static readonly Color FormatListSelection = JellyAmberBright;
+        public static readonly Color FormatFrameInactive = BlendOnShell(JellyAmber, 0.22f);
+        public static readonly Color FormatTitleInactive = Color.FromArgb(132, 128, 140);
+        public static readonly Color FormatHintInactive = Color.FromArgb(96, 92, 104);
 
         public static readonly Color FieldBg = Color.FromArgb(28, 30, 42);
         public static readonly Color FieldBorder = Color.FromArgb(88, 72, 88);

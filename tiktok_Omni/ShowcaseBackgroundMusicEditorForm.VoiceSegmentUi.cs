@@ -15,6 +15,7 @@ namespace tiktok_Omni
             public TableLayoutPanel Table;
             public ComboBox CbTts;
             public ComboBox CbElevenPersona;
+            public ComboBox CbGender;
             public ComboBox CbLanguage;
             public ComboBox CbTone;
             public ComboBox CbStyle;
@@ -24,6 +25,7 @@ namespace tiktok_Omni
             public TrackBar TrkSimilarity;
             public TrackBar TrkStyle;
             public Label LblElevenPersona;
+            public Label LblGender;
             public Label LblLanguage;
             public Label LblTone;
             public Label LblCustomTone;
@@ -278,7 +280,7 @@ namespace tiktok_Omni
         {
             foreach (var cb in new[]
                      {
-                         seg.CbTts, seg.CbElevenPersona, seg.CbLanguage, seg.CbTone, seg.CbStyle
+                         seg.CbTts, seg.CbElevenPersona, seg.CbGender, seg.CbLanguage, seg.CbTone, seg.CbStyle
                      })
             {
                 if (cb == null)
@@ -343,6 +345,8 @@ namespace tiktok_Omni
             FillSegmentEngineCombo(seg.CbTts);
             seg.CbElevenPersona = CreateVoiceSegmentCombo();
             FillDimensionCombo(seg.CbElevenPersona, ElevenVoicePersonaCatalog.ListOptions());
+            seg.CbGender = CreateVoiceSegmentCombo();
+            FillDimensionCombo(seg.CbGender, ShowcaseVoicePresetDimensions.ListGenderOptions());
             seg.CbLanguage = CreateVoiceSegmentCombo();
             seg.CbTone = CreateVoiceSegmentCombo();
             seg.CbTone.MaxDropDownItems = 12;
@@ -431,6 +435,7 @@ namespace tiktok_Omni
 
             seg.CbTts.SelectedIndexChanged += OnSegChanged;
             seg.CbElevenPersona.SelectedIndexChanged += OnSegChanged;
+            seg.CbGender.SelectedIndexChanged += OnSegChanged;
             seg.CbLanguage.SelectedIndexChanged += OnSegChanged;
             seg.CbTone.SelectedIndexChanged += OnSegChanged;
             seg.CbStyle.SelectedIndexChanged += OnSegChanged;
@@ -466,6 +471,9 @@ namespace tiktok_Omni
             seg.LblElevenPersona = MkLbl("Giọng ElevenLabs");
             tbl.Controls.Add(seg.LblElevenPersona, 0, 1);
             tbl.Controls.Add(seg.CbElevenPersona, 1, 1);
+            seg.LblGender = MkLbl("Giới tính");
+            tbl.Controls.Add(seg.LblGender, 0, 1);
+            tbl.Controls.Add(seg.CbGender, 1, 1);
             seg.LblLanguage = MkLbl("Ngôn ngữ");
             tbl.Controls.Add(seg.LblLanguage, 0, 2);
             tbl.Controls.Add(seg.CbLanguage, 1, 2);
@@ -1084,8 +1092,11 @@ namespace tiktok_Omni
         private ShowcaseVoicePresetDimensions.VoiceDimensionSet SegmentDimensionSet(VoiceSegmentUi seg) =>
             ShowcaseVoicePresetDimensions.BuildFromVoiceUi(
                 DefaultSegmentAgeId,
-                SelectedDimensionId(seg.CbLanguage),
-                seg.IsHook ? ShowcaseVoicePresetDimensions.Tone.Natural : SelectedDimensionId(seg.CbTone));
+                SegmentIsEleven(seg)
+                    ? ShowcaseVoicePresetDimensions.Language.ViSouth
+                    : SelectedDimensionId(seg.CbLanguage),
+                seg.IsHook ? ShowcaseVoicePresetDimensions.Tone.Natural : SelectedDimensionId(seg.CbTone),
+                SegmentIsEdge(seg) ? SelectedDimensionId(seg.CbGender) : null);
 
         private string ResolvePresetIdForSegment(VoiceSegmentUi seg) =>
             ShowcaseVoicePresetDimensions.ResolvePresetId(SegmentDimensionSet(seg));
@@ -1099,8 +1110,7 @@ namespace tiktok_Omni
                 if (SegmentIsEleven(seg))
                 {
                     _video.ShowcaseVoiceAgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(DefaultSegmentAgeId);
-                    _video.ShowcaseVoiceLanguageId =
-                        ShowcaseVoicePresetDimensions.NormalizeLanguageId(SelectedDimensionId(seg.CbLanguage));
+                    _video.ShowcaseVoiceLanguageId = ShowcaseVoicePresetDimensions.Language.ViSouth;
                     _video.ShowcaseHookElevenPersona =
                         ElevenVoicePersonaCatalog.Normalize(SelectedDimensionId(seg.CbElevenPersona));
                 }
@@ -1108,6 +1118,8 @@ namespace tiktok_Omni
                 {
                     var edgeDims = ShowcaseVoicePresetDimensions.GetForPreset(presetId);
                     _video.ShowcaseVoiceAgeId = edgeDims.AgeId;
+                    _video.ShowcaseVoiceGenderId =
+                        ShowcaseVoicePresetDimensions.NormalizeGenderId(SelectedDimensionId(seg.CbGender));
                     _video.ShowcaseVoiceLanguageId = edgeDims.LanguageId;
                 }
 
@@ -1140,8 +1152,7 @@ namespace tiktok_Omni
             if (SegmentIsEleven(seg))
             {
                 _video.ShowcaseBodyVoiceAgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(DefaultSegmentAgeId);
-                _video.ShowcaseBodyVoiceLanguageId =
-                    ShowcaseVoicePresetDimensions.NormalizeLanguageId(SelectedDimensionId(seg.CbLanguage));
+                _video.ShowcaseBodyVoiceLanguageId = ShowcaseVoicePresetDimensions.Language.ViSouth;
                 _video.ShowcaseBodyElevenPersona =
                     ElevenVoicePersonaCatalog.Normalize(SelectedDimensionId(seg.CbElevenPersona));
             }
@@ -1149,6 +1160,8 @@ namespace tiktok_Omni
             {
                 var edgeDims = ShowcaseVoicePresetDimensions.GetForPreset(presetId);
                 _video.ShowcaseBodyVoiceAgeId = edgeDims.AgeId;
+                _video.ShowcaseBodyVoiceGenderId =
+                    ShowcaseVoicePresetDimensions.NormalizeGenderId(SelectedDimensionId(seg.CbGender));
                 _video.ShowcaseBodyVoiceLanguageId = edgeDims.LanguageId;
             }
 
@@ -1201,6 +1214,7 @@ namespace tiktok_Omni
                 ? _video.ShowcaseVoicePresetId
                 : _video.ShowcaseBodyVoicePresetId;
             var langId = seg.IsHook ? _video.ShowcaseVoiceLanguageId : _video.ShowcaseBodyVoiceLanguageId;
+            var genderId = seg.IsHook ? _video.ShowcaseVoiceGenderId : _video.ShowcaseBodyVoiceGenderId;
             var personaId = seg.IsHook ? _video.ShowcaseHookElevenPersona : _video.ShowcaseBodyElevenPersona;
             var toneId = seg.IsHook ? _video.ShowcaseVoiceToneId : _video.ShowcaseBodyVoiceToneId;
             var styleKey = seg.IsHook ? _video.ShowcaseHookStyleKey : _video.ShowcaseBodyStyleKey;
@@ -1216,9 +1230,16 @@ namespace tiktok_Omni
 
             var dims = ShowcaseVoicePresetDimensions.GetForPreset(presetId);
             SelectDimensionCombo(
-                seg.CbLanguage,
-                ShowcaseVoicePresetDimensions.NormalizeLanguageId(
-                    string.IsNullOrWhiteSpace(langId) ? dims.LanguageId : langId));
+                seg.CbGender,
+                ShowcaseVoicePresetDimensions.NormalizeGenderId(
+                    string.IsNullOrWhiteSpace(genderId) ? dims.GenderId : genderId));
+            var resolvedLangId = string.IsNullOrWhiteSpace(langId) ? dims.LanguageId : langId;
+            if (SegmentIsEdge(seg))
+            {
+                SelectDimensionCombo(
+                    seg.CbLanguage,
+                    ShowcaseVoicePresetDimensions.NormalizeLanguageId(resolvedLangId));
+            }
             SelectDimensionCombo(
                 seg.CbTone,
                 seg.IsHook
@@ -1348,7 +1369,8 @@ namespace tiktok_Omni
                     ShowcaseVoicePresetDimensions.BuildFromVoiceUi(
                         DefaultSegmentAgeId,
                         SelectedDimensionId(seg.CbLanguage),
-                        SelectedDimensionId(seg.CbTone)));
+                        SelectedDimensionId(seg.CbTone),
+                        SelectedDimensionId(seg.CbGender)));
                 var styleKey = SelectedSegmentStyleKey(seg);
                 var styleLabel = ShowcaseEdgeProsodyHelper.IsCustomStyle(styleKey)
                     ? "Tùy chỉnh"
@@ -1362,7 +1384,7 @@ namespace tiktok_Omni
 
             var set = ShowcaseVoicePresetDimensions.BuildFromVoiceUi(
                 DefaultSegmentAgeId,
-                SelectedDimensionId(seg.CbLanguage),
+                ShowcaseVoicePresetDimensions.Language.ViSouth,
                 SelectedDimensionId(seg.CbTone));
             var resolved = ShowcaseVoicePresetCatalog.GetById(ShowcaseVoicePresetDimensions.ResolvePresetId(set));
             var personaKey = ElevenVoicePersonaCatalog.Normalize(SelectedDimensionId(seg.CbElevenPersona));

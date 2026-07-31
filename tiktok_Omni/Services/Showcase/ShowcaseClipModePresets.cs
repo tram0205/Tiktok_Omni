@@ -87,7 +87,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 "Veo + Zoom",
 
-                "Flatlay → Veo I2V. On-model → Zoom Ken Burns trong app (không qua Flow).");
+                "Flatlay → xen kẽ Veo và Zoom khi có thể. On-model → Zoom (cấm Veo và Kling).");
 
 
 
@@ -147,7 +147,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 "Gemini gợi ý",
 
-                "Gemini tự chọn clip_tool từng cảnh (veo, zoom hoặc kling) theo ảnh và mạch quảng cáo — linh hoạt nhất.");
+                "Gemini tự chọn clip_tool từng cảnh — ưu tiên xen kẽ motion (veo/kling) với zoom theo loại ảnh.");
 
 
 
@@ -159,7 +159,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 "Kling + Veo + Zoom",
 
-                "Gemini chọn clip_tool từng cảnh trong veo, kling và zoom (Ken Burns) — dùng đủ ba công cụ khi phù hợp ảnh/mạch.");
+                "Gemini chọn clip_tool từng cảnh: flatlay xen kẽ Veo↔Zoom; on-model xen kẽ Kling↔Zoom khi có thể.");
 
 
 
@@ -281,6 +281,22 @@ namespace tiktok_Omni.Services.Showcase
             return string.Equals(mode, GeminiSuggestId, StringComparison.Ordinal)
 
                 || string.Equals(mode, KlingVeoZoomId, StringComparison.Ordinal);
+
+        }
+
+
+
+        /// <summary>Chế độ Gemini chọn clip_tool từng cảnh (có áp quy tắc cấm flatlay≠kling, on_model≠veo).</summary>
+
+        public static bool IsPerSceneToolChoiceMode(string clipModeId)
+
+        {
+
+            var mode = ResolveIdForGemini(clipModeId);
+
+            return string.Equals(mode, DefaultId, StringComparison.Ordinal)
+
+                || IsGeminiSuggestMode(mode);
 
         }
 

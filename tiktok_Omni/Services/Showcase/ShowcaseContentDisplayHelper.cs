@@ -49,10 +49,83 @@ namespace tiktok_Omni.Services.Showcase
             var outputPath = (video?.OutputVideoPath ?? string.Empty).Trim();
             if (!string.IsNullOrWhiteSpace(outputPath))
             {
-                return label + "\r\n" + outputPath + "\r\n\r\nBấm để mở thư mục output.";
+                return label + "\r\n" + outputPath;
             }
 
-            return label + "\r\n\r\nBấm để mở thư mục output (nếu đã có phiên render).";
+            return label;
+        }
+
+        public static string TryResolveFinishedVideoPath(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return string.Empty;
+            }
+
+            var tracked = (video.OutputVideoPath ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(tracked) && File.Exists(tracked))
+            {
+                return tracked;
+            }
+
+            var sessionBase = (video.ShowcaseSessionBaseDir ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(sessionBase))
+            {
+                var ctaTail = Path.Combine(sessionBase, ShowcaseSessionCleanupHelper.FinalVideoFileName);
+                if (File.Exists(ctaTail))
+                {
+                    return ctaTail;
+                }
+
+                var outputDir = ShowcaseNarrationCacheHelper.GetOutputDirectory(sessionBase);
+                if (Directory.Exists(outputDir))
+                {
+                    var newest = Directory.GetFiles(outputDir, "*.mp4")
+                        .Select(path => new FileInfo(path))
+                        .Where(info => info.Exists)
+                        .OrderByDescending(info => info.LastWriteTimeUtc)
+                        .Select(info => info.FullName)
+                        .FirstOrDefault();
+                    if (!string.IsNullOrWhiteSpace(newest))
+                    {
+                        return newest;
+                    }
+                }
+            }
+
+            return tracked;
+        }
+
+        public static string FormatOutputGridLabel(ShowcaseVideoItem video, string resolvedPath = null)
+        {
+            var path = (resolvedPath ?? TryResolveFinishedVideoPath(video) ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                return "▶ " + Path.GetFileName(path);
+            }
+
+            if (!string.IsNullOrEmpty(path))
+            {
+                return Path.GetFileName(path) + " (thiếu file)";
+            }
+
+            return "Chờ render";
+        }
+
+        public static string FormatOutputGridToolTip(ShowcaseVideoItem video, string resolvedPath = null)
+        {
+            var path = (resolvedPath ?? TryResolveFinishedVideoPath(video) ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                return "Bấm để mở video thành phẩm.\r\n" + path;
+            }
+
+            if (!string.IsNullOrEmpty(path))
+            {
+                return "File output đã ghi nhưng không tìm thấy trên đĩa:\r\n" + path;
+            }
+
+            return "Chưa có video thành phẩm — render xong sẽ hiện tại đây.";
         }
 
         public static void RefreshContentLabels(ShowcaseVideoItem video)
@@ -122,9 +195,41 @@ namespace tiktok_Omni.Services.Showcase
                 return string.Empty;
             }
 
-            return "Loại SP: " + ShowcaseProductTypePresets.GetDisplayLabel(video.ShowcaseProductTypePrompt)
-                   + "\r\nChủ đề: " + (video.ShowcaseThemeGridDisplay ?? string.Empty)
+            var typeLabel = TruncateGridToolTipLine(
+                ShowcaseProductTypePresets.GetDisplayLabel(video.ShowcaseProductTypePrompt),
+                80);
+            var themeLabel = video.ShowcaseThemeGridDisplay;
+            if (string.IsNullOrWhiteSpace(themeLabel))
+            {
+                themeLabel = ShowcaseThemePresets.GetDisplayLabel(video.ShowcaseThemePrompt);
+            }
+
+            if (string.IsNullOrWhiteSpace(themeLabel))
+            {
+                themeLabel = ShowcaseThemePresets.Auto.DisplayLabel;
+            }
+
+            themeLabel = TruncateGridToolTipLine(themeLabel, 80);
+
+            return "Loại SP: " + typeLabel
+                   + "\r\nChủ đề: " + themeLabel
                    + "\r\n\r\nBấm ô → chọn «Loại SP» hoặc «Chủ đề».";
+        }
+
+        private static string TruncateGridToolTipLine(string text, int maxChars)
+        {
+            var trimmed = (text ?? string.Empty).Trim().Replace('\r', ' ').Replace('\n', ' ');
+            while (trimmed.Contains("  "))
+            {
+                trimmed = trimmed.Replace("  ", " ");
+            }
+
+            if (trimmed.Length <= maxChars)
+            {
+                return trimmed;
+            }
+
+            return trimmed.Substring(0, maxChars).TrimEnd() + "…";
         }
 
         public static string FormatScriptLabel(ShowcaseVideoItem video)
@@ -135,6 +240,7 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             var scenes = video.Scenes?.Where(s => s != null).ToList() ?? Array.Empty<AiVideoGenInputItem>().ToList();
+            ShowcaseVoiceoverHelper.SyncSilentFlagsFromVoiceover(scenes);
             var voiceCount = ShowcaseVoiceoverHelper.CountVoicedScenes(scenes);
             var silentCount = ShowcaseVoiceoverHelper.CountSilentScenes(scenes);
             var hasHook = !string.IsNullOrWhiteSpace(video.ShowcaseHookText);

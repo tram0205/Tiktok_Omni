@@ -43,6 +43,15 @@ namespace tiktok_Omni.Services.Showcase
                 video.ShowcaseVoiceAgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(video.ShowcaseVoiceAgeId);
             }
 
+            if (string.IsNullOrWhiteSpace(video.ShowcaseVoiceGenderId))
+            {
+                video.ShowcaseVoiceGenderId = ShowcaseVoicePresetDimensions.GetForPreset(video.ShowcaseVoicePresetId).GenderId;
+            }
+            else
+            {
+                video.ShowcaseVoiceGenderId = ShowcaseVoicePresetDimensions.NormalizeGenderId(video.ShowcaseVoiceGenderId);
+            }
+
             if (string.IsNullOrWhiteSpace(video.ShowcaseVoiceLanguageId))
             {
                 video.ShowcaseVoiceLanguageId = ShowcaseVoicePresetDimensions.GetForPreset(video.ShowcaseVoicePresetId).LanguageId;
@@ -75,6 +84,28 @@ namespace tiktok_Omni.Services.Showcase
             ShowcaseEdgeProsodyHelper.EnsureVideoDefaults(video);
             ShowcaseNarrationSpeedHelper.EnsureSegmentSpeedDefaults(video);
             ShowcaseNarrationSpeedHelper.EnsureSegmentSpeedDefaults(video);
+            ApplyElevenSouthernLanguageDefaults(video);
+        }
+
+        /// <summary>ElevenLabs tiếng Việt luôn vi_south — không còn chọn vùng trên UI.</summary>
+        private static void ApplyElevenSouthernLanguageDefaults(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            if (string.Equals(NormalizeEngineStorageId(video.ShowcaseHookTtsEngine), EngineElevenLabs, StringComparison.OrdinalIgnoreCase))
+            {
+                video.ShowcaseVoiceLanguageId = ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(
+                    video.ShowcaseVoiceLanguageId);
+            }
+
+            if (string.Equals(NormalizeEngineStorageId(video.ShowcaseBodyTtsEngine), EngineElevenLabs, StringComparison.OrdinalIgnoreCase))
+            {
+                video.ShowcaseBodyVoiceLanguageId = ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(
+                    video.ShowcaseBodyVoiceLanguageId);
+            }
         }
 
         public static void SyncBodyVoiceFromHookWhenEmpty(ShowcaseVideoItem video)
@@ -92,6 +123,11 @@ namespace tiktok_Omni.Services.Showcase
             if (string.IsNullOrWhiteSpace(video.ShowcaseBodyVoiceAgeId))
             {
                 video.ShowcaseBodyVoiceAgeId = video.ShowcaseVoiceAgeId;
+            }
+
+            if (string.IsNullOrWhiteSpace(video.ShowcaseBodyVoiceGenderId))
+            {
+                video.ShowcaseBodyVoiceGenderId = video.ShowcaseVoiceGenderId;
             }
 
             if (string.IsNullOrWhiteSpace(video.ShowcaseBodyVoiceLanguageId))
@@ -216,12 +252,18 @@ namespace tiktok_Omni.Services.Showcase
             EnsureVideoDefaults(video, settings);
             var dims = ShowcaseVoicePresetDimensions.GetForPreset(video.ShowcaseVoicePresetId);
             dims.AgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(video.ShowcaseVoiceAgeId);
-            dims.LanguageId = ShowcaseVoicePresetDimensions.NormalizeLanguageId(video.ShowcaseVoiceLanguageId);
+            dims.GenderId = ShowcaseVoicePresetDimensions.NormalizeGenderId(video.ShowcaseVoiceGenderId);
+            dims.LanguageId = ParseEngine(video.ShowcaseHookTtsEngine, settings) == TtsEngineKind.ElevenLabs
+                ? ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(video.ShowcaseVoiceLanguageId)
+                : ShowcaseVoicePresetDimensions.NormalizeLanguageId(video.ShowcaseVoiceLanguageId);
             var resolvedPresetId = ShowcaseVoicePresetDimensions.ResolvePresetId(dims);
 
             var bodyDims = ShowcaseVoicePresetDimensions.GetForPreset(video.ShowcaseBodyVoicePresetId);
             bodyDims.AgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(video.ShowcaseBodyVoiceAgeId);
-            bodyDims.LanguageId = ShowcaseVoicePresetDimensions.NormalizeLanguageId(video.ShowcaseBodyVoiceLanguageId);
+            bodyDims.GenderId = ShowcaseVoicePresetDimensions.NormalizeGenderId(video.ShowcaseBodyVoiceGenderId);
+            bodyDims.LanguageId = ParseEngine(video.ShowcaseBodyTtsEngine, settings) == TtsEngineKind.ElevenLabs
+                ? ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(video.ShowcaseBodyVoiceLanguageId)
+                : ShowcaseVoicePresetDimensions.NormalizeLanguageId(video.ShowcaseBodyVoiceLanguageId);
             var resolvedBodyPresetId = ShowcaseVoicePresetDimensions.ResolvePresetId(bodyDims);
 
             return new ShowcaseTtsRenderOptions
@@ -281,14 +323,24 @@ namespace tiktok_Omni.Services.Showcase
                 StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>Ưu tiên persona chọn tay (ElevenVoicePersonaCatalog); rỗng thì fallback logic mood cũ.</summary>
+        /// <summary>Ưu tiên persona + vùng miền; rỗng thì suy từ preset (miền Nam) thay vì Calm/Intense.</summary>
         public static string ResolveElevenLabsVoiceId(ShowcaseTtsRenderOptions segmentTts, AppSettings settings)
         {
             segmentTts = segmentTts ?? new ShowcaseTtsRenderOptions();
-            var personaVoice = ElevenVoicePersonaCatalog.ResolveVoiceId(segmentTts.ElevenPersona, settings);
+            var languageId = ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(segmentTts.VoiceLanguageId);
+            var personaVoice = ElevenVoicePersonaCatalog.ResolveVoiceId(
+                segmentTts.ElevenPersona,
+                settings,
+                languageId);
             if (!string.IsNullOrWhiteSpace(personaVoice))
             {
                 return personaVoice;
+            }
+
+            var inferred = ElevenVoiceRegionHelper.ResolveInferredVoiceId(segmentTts, settings);
+            if (!string.IsNullOrWhiteSpace(inferred))
+            {
+                return inferred;
             }
 
             return ResolveElevenLabsVoiceId(segmentTts.Preset, settings);

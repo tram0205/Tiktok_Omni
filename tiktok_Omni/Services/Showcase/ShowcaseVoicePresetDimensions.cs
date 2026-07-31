@@ -188,14 +188,16 @@ namespace tiktok_Omni.Services.Showcase
             }
         }
 
-        public static VoiceDimensionSet BuildFromVoiceUi(string ageId, string languageId, string toneId)
+        public static VoiceDimensionSet BuildFromVoiceUi(string ageId, string languageId, string toneId, string genderId = null)
         {
             ageId = NormalizeAgeId(ageId);
             languageId = NormalizeLanguageId(languageId);
             toneId = string.IsNullOrWhiteSpace(toneId) ? Tone.Natural : Norm(toneId);
             return new VoiceDimensionSet
             {
-                GenderId = InferGenderIdForPresetResolution(toneId, ageId),
+                GenderId = string.IsNullOrWhiteSpace(genderId)
+                    ? InferGenderIdForPresetResolution(toneId, ageId)
+                    : NormalizeGenderId(genderId),
                 AgeId = ageId,
                 LanguageId = languageId,
                 ToneId = toneId
@@ -212,9 +214,10 @@ namespace tiktok_Omni.Services.Showcase
 
             if (languageId == Language.ViSouth
                 || languageId == Language.ViNorth
-                || languageId == Language.ViCentral)
+                || languageId == Language.ViCentral
+                || languageId == Language.ViGeneral)
             {
-                return Language.ViGeneral;
+                return languageId;
             }
 
             if (LanguageOptions.Any(o => string.Equals(o.Id, languageId, StringComparison.OrdinalIgnoreCase))
@@ -224,6 +227,49 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             return Language.ViGeneral;
+        }
+
+        /// <summary>ElevenLabs — tiếng Việt luôn miền Nam; ngôn ngữ nước ngoài giữ nguyên.</summary>
+        public static string NormalizeElevenLanguageId(string languageId)
+        {
+            languageId = NormalizeLanguageId(languageId);
+            if (string.IsNullOrEmpty(languageId)
+                || languageId.StartsWith("vi_", StringComparison.OrdinalIgnoreCase))
+            {
+                return Language.ViSouth;
+            }
+
+            return languageId;
+        }
+
+        public static bool IsVietnameseLanguage(string languageId)
+        {
+            languageId = NormalizeLanguageId(languageId);
+            return languageId == Language.ViSouth
+                   || languageId == Language.ViNorth
+                   || languageId == Language.ViCentral
+                   || languageId == Language.ViGeneral;
+        }
+
+        /// <summary>Miền Nam hoặc «Tiếng Việt chung» → dùng 6 ô Voice ID miền Nam trong Cài đặt.</summary>
+        public static bool IsSouthernVietnamese(string languageId)
+        {
+            languageId = NormalizeElevenLanguageId(languageId);
+            return string.Equals(languageId, Language.ViSouth, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static IReadOnlyList<VoiceDimensionChoice> ListElevenLanguageOptions()
+        {
+            return new[]
+            {
+                new VoiceDimensionChoice(Language.ViSouth, "Tiếng Việt — miền Nam"),
+                new VoiceDimensionChoice(Language.EnUs, "Tiếng Anh — Mỹ"),
+                new VoiceDimensionChoice(Language.EnGb, "Tiếng Anh — Anh"),
+                new VoiceDimensionChoice(Language.ZhCn, "Tiếng Trung — giản thể"),
+                new VoiceDimensionChoice(Language.JaJp, "Tiếng Nhật"),
+                new VoiceDimensionChoice(Language.KoKr, "Tiếng Hàn"),
+                new VoiceDimensionChoice(Language.ThTh, "Tiếng Thái")
+            };
         }
 
         /// <summary>Edge TTS miễn phí — hiện map neural tiếng Việt (Hoài My / Nam Minh).</summary>

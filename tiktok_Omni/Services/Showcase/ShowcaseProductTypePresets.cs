@@ -25,8 +25,17 @@ namespace tiktok_Omni.Services.Showcase
     /// <summary>Loại sản phẩm/trang phục Showcase — gửi <see cref="ShowcaseProductTypePreset.PromptHint"/> cho Gemini khi sinh kịch bản.</summary>
     public static class ShowcaseProductTypePresets
     {
+        /// <summary>Giá trị lưu trên lưới khi chọn «Tuỳ chỉnh» (tránh trùng «Tự động» — PromptHint rỗng).</summary>
+        public const string CustomPromptSentinel = "__showcase_product_custom__";
+
         public static ShowcaseProductTypePreset Auto { get; } =
             new ShowcaseProductTypePreset("auto", "— Tự động (Gemini) —", string.Empty);
+
+        public static ShowcaseProductTypePreset Custom { get; } =
+            new ShowcaseProductTypePreset(
+                "custom",
+                "Tuỳ chỉnh: người dùng tự nhập",
+                CustomPromptSentinel);
 
         public static IReadOnlyList<ShowcaseProductTypePreset> All { get; } = new[]
         {
@@ -34,7 +43,7 @@ namespace tiktok_Omni.Services.Showcase
             new ShowcaseProductTypePreset(
                 "ao-dai",
                 "Áo dài / truyền thống",
-                "Loại: áo dài / trang phục truyền thống Việt Nam. Voiceover có thể nhấn lụa, thêu, tà áo, xẻ tà, phom eo. Prompt clip (Veo/Kling): CHỈ mô tả chi tiết NHÌN THẤY trong từng ảnh — áo trơn → smooth plain silk, KHÔNG embroidery; có thêu rõ → mới nói embroidery. Veo flatlay: cổ áo, thêu (nếu có), gấp tà. On-model Flow-safe: fabric panels/hem sway, mandarin collar. Kling: chuyển động vừa phải + khớp pose (tay tóc → weight shift; đứng thẳng → one slow step); preserve silhouette + visible fabric details from photo."),
+                "Loại: áo dài / trang phục truyền thống Việt Nam. Voiceover có thể nhấn lụa, thêu, tà áo, xẻ tà, phom eo. Prompt clip (Veo/Kling): CHỈ mô tả chi tiết NHÌN THẤY trong từng ảnh — áo trơn → fabric as shown, KHÔNG embroidery/zipper nếu ảnh không có; có thêu rõ → mới nói embroidery; closure = tie cords/buttons/hooks as shown (KHÔNG đoán zipper). Veo flatlay: giữ mẫu + chuyển động camera hoặc tay nhẹ (no face); bắt buộc câu Garment color, silhouette and visible details stay exactly as shown. On-model Flow-safe: fabric panels/hem sway, mandarin collar. Kling: chuyển động vừa phải + khớp pose; preserve silhouette + visible fabric details from photo."),
             new ShowcaseProductTypePreset(
                 "fashion-top",
                 "Áo / top",
@@ -70,8 +79,47 @@ namespace tiktok_Omni.Services.Showcase
             new ShowcaseProductTypePreset(
                 "general",
                 "Thời trang / chung",
-                "Loại: thời trang/sản phẩm phổ thông. Cân bằng chi tiết chất liệu + phom mặc + giá trị sử dụng. Áp dụng quy tắc flatlay/on-model Flow-safe chuẩn.")
+                "Loại: thời trang/sản phẩm phổ thông. Cân bằng chi tiết chất liệu + phom mặc + giá trị sử dụng. Áp dụng quy tắc flatlay/on-model Flow-safe chuẩn."),
+            Custom
         };
+
+        public static bool IsCustomPreset(ShowcaseProductTypePreset preset) =>
+            preset != null && string.Equals(preset.Id, Custom.Id, StringComparison.Ordinal);
+
+        public static bool IsCustomPrompt(string promptHint) =>
+            string.Equals(Normalize(promptHint), CustomPromptSentinel, StringComparison.Ordinal);
+
+        public static int FindIndexByPromptHint(string promptHint)
+        {
+            var normalized = Normalize(promptHint);
+            if (string.IsNullOrEmpty(normalized))
+            {
+                return 0;
+            }
+
+            if (IsCustomPrompt(normalized))
+            {
+                for (var i = 0; i < All.Count; i++)
+                {
+                    if (IsCustomPreset(All[i]))
+                    {
+                        return i;
+                    }
+                }
+
+                return -1;
+            }
+
+            for (var i = 0; i < All.Count; i++)
+            {
+                if (string.Equals(Normalize(All[i].PromptHint), normalized, StringComparison.Ordinal))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
 
         public static string GetDisplayLabel(string promptHint)
         {
@@ -81,12 +129,25 @@ namespace tiktok_Omni.Services.Showcase
                 return Auto.DisplayLabel;
             }
 
+            if (IsCustomPrompt(normalized))
+            {
+                return Custom.DisplayLabel;
+            }
+
             var preset = All.FirstOrDefault(p =>
                 string.Equals(Normalize(p.PromptHint), normalized, StringComparison.Ordinal));
             return preset?.DisplayLabel ?? promptHint.Trim();
         }
 
-        public static string ResolvePromptForGemini(string promptHint) => Normalize(promptHint);
+        public static string ResolvePromptForGemini(string promptHint)
+        {
+            if (IsCustomPrompt(promptHint))
+            {
+                return string.Empty;
+            }
+
+            return Normalize(promptHint);
+        }
 
         private static string Normalize(string value) => (value ?? string.Empty).Trim();
     }

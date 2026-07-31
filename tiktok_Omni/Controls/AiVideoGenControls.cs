@@ -21,6 +21,7 @@ namespace tiktok_Omni.Controls
         private static readonly Color ShowcaseTintAudio = Color.FromArgb(138, 58, 118);
         private static readonly Color ShowcaseTintGemini = Color.FromArgb(78, 120, 166);
         private static readonly Color ShowcaseTintExcel = Color.FromArgb(52, 158, 178);
+        private static readonly Color ShowcaseTintAutoPost = Color.FromArgb(68, 130, 105);
         private static readonly Color ShowcaseTintRender = Color.FromArgb(50, 110, 68);
         private static readonly Color ShowcaseTintDanger = Color.FromArgb(168, 52, 52);
         private static readonly Color ShowcaseTintStop = Color.FromArgb(192, 48, 48);
@@ -34,6 +35,8 @@ namespace tiktok_Omni.Controls
         private Panel _pnlSlideshowActionBar;
         private Panel _pnlAffiliateDeepHeaderActions;
         private FlowLayoutPanel _flpShowcaseRowManage;
+        private FlowLayoutPanel _flpShowcaseDeleteTrashRight;
+        private Panel _pnlShowcaseRenderRight;
         private FlowLayoutPanel _flpShowcaseWorkflow;
         private Panel _pnlAffiliateDeepExecuteActions;
         private FlowLayoutPanel _flpSharedRenderParams;
@@ -52,8 +55,13 @@ namespace tiktok_Omni.Controls
         private Button _btnDeepGenerateScript;
         private Button _btnRunAffiliateDeepVideo;
         private Button _btnShowcaseOverview;
+        private Button _btnShowcasePushToAutoPost;
         private FlowLayoutPanel _flpShowcaseExecute;
         private Button _btnDeepClearGrid;
+        private Button _btnShowcaseCopyVideoRow;
+        private Button _btnShowcaseMoveVideoRowUp;
+        private Button _btnShowcaseMoveVideoRowDown;
+        private Button _btnShowcaseTrash;
         private Button _btnShowcaseExportExcel;
         private Button _btnShowcaseGenerateZoomClips;
         private Button _btnShowcaseGenerateVoiceover;
@@ -113,6 +121,8 @@ namespace tiktok_Omni.Controls
 
         public Button ShowcaseOverviewButton => _btnShowcaseOverview;
 
+        public Button ShowcasePushToAutoPostButton => _btnShowcasePushToAutoPost;
+
         public Button DeepGenerateScriptButton => _btnDeepGenerateScript;
 
         public Button DeepEditScriptButton => null;
@@ -144,6 +154,12 @@ namespace tiktok_Omni.Controls
                 return;
             }
 
+            if (_btnShowcaseStop.InvokeRequired)
+            {
+                _btnShowcaseStop.BeginInvoke(new Action(() => ApplyShowcaseStopButtonUi(continueMode, enabled)));
+                return;
+            }
+
             _btnShowcaseStop.Text = continueMode ? "Tiếp tục" : "⏹ Dừng lại";
             _btnShowcaseStop.Enabled = enabled;
             if (_btnShowcaseStop is JellyButton jelly)
@@ -156,13 +172,27 @@ namespace tiktok_Omni.Controls
         public void SetShowcaseWorkflowButtonsEnabled(bool enabled)
         {
             SetButtonEnabled(_btnShowcaseAddVideoRow, enabled);
+            SetButtonEnabled(_btnShowcaseCopyVideoRow, enabled);
+            SetButtonEnabled(_btnShowcaseMoveVideoRowUp, enabled);
+            SetButtonEnabled(_btnShowcaseMoveVideoRowDown, enabled);
             SetButtonEnabled(_btnDeepClearGrid, enabled);
+            SetButtonEnabled(_btnShowcaseTrash, enabled);
             SetButtonEnabled(_btnDeepGenerateScript, enabled);
             SetButtonEnabled(_btnShowcaseExportExcel, enabled);
             SetButtonEnabled(_btnShowcaseGenerateZoomClips, enabled);
             SetButtonEnabled(_btnShowcaseGenerateVoiceover, enabled);
             SetButtonEnabled(_btnShowcasePreviewNarration, enabled);
             SetButtonEnabled(_btnShowcaseListenNarration, enabled);
+        }
+
+        public void SetShowcaseTrashButtonCount(int count)
+        {
+            if (_btnShowcaseTrash == null || _btnShowcaseTrash.IsDisposed)
+            {
+                return;
+            }
+
+            _btnShowcaseTrash.Text = count > 0 ? "♻ Thùng rác (" + count + ")" : "♻ Thùng rác";
         }
 
         private static void SetButtonEnabled(Button button, bool enabled)
@@ -398,6 +428,7 @@ namespace tiktok_Omni.Controls
                 BackColor = Color.Transparent,
                 Padding = new Padding(0, 10, 0, 12)
             };
+            _pnlAffiliateDeepExecuteActions.Resize += (_, __) => LayoutShowcaseRenderRow();
 
             _btnShowcaseAddVideoRow = CreateShowcaseSolidRectButton(
                 "btnShowcaseAddVideoRow",
@@ -406,12 +437,36 @@ namespace tiktok_Omni.Controls
                 118);
             _btnShowcaseAddVideoRow.Click += (_, __) => _host?.AddShowcaseVideoRow();
 
+            _btnShowcaseCopyVideoRow = CreateShowcaseSolidRectButton(
+                "btnShowcaseCopyVideoRow",
+                "📋 Copy dòng",
+                ShowcaseTintNeutral,
+                118);
+            _btnShowcaseCopyVideoRow.Click += (_, __) => _host?.CopyShowcaseVideoRow();
+
+            _btnShowcaseMoveVideoRowUp = CreateShowcaseArrowButton(
+                "btnShowcaseMoveVideoRowUp",
+                "↑");
+            _btnShowcaseMoveVideoRowUp.Click += (_, __) => _host?.MoveShowcaseVideoRowUp();
+
+            _btnShowcaseMoveVideoRowDown = CreateShowcaseArrowButton(
+                "btnShowcaseMoveVideoRowDown",
+                "↓");
+            _btnShowcaseMoveVideoRowDown.Click += (_, __) => _host?.MoveShowcaseVideoRowDown();
+
             _btnDeepClearGrid = CreateShowcaseSolidRectButton(
                 "btnDeepClearAiGenGrid",
                 "🗑 Xoá dòng",
                 ShowcaseTintDanger,
                 108);
             _btnDeepClearGrid.Click += (_, __) => _host?.ClearActiveGrid();
+
+            _btnShowcaseTrash = CreateShowcaseSolidRectButton(
+                "btnShowcaseTrash",
+                "♻ Thùng rác",
+                Color.FromArgb(88, 92, 72),
+                118);
+            _btnShowcaseTrash.Click += (_, __) => _host?.OpenShowcaseTrash();
 
             _btnDeepGenerateScript = CreateShowcaseJellyButton("btnDeepGenerateScript", "📝 Tạo kịch bản", ShowcaseTintScript, 148);
             _btnDeepGenerateScript.Click += async (_, __) => await RunHostAsync(_btnDeepGenerateScript, h => h.GenerateShowcaseSceneScriptAsync()).ConfigureAwait(true);
@@ -463,10 +518,7 @@ namespace tiktok_Omni.Controls
                 }
                 finally
                 {
-                    if (_btnShowcaseStop != null && !_btnShowcaseStop.IsDisposed)
-                    {
-                        _btnShowcaseStop.Enabled = true;
-                    }
+                    _host.RefreshShowcaseStopButton();
                 }
             };
 
@@ -475,6 +527,12 @@ namespace tiktok_Omni.Controls
                 "👁 Tổng quan",
                 Color.FromArgb(72, 118, 198),
                 168);
+
+            _btnShowcasePushToAutoPost = CreateShowcaseJellyButton(
+                "btnShowcasePushToAutoPost",
+                "Đẩy sang Đăng tự động",
+                ShowcaseTintAutoPost,
+                196);
 
             _btnRunAffiliateDeepVideo = Form1.CreateAppPrimaryJellyButton(
                 "btnRunAffiliateDeepVideo",
@@ -508,6 +566,26 @@ namespace tiktok_Omni.Controls
                 await _host.PreviewShowcaseOverviewAsync().ConfigureAwait(true);
             };
 
+            _btnShowcasePushToAutoPost.Click += (_, __) =>
+            {
+                if (_host == null)
+                {
+                    return;
+                }
+
+                if (_host.IsShowcaseTabPaused)
+                {
+                    MessageBox.Show(
+                        "Tab Showcase đang dừng — bấm «Tiếp tục» (nút cam) rồi thử lại.",
+                        "Đẩy sang Đăng tự động",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
+                _host.PushShowcaseSelectionToAutoPost();
+            };
+
             _btnRunAffiliateDeepVideo.Click += async (_, __) =>
             {
                 if (_host == null)
@@ -524,6 +602,11 @@ namespace tiktok_Omni.Controls
                 if (_btnShowcaseOverview != null && !_btnShowcaseOverview.IsDisposed)
                 {
                     _btnShowcaseOverview.Enabled = false;
+                }
+
+                if (_btnShowcasePushToAutoPost != null && !_btnShowcasePushToAutoPost.IsDisposed)
+                {
+                    _btnShowcasePushToAutoPost.Enabled = false;
                 }
 
                 try
@@ -546,7 +629,7 @@ namespace tiktok_Omni.Controls
             _showcaseToolTip.SetToolTip(_btnShowcaseExportExcel,
                 "Xuất Excel (sheet «Clip Prompts»: loại ảnh, công cụ, prompt Veo/Kling, zoom gợi ý) — dùng tạo clip bên ngoài app.");
             _showcaseToolTip.SetToolTip(_btnShowcaseGenerateZoomClips,
-                "Tạo clip Ken Burns trong app — thời lượng từng cảnh theo clip_duration_seconds (Gemini) / thoại cảnh, không cố định 6s.");
+                "Tạo clip Ken Burns trong app — thời lượng theo clip_duration_seconds (Gemini); tốc độ/biên độ zoom theo zoom_speed (slow/medium/fast, Gemini gợi ý từng cảnh).");
             _showcaseToolTip.SetToolTip(_btnShowcaseGenerateVoiceover,
                 "Cần ít nhất 1 clip trong veo_clips (không bắt đủ mọi cảnh). Gemini xem clip có sẵn → viết lại Hook/thoại/CTA khớp hình. "
                 + "Bấm lại khi replace clip hoặc bổ sung cảnh thiếu.");
@@ -555,19 +638,39 @@ namespace tiktok_Omni.Controls
                 "Mở file narration.mp3 đã tạo — nghe thử trước khi render (không gọi ElevenLabs lại).");
             _showcaseToolTip.SetToolTip(_btnShowcaseAddVideoRow,
                 "Thêm một dòng video mới trên lưới — thêm ảnh bằng cột «Ảnh» (➕ Thêm ảnh) trên từng dòng.");
+            _showcaseToolTip.SetToolTip(_btnShowcaseCopyVideoRow,
+                "Sao chép dòng đang chọn (kịch bản, cảnh, cài đặt) — bản sao được thêm ở cuối lưới.");
+            _showcaseToolTip.SetToolTip(_btnShowcaseMoveVideoRowUp,
+                "Đưa dòng đang chọn lên một vị trí trên lưới.");
+            _showcaseToolTip.SetToolTip(_btnShowcaseMoveVideoRowDown,
+                "Đưa dòng đang chọn xuống một vị trí trên lưới.");
+            _showcaseToolTip.SetToolTip(_btnDeepClearGrid,
+                "Xóa dòng đang chọn — chuyển vào thùng rác (giữ 24 giờ, có thể khôi phục).");
+            _showcaseToolTip.SetToolTip(_btnShowcaseTrash,
+                "Mở thùng rác — khôi phục hoặc xóa vĩnh viễn dòng đã xóa (tự xóa sau 24 giờ).");
             _showcaseToolTip.SetToolTip(_btnShowcaseOverview,
                 "Bảng trực quan: pipeline, timeline từng cảnh (ảnh + clip + thoại), thoại/phụ đề/nhạc, checklist Render.");
+            _showcaseToolTip.SetToolTip(_btnShowcasePushToAutoPost,
+                "Chọn dòng đã render xong → copy MP4 vào Publishing và thêm lịch TikTok + Facebook + YouTube trên tab Đăng tự động.");
             _showcaseToolTip.SetToolTip(_btnRunAffiliateDeepVideo,
                 "Bấm để render — nếu thiếu điều kiện, app liệt kê cụ thể (clip, thoại, TTS, FFmpeg…).");
             _showcaseToolTip.SetToolTip(_btnShowcaseStop,
                 "Dừng lại mọi thao tác tab (Gemini, Zoom, audio, render). Sau đó bấm «Tiếp tục» (cam) để mở khóa — không tự chạy lại job đã hủy.");
 
-            // Một dòng: thêm/xoá trái; kịch bản → Zoom → lời thoại → audio căn giữa toolbar
+            // Hàng 1: thêm/sao chép/di chuyển trái; workflow căn giữa
             _flpShowcaseRowManage = CreateActionFlowPanel();
             _flpShowcaseRowManage.Dock = DockStyle.None;
             _flpShowcaseRowManage.WrapContents = false;
             _flpShowcaseRowManage.Controls.Add(_btnShowcaseAddVideoRow);
-            _flpShowcaseRowManage.Controls.Add(_btnDeepClearGrid);
+            _flpShowcaseRowManage.Controls.Add(_btnShowcaseCopyVideoRow);
+            _flpShowcaseRowManage.Controls.Add(_btnShowcaseMoveVideoRowUp);
+            _flpShowcaseRowManage.Controls.Add(_btnShowcaseMoveVideoRowDown);
+
+            _flpShowcaseDeleteTrashRight = CreateActionFlowPanel();
+            _flpShowcaseDeleteTrashRight.Dock = DockStyle.None;
+            _flpShowcaseDeleteTrashRight.WrapContents = false;
+            _flpShowcaseDeleteTrashRight.Controls.Add(_btnDeepClearGrid);
+            _flpShowcaseDeleteTrashRight.Controls.Add(_btnShowcaseTrash);
 
             _flpShowcaseWorkflow = CreateActionFlowPanel();
             _flpShowcaseWorkflow.Dock = DockStyle.None;
@@ -575,13 +678,14 @@ namespace tiktok_Omni.Controls
             _flpShowcaseWorkflow.Controls.Add(_btnDeepGenerateScript);
             _flpShowcaseWorkflow.Controls.Add(_btnShowcaseGenerateZoomClips);
             _flpShowcaseWorkflow.Controls.Add(_btnShowcaseGenerateVoiceover);
+            _flpShowcaseWorkflow.Controls.Add(_btnShowcaseStop);
             _btnShowcasePreviewNarration.Visible = false;
 
             _pnlAffiliateDeepHeaderActions.Controls.Add(_flpShowcaseRowManage);
             _pnlAffiliateDeepHeaderActions.Controls.Add(_flpShowcaseWorkflow);
             LayoutShowcaseHeaderToolbar();
 
-            // Hàng 2 — render (nút primary căn giữa)
+            // Hàng 2 — render căn giữa; xoá dòng + thùng rác căn phải
             var tblRenderCenter = new TableLayoutPanel
             {
                 Name = "tblShowcaseRenderCenter",
@@ -601,10 +705,20 @@ namespace tiktok_Omni.Controls
             _flpShowcaseExecute.WrapContents = false;
             _flpShowcaseExecute.Controls.Add(_btnShowcaseOverview);
             _flpShowcaseExecute.Controls.Add(_btnRunAffiliateDeepVideo);
-            _flpShowcaseExecute.Controls.Add(_btnShowcaseStop);
+            _flpShowcaseExecute.Controls.Add(_btnShowcasePushToAutoPost);
+
+            _pnlShowcaseRenderRight = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent,
+                Margin = new Padding(0)
+            };
+            _pnlShowcaseRenderRight.Controls.Add(_flpShowcaseDeleteTrashRight);
 
             tblRenderCenter.Controls.Add(_flpShowcaseExecute, 1, 0);
+            tblRenderCenter.Controls.Add(_pnlShowcaseRenderRight, 2, 0);
             _pnlAffiliateDeepExecuteActions.Controls.Add(tblRenderCenter);
+            LayoutShowcaseRenderRow();
         }
 
         private async Task RunHostAsync(Button button, Func<IAiVideoGenControlsHost, Task> action)
@@ -666,6 +780,25 @@ namespace tiktok_Omni.Controls
             _flpShowcaseWorkflow.BringToFront();
         }
 
+        private void LayoutShowcaseRenderRow()
+        {
+            if (_pnlShowcaseRenderRight == null || _flpShowcaseDeleteTrashRight == null)
+            {
+                return;
+            }
+
+            if (_pnlShowcaseRenderRight.Width <= 0 || _pnlShowcaseRenderRight.Height <= 0)
+            {
+                return;
+            }
+
+            _flpShowcaseDeleteTrashRight.PerformLayout();
+            var x = Math.Max(0, _pnlShowcaseRenderRight.ClientSize.Width - _flpShowcaseDeleteTrashRight.Width);
+            var y = Math.Max(0, (_pnlShowcaseRenderRight.ClientSize.Height - _flpShowcaseDeleteTrashRight.Height) / 2);
+            _flpShowcaseDeleteTrashRight.Location = new Point(x, y);
+            _flpShowcaseDeleteTrashRight.BringToFront();
+        }
+
         private static FlowLayoutPanel CreateActionFlowPanel()
         {
             return new FlowLayoutPanel
@@ -717,6 +850,38 @@ namespace tiktok_Omni.Controls
                 tint,
                 minWidth: minWidth,
                 margin: ShowcaseJellyMargin);
+        }
+
+        /// <summary>Nút mũi tên gọn (không nền hộp) — lên/xuống dòng lưới.</summary>
+        private static Button CreateShowcaseArrowButton(string name, string arrow)
+        {
+            var height = Form1.AppJellyButtonHeight;
+            const int width = 30;
+            var font = new Font("Segoe UI", 14F, FontStyle.Regular);
+
+            var btn = new Button
+            {
+                Name = name,
+                Text = arrow,
+                Font = font,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(31, 34, 42),
+                ForeColor = Color.FromArgb(210, 214, 222),
+                AutoSize = false,
+                Height = height,
+                Width = width,
+                MinimumSize = new Size(width, height),
+                MaximumSize = new Size(width, height),
+                Margin = new Padding(1, 2, 1, 2),
+                Cursor = Cursors.Hand,
+                TextAlign = ContentAlignment.MiddleCenter,
+                UseVisualStyleBackColor = false
+            };
+
+            btn.FlatAppearance.BorderSize = 0;
+            btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(52, 56, 68);
+            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(68, 72, 86);
+            return btn;
         }
 
         /// <summary>Nút chữ nhật đặc (không jelly trong suốt) — dùng cho Thêm/Xoá dòng.</summary>

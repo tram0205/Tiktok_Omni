@@ -28,6 +28,9 @@ namespace tiktok_Omni
         private const string ColVoice = "colHubVoice";
         private const string ColTool = "colHubTool";
         private const string ColPrompt = "colHubPrompt";
+        private const string ColCopyPrompt = "colHubCopyPrompt";
+
+        private const int HubGridCopyColWidth = 36;
 
         private const float HubGridPctScene = 0.14f;
         private const float HubGridPctImage = 0.12f;
@@ -253,12 +256,37 @@ namespace tiktok_Omni
                 }
             });
 
+            grid.Columns.Add(new DataGridViewButtonColumn
+            {
+                Name = ColCopyPrompt,
+                HeaderText = string.Empty,
+                Text = "📋",
+                UseColumnTextForButtonValue = true,
+                FlatStyle = FlatStyle.Flat,
+                SortMode = DataGridViewColumnSortMode.NotSortable,
+                Width = HubGridCopyColWidth,
+                MinimumWidth = HubGridCopyColWidth,
+                DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.TopCenter,
+                    BackColor = Color.FromArgb(45, 49, 60),
+                    ForeColor = Color.FromArgb(188, 196, 210),
+                    Font = new Font("Segoe UI", 9.5F),
+                    Padding = new Padding(0, 6, 0, 0),
+                    SelectionBackColor = Color.FromArgb(68, 118, 168),
+                    SelectionForeColor = Color.White
+                }
+            });
+
             Form1.ApplyAppGridHeaderChrome(grid);
             AppGridSttColumn.EnsureFirstColumn(grid);
 
             PopulateHubGridRows(grid, scenes);
 
             grid.CellFormatting += HubGrid_CellFormatting;
+
+            grid.CellContentClick += HubGrid_CopyPromptClick;
+            grid.CellToolTipTextNeeded += HubGrid_CellToolTipTextNeeded;
 
             grid.CellBeginEdit += HubGrid_CellBeginEdit;
             grid.CellEndEdit += HubGrid_CellEndEdit;
@@ -293,6 +321,7 @@ namespace tiktok_Omni
                 placeholder.Cells[ColVoice].Value = string.Empty;
                 placeholder.Cells[ColTool].Value = string.Empty;
                 placeholder.Cells[ColPrompt].Value = string.Empty;
+                placeholder.Cells[ColCopyPrompt].Value = string.Empty;
                 placeholder.ReadOnly = true;
                 placeholder.DefaultCellStyle.ForeColor = Color.FromArgb(140, 148, 162);
                 return;
@@ -630,6 +659,7 @@ namespace tiktok_Omni
             row.Cells[ColVoice].Value = voice ?? string.Empty;
             row.Cells[ColTool].Value = toolLabel ?? string.Empty;
             row.Cells[ColPrompt].Value = prompt ?? string.Empty;
+            row.Cells[ColCopyPrompt].Value = tag?.Scene != null ? "📋" : string.Empty;
             row.Tag = tag;
 
             if (tag?.Scene == null)
@@ -638,8 +668,64 @@ namespace tiktok_Omni
                 row.Cells[ColImage].Style.BackColor = Color.FromArgb(52, 56, 68);
                 row.Cells[ColTool].ReadOnly = true;
                 row.Cells[ColPrompt].ReadOnly = true;
+                row.Cells[ColCopyPrompt].ReadOnly = true;
                 row.Cells[ColTool].Style.BackColor = Color.FromArgb(52, 56, 68);
                 row.Cells[ColPrompt].Style.BackColor = Color.FromArgb(52, 56, 68);
+                row.Cells[ColCopyPrompt].Style.BackColor = Color.FromArgb(52, 56, 68);
+            }
+        }
+
+        private void HubGrid_CopyPromptClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (_dgvHub == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (_dgvHub.Columns[e.ColumnIndex].Name != ColCopyPrompt)
+            {
+                return;
+            }
+
+            var row = _dgvHub.Rows[e.RowIndex];
+            if (!(row.Tag is HubGridRowTag tag) || tag.Scene == null)
+            {
+                return;
+            }
+
+            var prompt = (row.Cells[ColPrompt].Value?.ToString() ?? string.Empty).Trim();
+            if (prompt.Length == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                Clipboard.SetText(prompt);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    "Không copy được prompt: " + ex.Message,
+                    "Copy prompt",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
+        private void HubGrid_CellToolTipTextNeeded(object sender, DataGridViewCellToolTipTextNeededEventArgs e)
+        {
+            if (_dgvHub == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (_dgvHub.Columns[e.ColumnIndex].Name == ColCopyPrompt
+                && _dgvHub.Rows[e.RowIndex].Tag is HubGridRowTag tag
+                && tag.Scene != null)
+            {
+                e.ToolTipText = "Copy prompt vào clipboard";
             }
         }
 
@@ -766,7 +852,7 @@ namespace tiktok_Omni
             var wImage = Pct(96, HubGridPctImage, 280);
             var wVoice = Pct(152, HubGridPctVoice, 640);
             var wTool = Pct(100, HubGridPctTool, 200);
-            var wPrompt = Math.Max(160, remain - wScene - wImage - wVoice - wTool);
+            var wPrompt = Math.Max(160, remain - wScene - wImage - wVoice - wTool - HubGridCopyColWidth);
 
             var prevTag = _dgvHub.Tag;
             _dgvHub.Tag = HubGridLayoutLock;
@@ -777,6 +863,7 @@ namespace tiktok_Omni
                 SetHubColWidth(ColVoice, wVoice);
                 SetHubColWidth(ColTool, wTool);
                 SetHubColWidth(ColPrompt, wPrompt);
+                SetHubColWidth(ColCopyPrompt, HubGridCopyColWidth);
             }
             finally
             {
@@ -871,6 +958,10 @@ namespace tiktok_Omni
 
                     tag.Scene.SceneVoiceover = voice;
                     tag.Scene.ShowcaseTheme = _video.ShowcaseTheme;
+                    if (voice.Length > 0)
+                    {
+                        tag.Scene.ShowcaseSceneSilent = false;
+                    }
                     if (tag.IsOpeningHookScene)
                     {
                         _video.ShowcaseHookText = voice;
@@ -902,6 +993,7 @@ namespace tiktok_Omni
             }
 
             _video.ApplySettingsToScenes();
+            ShowcaseVoiceoverHelper.SyncSilentFlagsFromVoiceover(_video.Scenes);
             ShowcaseSubtitleDisplayHelper.SyncDisplayTextFromSpeechEdits(_video, _speechBeforeEdit);
             ShowcaseContentDisplayHelper.RefreshContentLabels(_video);
             return true;

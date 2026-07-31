@@ -11,7 +11,8 @@ Sfx\    — hiệu ứng ngắn (.mp3, .wav, …)
   sfx_ding_bright.mp3
   scene_* / hook_* (tùy chọn — phân biệt cảnh vs hook Reup)
 
-Showcase «Tạo kịch bản»: Gemini gợi ý background_music_id (1 track/video), sfx_id/cảnh, cta_sfx_id.
+Showcase «Tạo kịch bản»: Gemini gợi ý background_music_id, sfx_id/cảnh, cta_sfx_id, hook_sfx_id;
+  transition_seconds, phụ đề (look/animation/vị trí), hook_style_key, voice_preset_id, tts_engine, tốc độ thoại, music_volume_percent.
 Video Reup / Mascot / Philosophy / Showcase: chỉ dùng hai thư mục trên (không quét Music, HookSfx, Showcase\Sfx cũ).
 
 Nếu còn file ở thư mục cũ, copy sang Music\ hoặc Sfx\ tương ứng.

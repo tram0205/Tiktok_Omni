@@ -40,7 +40,9 @@ namespace tiktok_Omni.Services.Showcase
 
             Action<string> logAction,
 
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+
+            string userVideoFormatId = null)
 
         {
 
@@ -146,7 +148,9 @@ namespace tiktok_Omni.Services.Showcase
 
                 clipSceneIndexes.Count,
 
-                sceneDurations);
+                sceneDurations,
+
+                userVideoFormatId);
 
 
 
@@ -312,6 +316,10 @@ namespace tiktok_Omni.Services.Showcase
 
 
 
+            var ctaText = ShowcaseCtaDedupHelper.NormalizeScriptCta(
+                allScenes,
+                (dto.cta_text ?? string.Empty).Trim());
+
             return new ShowcaseVoiceoverResult
 
             {
@@ -320,7 +328,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 HookText = (dto.hook_text ?? string.Empty).Trim(),
 
-                CtaText = (dto.cta_text ?? string.Empty).Trim(),
+                CtaText = ctaText,
 
                 Scenes = allScenes.ToList()
 

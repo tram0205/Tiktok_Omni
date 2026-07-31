@@ -45,6 +45,8 @@ namespace tiktok_Omni
 
         private Button btnShowcaseOverview => _aiVideoGenControls?.ShowcaseOverviewButton;
 
+        private Button btnShowcasePushToAutoPost => _aiVideoGenControls?.ShowcasePushToAutoPostButton;
+
         private Button btnDeepGenerateScript => _aiVideoGenControls?.DeepGenerateScriptButton;
 
         private Button btnDeepEditScript => _aiVideoGenControls?.DeepEditScriptButton;

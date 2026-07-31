@@ -174,7 +174,7 @@ namespace tiktok_Omni.Services.Showcase
             return false;
         }
 
-        /// <summary>Đường dẫn ảnh gốc storyboard — <c>photo_XX</c> (clip video dùng <c>scene_XX.mp4</c> trong veo_clips).</summary>
+        /// <summary>Đường dẫn đích trong source_images — giữ tên file gốc (clip video vẫn dùng scene_XX.mp4 trong veo_clips).</summary>
         public static string GetSourceImageDestPath(ShowcaseSessionState session, int sceneIndexOneBased, string sourceFilePath)
         {
             if (session == null)
@@ -187,8 +187,74 @@ namespace tiktok_Omni.Services.Showcase
                 sceneIndexOneBased = 1;
             }
 
+            var preserved = BuildSourceImageDestPathPreservingFileName(session, sourceFilePath);
+            if (!string.IsNullOrWhiteSpace(preserved))
+            {
+                return preserved;
+            }
+
             var ext = GuessImageExtension(sourceFilePath);
             return Path.Combine(session.SourceImagesDir, $"photo_{sceneIndexOneBased:D2}{ext}");
+        }
+
+        private static string BuildSourceImageDestPathPreservingFileName(ShowcaseSessionState session, string sourceFilePath)
+        {
+            if (session == null || string.IsNullOrWhiteSpace(sourceFilePath))
+            {
+                return null;
+            }
+
+            var fileName = SanitizeSourceImageFileName(Path.GetFileName(sourceFilePath));
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return null;
+            }
+
+            return Path.Combine(session.SourceImagesDir, fileName);
+        }
+
+        private static string ResolveUniqueSourceImageDestPath(ShowcaseSessionState session, string sourceFilePath)
+        {
+            var dest = BuildSourceImageDestPathPreservingFileName(session, sourceFilePath);
+            if (string.IsNullOrWhiteSpace(dest))
+            {
+                return GetSourceImageDestPath(session, 1, sourceFilePath);
+            }
+
+            if (PathsEqual(sourceFilePath, dest) || !File.Exists(dest))
+            {
+                return dest;
+            }
+
+            var dir = session.SourceImagesDir;
+            var stem = Path.GetFileNameWithoutExtension(dest);
+            var ext = Path.GetExtension(dest);
+            for (var n = 2; n < 1000; n++)
+            {
+                var candidate = Path.Combine(dir, stem + " (" + n + ")" + ext);
+                if (!File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return Path.Combine(dir, stem + "_" + Guid.NewGuid().ToString("N").Substring(0, 6) + ext);
+        }
+
+        private static string SanitizeSourceImageFileName(string fileName)
+        {
+            var name = (fileName ?? string.Empty).Trim();
+            if (name.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            foreach (var c in Path.GetInvalidFileNameChars())
+            {
+                name = name.Replace(c, '_');
+            }
+
+            return name.Trim();
         }
 
         /// <summary>Đã có file ảnh gốc ở vị trí thứ tự này (photo_XX hoặc scene_XX cũ).</summary>
@@ -218,7 +284,7 @@ namespace tiktok_Omni.Services.Showcase
             return false;
         }
 
-        /// <summary>Copy ảnh chọn từ máy vào <c>source_images/photo_XX.*</c> — null nếu bỏ qua vì trùng và không ghi đè.</summary>
+        /// <summary>Copy ảnh chọn từ máy vào source_images (giữ tên gốc) — null nếu bỏ qua vì trùng và không ghi đè.</summary>
         public static string CopyLocalSceneImage(
             ShowcaseSessionState session,
             int sceneIndexOneBased,
@@ -236,7 +302,7 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             Directory.CreateDirectory(session.SourceImagesDir);
-            var dest = GetSourceImageDestPath(session, sceneIndexOneBased, sourceFilePath);
+            var dest = ResolveUniqueSourceImageDestPath(session, sourceFilePath);
             if (PathsEqual(sourceFilePath, dest))
             {
                 return dest;
@@ -251,7 +317,6 @@ namespace tiktok_Omni.Services.Showcase
                     return null;
                 }
 
-                dest = GetSourceImageDestPath(session, sceneIndexOneBased, sourceFilePath);
                 if (!PathsEqual(existingAtSlot, dest) && File.Exists(existingAtSlot))
                 {
                     try
@@ -260,11 +325,11 @@ namespace tiktok_Omni.Services.Showcase
                     }
                     catch
                     {
-                        // vẫn thử ghi photo_XX
+                        // vẫn thử ghi file mới
                     }
                 }
             }
-            else if (File.Exists(dest) && !overwriteExisting)
+            else if (File.Exists(dest) && !overwriteExisting && !PathsEqual(sourceFilePath, dest))
             {
                 return null;
             }
@@ -481,7 +546,7 @@ namespace tiktok_Omni.Services.Showcase
             return counts.OrderByDescending(kv => kv.Value).First().Key;
         }
 
-        /// <summary>Đưa mọi ảnh cảnh vào <c>session.SourceImagesDir</c> (photo_01, …) và cập nhật đường dẫn trên item.</summary>
+        /// <summary>Đưa mọi ảnh cảnh vào session.SourceImagesDir (giữ tên gốc) và cập nhật đường dẫn trên item.</summary>
         public static void ImportScenesIntoSessionSourceImages(ShowcaseSessionState session, IList<AiVideoGenInputItem> scenes)
         {
             if (session == null || scenes == null || scenes.Count == 0)
@@ -705,6 +770,27 @@ namespace tiktok_Omni.Services.Showcase
                 return false;
             }
 
+            var stored = (scene?.ThumbnailPath ?? scene?.ImageUrl ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(stored) && File.Exists(stored))
+            {
+                resolvedPath = stored;
+                return true;
+            }
+
+            var byName = TryFindSourceImageByKnownFileName(sourceImagesDir, scene);
+            if (!string.IsNullOrWhiteSpace(byName))
+            {
+                resolvedPath = byName;
+                return true;
+            }
+
+            var pick = (scene?.ShowcaseLocalPickPath ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(pick) && File.Exists(pick))
+            {
+                resolvedPath = pick;
+                return true;
+            }
+
             if (!string.IsNullOrWhiteSpace(sourceImagesDir))
             {
                 resolvedPath = DetectSourceImageForOrder(sourceImagesDir, orderOneBased);
@@ -714,14 +800,38 @@ namespace tiktok_Omni.Services.Showcase
                 }
             }
 
-            var stored = (scene?.ThumbnailPath ?? scene?.ImageUrl ?? string.Empty).Trim();
-            if (!string.IsNullOrWhiteSpace(stored) && File.Exists(stored))
+            return false;
+        }
+
+        private static string TryFindSourceImageByKnownFileName(string sourceImagesDir, AiVideoGenInputItem scene)
+        {
+            if (scene == null || string.IsNullOrWhiteSpace(sourceImagesDir) || !Directory.Exists(sourceImagesDir))
             {
-                resolvedPath = stored;
-                return true;
+                return null;
             }
 
-            return false;
+            var names = new[]
+            {
+                Path.GetFileName((scene.ThumbnailPath ?? string.Empty).Trim()),
+                Path.GetFileName((scene.ImageUrl ?? string.Empty).Trim()),
+                Path.GetFileName((scene.ShowcaseLocalPickPath ?? string.Empty).Trim())
+            };
+
+            foreach (var name in names)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                var candidate = Path.Combine(sourceImagesDir, name);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
         }
 
         private static void ApplyResolvedSourceImagePath(AiVideoGenInputItem scene, string path)

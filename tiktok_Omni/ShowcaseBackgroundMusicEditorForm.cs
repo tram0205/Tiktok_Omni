@@ -50,6 +50,7 @@ namespace tiktok_Omni
         private FlowLayoutPanel _voiceTabRoot;
         private Panel _voiceReviewScriptRow;
         private Panel _footerBarPanel;
+        private TableLayoutPanel _footerStack;
         private Label _lblOperationStatus;
 
         private const int DialogClientWidth = 2376;
@@ -63,7 +64,7 @@ namespace tiktok_Omni
         private const int VoiceTabPaddingBottom = 12;
         private const int MinTabContentHeight = 480;
         private const int VoiceTabHeightFitBuffer = 56;
-        private const int FooterBarHeight = 248;
+        private const int FooterBarMinHeight = 248;
         private const int TabFooterSpacerHeight = 14;
         private const float MusicComboWidthScale = 0.64f;
         private const float MusicVolumeSliderWidthScale = 0.5f;
@@ -170,6 +171,8 @@ namespace tiktok_Omni
             {
                 _btnListenFullMixedAudio.Enabled = _canListenFullMixedAudio?.Invoke() ?? false;
             }
+
+            SyncFooterBarHeight();
         }
 
         /// <summary>Lưu nhạc + giọng từ dialog xuống <see cref="ShowcaseVideoItem"/>.</summary>
@@ -240,9 +243,9 @@ namespace tiktok_Omni
             var btnBar = new Panel
             {
                 Dock = DockStyle.Bottom,
-                Height = FooterBarHeight,
+                Height = FooterBarMinHeight,
                 BackColor = BackColor,
-                Padding = new Padding(0, 14, 0, 14)
+                Padding = new Padding(0, 14, 0, 18)
             };
             _footerBarPanel = btnBar;
 
@@ -312,15 +315,16 @@ namespace tiktok_Omni
             flpButtons.Controls.Add(btnCancel);
             flpButtons.Controls.Add(btnOk);
 
-            var footerStack = new TableLayoutPanel
+            _footerStack = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 4,
                 BackColor = BackColor,
                 Margin = Padding.Empty,
-                Padding = new Padding(0, 8, 2, 14)
+                Padding = new Padding(0, 8, 2, 16)
             };
+            var footerStack = _footerStack;
             footerStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             footerStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             footerStack.RowStyles.Add(new RowStyle(SizeType.Absolute, 1));
@@ -383,6 +387,8 @@ namespace tiktok_Omni
                     DialogResult = DialogResult.None;
                 }
             };
+
+            SyncFooterBarHeight();
         }
 
         private void BuildMusicTab(TabPage tab)
@@ -680,12 +686,31 @@ namespace tiktok_Omni
             _voiceTabRoot.Size = new Size(innerW, Math.Max(0, pref.Height));
         }
 
+        private void SyncFooterBarHeight()
+        {
+            if (_footerBarPanel == null || _footerBarPanel.IsDisposed || _footerStack == null || _footerStack.IsDisposed)
+            {
+                return;
+            }
+
+            _footerStack.PerformLayout();
+            var contentW = Math.Max(320, _footerBarPanel.ClientSize.Width);
+            var contentH = _footerStack.GetPreferredSize(new Size(contentW, 0)).Height;
+            var target = Math.Max(FooterBarMinHeight, contentH + _footerBarPanel.Padding.Vertical + 4);
+            if (_footerBarPanel.Height != target)
+            {
+                _footerBarPanel.Height = target;
+            }
+        }
+
         private void FitDialogClientHeightToVoiceTabContent()
         {
             if (_voiceTabPage == null || _voiceTabRoot == null || _footerBarPanel == null)
             {
                 return;
             }
+
+            SyncFooterBarHeight();
 
             var tabs = _voiceTabPage.Parent as TabControl;
             if (tabs == null)
@@ -919,8 +944,28 @@ namespace tiktok_Omni
 
             var eleven = SegmentIsEleven(seg);
             var edge = SegmentIsEdge(seg);
-            SetSegmentTableRowVisible(seg, 1, eleven);
-            SetSegmentTableRowVisible(seg, 2, eleven);
+            SetSegmentTableRowVisible(seg, 1, eleven || edge);
+            if (seg.LblElevenPersona != null)
+            {
+                seg.LblElevenPersona.Visible = eleven;
+            }
+
+            if (seg.CbElevenPersona != null)
+            {
+                seg.CbElevenPersona.Visible = eleven;
+            }
+
+            if (seg.LblGender != null)
+            {
+                seg.LblGender.Visible = edge;
+            }
+
+            if (seg.CbGender != null)
+            {
+                seg.CbGender.Visible = edge;
+            }
+
+            SetSegmentTableRowVisible(seg, 2, false);
             // Hook: "Tone giọng" bị bỏ hẳn — "Phong cách hook" lo hết cảm xúc + rate/pitch/stability tuỳ chỉnh.
             SetSegmentTableRowVisible(seg, 3, eleven && !seg.IsHook);
             var showCustomToneRow = seg.IsHook
@@ -1420,17 +1465,23 @@ namespace tiktok_Omni
                 (int)(accent.B * w + baseColor.B * inv));
         }
 
-        private static Button CreateButton(string text, Color back) => new Button
+        private static Button CreateButton(string text, Color back)
         {
-            Text = text,
-            AutoSize = true,
-            MinimumSize = new Size(264, 72),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = back,
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
-            Margin = new Padding(16, 0, 0, 0),
-            Padding = new Padding(22, 12, 22, 12)
-        };
+            var btn = new Button
+            {
+                Text = text,
+                AutoSize = true,
+                MinimumSize = new Size(264, 72),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = back,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
+                Margin = new Padding(16, 0, 0, 0),
+                Padding = new Padding(22, 10, 22, 14),
+                UseCompatibleTextRendering = true
+            };
+            btn.FlatAppearance.BorderSize = 0;
+            return btn;
+        }
     }
 }

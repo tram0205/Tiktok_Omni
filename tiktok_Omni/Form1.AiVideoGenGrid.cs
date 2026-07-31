@@ -47,7 +47,7 @@ namespace tiktok_Omni
         {
             "colAiProduct", "colAiShowcaseImages", "colAiShowcaseProductType", "colAiShowcaseClipMode", "colAiShowcaseOutputAspect",
             "colAiShowcaseScript", "colAiShowcaseSceneSummary",
-            "colAiShowcaseTextSize", "colAiShowcaseMusicVolume", "colAiStatus"
+            "colAiShowcaseTextSize", "colAiShowcaseMusicVolume", "colAiShowcaseBrandLogo", "colAiStatus", "colAiShowcaseOutput"
         };
 
         private static readonly string[] ShowcaseLegacyOnlyGridColumns =
@@ -147,7 +147,9 @@ namespace tiktok_Omni
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseSceneSummary", 7);
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseTextSize", 8);
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseMusicVolume", 9);
-                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiStatus", 10);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseBrandLogo", 10);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiStatus", 11);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseOutput", 12);
 
                 var multiVoiceCol = dgvDeepDiveInput.Columns["colAiShowcaseMultiVoice"];
                 if (multiVoiceCol != null)
@@ -267,15 +269,19 @@ namespace tiktok_Omni
                 {
                     statusCol.HeaderText = "Trạng thái";
                     statusCol.ReadOnly = true;
-                    statusCol.FillWeight = 22;
-                    statusCol.MinimumWidth = 140;
-                    statusCol.ToolTipText = "Trạng thái render và file output — bấm ô để mở thư mục output.";
+                    statusCol.FillWeight = 14;
+                    statusCol.MinimumWidth = 96;
+                    statusCol.ToolTipText = "Trạng thái pipeline: Chờ, Đang render, Xong, Lỗi.";
                 }
 
                 var outputCol = dgvDeepDiveInput.Columns["colAiShowcaseOutput"];
                 if (outputCol != null)
                 {
-                    outputCol.Visible = false;
+                    outputCol.HeaderText = "Output";
+                    outputCol.ReadOnly = true;
+                    outputCol.FillWeight = 16;
+                    outputCol.MinimumWidth = 88;
+                    outputCol.ToolTipText = "▶ xem video thành phẩm · 📂 mở thư mục output.";
                 }
 
                 var subtitleCol = dgvDeepDiveInput.Columns["colAiShowcaseTextSize"];
@@ -292,6 +298,16 @@ namespace tiktok_Omni
                     musicCol.HeaderText = "Âm thanh";
                     musicCol.ReadOnly = true;
                     musicCol.ToolTipText = "Bấm để chọn nhạc nền, âm lượng, tốc độ thoại và nghe audio.";
+                }
+
+                var logoCol = dgvDeepDiveInput.Columns["colAiShowcaseBrandLogo"];
+                if (logoCol != null)
+                {
+                    logoCol.HeaderText = "Logo";
+                    logoCol.ReadOnly = true;
+                    logoCol.FillWeight = 10;
+                    logoCol.MinimumWidth = 88;
+                    logoCol.ToolTipText = "Bấm để bật logo, chọn vị trí, scale. Kho logo: Assets\\Logos.";
                 }
             }
         }
@@ -985,6 +1001,32 @@ namespace tiktok_Omni
 
             {
 
+                Name = "colAiShowcaseBrandLogo",
+
+                HeaderText = "Logo",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseBrandLogoLabel),
+
+                FillWeight = 10,
+
+                MinimumWidth = 88,
+
+                ReadOnly = true,
+
+                Visible = false,
+
+                DefaultCellStyle =
+                {
+                    ForeColor = Color.FromArgb(130, 175, 255),
+                    SelectionForeColor = Color.White
+                }
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
                 Name = "colAiShowcaseTransition",
 
                 HeaderText = "Chuyển cảnh",
@@ -1014,6 +1056,10 @@ namespace tiktok_Omni
             grid.CellFormatting -= ProductInputGrid_CellFormatting;
 
             grid.CellFormatting += ProductInputGrid_CellFormatting;
+
+            grid.CellToolTipTextNeeded -= ProductInputGrid_CellToolTipTextNeeded;
+
+            grid.CellToolTipTextNeeded += ProductInputGrid_CellToolTipTextNeeded;
 
             grid.RowPrePaint -= ProductInputGrid_RowPrePaint;
 
@@ -1634,6 +1680,38 @@ namespace tiktok_Omni
 
 
 
+        private void ProductInputGrid_CellToolTipTextNeeded(object sender, DataGridViewCellToolTipTextNeededEventArgs e)
+        {
+            var grid = sender as DataGridView;
+            if (grid == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            var col = grid.Columns[e.ColumnIndex];
+            if (col == null)
+            {
+                return;
+            }
+
+            var row = grid.Rows[e.RowIndex];
+            if (grid != dgvDeepDiveInput || !(row?.DataBoundItem is ShowcaseVideoItem video))
+            {
+                return;
+            }
+
+            if (string.Equals(col.Name, "colAiShowcaseProductType", StringComparison.Ordinal))
+            {
+                e.ToolTipText = ShowcaseContentDisplayHelper.FormatProductTypeThemeGridToolTip(video);
+                return;
+            }
+
+            if (string.Equals(col.Name, "colAiShowcaseScript", StringComparison.Ordinal))
+            {
+                e.ToolTipText = ShowcaseContentDisplayHelper.FormatScriptPromptGridToolTip(video);
+            }
+        }
+
         private void ProductInputGrid_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
 
         {
@@ -1681,8 +1759,7 @@ namespace tiktok_Omni
                     var status = string.IsNullOrWhiteSpace(showcaseVideo.PipelineStatus)
                         ? "Chờ"
                         : showcaseVideo.PipelineStatus.Trim();
-                    e.Value = showcaseVideo.ShowcaseOutputGridLabel
-                              ?? ShowcaseContentDisplayHelper.FormatPipelineGridLabel(showcaseVideo);
+                    e.Value = status;
                     if (string.Equals(status, "Xong", StringComparison.OrdinalIgnoreCase))
                     {
                         e.CellStyle.ForeColor = Color.FromArgb(120, 220, 160);
@@ -1695,15 +1772,19 @@ namespace tiktok_Omni
                     {
                         e.CellStyle.ForeColor = Color.FromArgb(255, 200, 120);
                     }
-                    else if (!string.IsNullOrWhiteSpace(showcaseVideo.OutputVideoPath)
-                             && File.Exists(showcaseVideo.OutputVideoPath))
-                    {
-                        e.CellStyle.ForeColor = Color.FromArgb(130, 175, 255);
-                        e.CellStyle.SelectionForeColor = Color.White;
-                    }
 
+                    row.Cells[e.ColumnIndex].ToolTipText = "Trạng thái pipeline render.";
+                    e.FormattingApplied = true;
+                    return;
+                }
+
+                if (col.Name == "colAiShowcaseOutput")
+                {
+                    e.Value = string.Empty;
+                    var outputPath = ShowcaseContentDisplayHelper.TryResolveFinishedVideoPath(showcaseVideo);
                     row.Cells[e.ColumnIndex].ToolTipText =
-                        ShowcaseContentDisplayHelper.FormatPipelineGridToolTip(showcaseVideo);
+                        ShowcaseContentDisplayHelper.FormatOutputGridLabel(showcaseVideo, outputPath)
+                        + " — ▶ xem video · 📂 thư mục output";
                     e.FormattingApplied = true;
                     return;
                 }

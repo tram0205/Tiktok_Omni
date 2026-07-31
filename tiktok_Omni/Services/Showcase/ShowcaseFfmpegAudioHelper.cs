@@ -202,38 +202,19 @@ namespace tiktok_Omni.Services.Showcase
             return filters.Count > 0 ? string.Join(",", filters) : "atempo=1";
         }
 
-        private static async Task RunFfmpegAsync(
+        private static Task RunFfmpegAsync(
             string ffmpegExecutable,
             string args,
             Action<string> logAction,
             CancellationToken cancellationToken)
         {
-            var ffmpeg = (ffmpegExecutable ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(ffmpeg) || !File.Exists(ffmpeg))
-            {
-                ffmpeg = FfmpegToolkitService.GetBundledFfmpegPath();
-            }
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = ffmpeg,
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using (var process = new Process { StartInfo = psi })
-            {
-                process.Start();
-                await ProcessCancellationHelper.WaitUntilExitAsync(process, cancellationToken, 120).ConfigureAwait(false);
-                if (process.ExitCode != 0)
-                {
-                    var err = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
-                    logAction?.Invoke("[Showcase audio] FFmpeg: " + err);
-                    throw new InvalidOperationException("FFmpeg audio failed (exit " + process.ExitCode + ").");
-                }
-            }
+            return FfmpegProcessRunner.RunAsync(
+                ffmpegExecutable,
+                args,
+                logAction,
+                cancellationToken,
+                logPrefix: "[Showcase audio]",
+                timeoutSeconds: 120);
         }
     }
 }

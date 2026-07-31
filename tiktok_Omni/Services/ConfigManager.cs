@@ -851,22 +851,22 @@ namespace tiktok_Omni.Services
         /// <summary>ElevenLabs voice_id cho mood calm / reflective và mặc định (tab Triết lý) — legacy, không còn UI.</summary>
         public string VoiceId_Calm { get; set; } = string.Empty;
 
-        /// <summary>ElevenLabs voice_id — Nữ trẻ. Dùng chung mọi tab video khi chọn persona giọng (ElevenVoicePersonaCatalog).</summary>
+        /// <summary>ElevenLabs voice_id — Nữ trẻ miền Nam. Dùng khi chọn persona hoặc vùng «miền Nam».</summary>
         public string VoiceId_FemaleYoung { get; set; } = string.Empty;
 
-        /// <summary>ElevenLabs voice_id — Nữ trung niên.</summary>
+        /// <summary>ElevenLabs voice_id — Nữ trung niên miền Nam.</summary>
         public string VoiceId_FemaleMature { get; set; } = string.Empty;
 
-        /// <summary>ElevenLabs voice_id — Nam trẻ.</summary>
+        /// <summary>ElevenLabs voice_id — Nam trẻ miền Nam.</summary>
         public string VoiceId_MaleYoung { get; set; } = string.Empty;
 
-        /// <summary>ElevenLabs voice_id — Nam trung niên.</summary>
+        /// <summary>ElevenLabs voice_id — Nam trung niên miền Nam.</summary>
         public string VoiceId_MaleMature { get; set; } = string.Empty;
 
-        /// <summary>ElevenLabs voice_id — Bé gái.</summary>
+        /// <summary>ElevenLabs voice_id — Bé gái miền Nam.</summary>
         public string VoiceId_GirlChild { get; set; } = string.Empty;
 
-        /// <summary>ElevenLabs voice_id — Bé trai.</summary>
+        /// <summary>ElevenLabs voice_id — Bé trai miền Nam.</summary>
         public string VoiceId_BoyChild { get; set; } = string.Empty;
 
         /// <summary>ElevenLabs voice_id riêng cho hook Video reup (nhấn mạnh). Fallback: VoiceId_Intense → Endpoint.</summary>

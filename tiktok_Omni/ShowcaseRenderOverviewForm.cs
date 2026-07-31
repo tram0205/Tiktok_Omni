@@ -15,9 +15,9 @@ namespace tiktok_Omni
         private const int SceneCellTextGap = 20;
         private const int SceneCellThumbMinWidth = 52;
         private const int SceneCellThumbMaxWidth = 180;
-        private const float PipelineRowHeight = 177F;
-        private const int PipelineChipHeight = 126;
-        private const float PipelineChipTitleRowHeight = 36F;
+        private const float PipelineRowHeight = 185F;
+        private const int PipelineChipHeight = 134;
+        private const float PipelineChipTitleRowHeight = 44F;
         private const int PipelineChipWidth = 237;
         private const int ContentMaxWidth = 2640;
         private readonly List<Image> _loadedImages = new List<Image>();
@@ -857,9 +857,10 @@ namespace tiktok_Omni
             pnl.Controls.Add(new Label
             {
                 Dock = DockStyle.Fill,
-                AutoEllipsis = true,
+                AutoEllipsis = false,
+                UseCompatibleTextRendering = true,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(0, 2, 0, 4),
+                Padding = new Padding(0, 1, 0, 3),
                 ForeColor = fg,
                 Font = new Font("Segoe UI", 10F, FontStyle.Bold),
                 Text = step.Title ?? string.Empty
@@ -884,7 +885,7 @@ namespace tiktok_Omni
                 AutoSize = true,
                 ForeColor = Color.FromArgb(120, 130, 145),
                 Font = new Font("Segoe UI", 14F),
-                Margin = new Padding(2, 52, 2, 0),
+                Margin = new Padding(2, 56, 2, 0),
                 Text = "→"
             };
         }

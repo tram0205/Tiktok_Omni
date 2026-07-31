@@ -110,6 +110,24 @@ namespace tiktok_Omni.Services.Showcase
 
         public int HookSfxVolumePercent { get; set; }
 
+        public string ProfileName { get; set; } = string.Empty;
+
+        public bool BrandLogoEnabled { get; set; }
+
+        public string BrandLogoFile { get; set; } = string.Empty;
+
+        public string BrandLogoResolvedPath { get; set; } = string.Empty;
+
+        public string BrandLogoPositionId { get; set; } = ShowcaseBrandLogoPositionCatalog.BottomRight;
+
+        public int BrandLogoScaleWidthPercent { get; set; } = ShowcaseBrandOverlayHelper.DefaultScaleWidthPercent;
+
+        public int BrandLogoMarginX { get; set; } = ShowcaseBrandOverlayHelper.DefaultMargin;
+
+        public int BrandLogoMarginY { get; set; } = ShowcaseBrandOverlayHelper.DefaultMargin;
+
+        public int BrandLogoOpacityPercent { get; set; } = ShowcaseBrandOverlayHelper.DefaultOpacityPercent;
+
         public static ShowcasePerVideoRenderSettings FromVideo(ShowcaseVideoItem video, AppSettings appSettings = null)
         {
             if (video == null)
@@ -180,7 +198,25 @@ namespace tiktok_Omni.Services.Showcase
                 HookSfxOffsetSeconds = video.ShowcaseHookSfxOffsetSeconds,
                 HookSfxVolumePercent = video.ShowcaseHookSfxVolumePercent > 0
                     ? video.ShowcaseHookSfxVolumePercent
-                    : ShowcaseSfxCatalog.DefaultVolumePercent
+                    : ShowcaseSfxCatalog.DefaultVolumePercent,
+                ProfileName = video.ProfileName ?? string.Empty,
+                BrandLogoEnabled = video.ShowcaseBrandLogoEnabled,
+                BrandLogoFile = video.ShowcaseBrandLogoFile ?? string.Empty,
+                BrandLogoResolvedPath = ShowcaseBrandOverlayHelper.ResolveEffectiveLogoPath(
+                    video.ShowcaseBrandLogoFile,
+                    video.ProfileName,
+                    appSettings),
+                BrandLogoPositionId = ShowcaseBrandLogoPositionCatalog.ResolveId(video.ShowcaseBrandLogoPositionId),
+                BrandLogoScaleWidthPercent = ShowcaseBrandOverlayHelper.ClampScaleWidthPercent(
+                    video.ShowcaseBrandLogoScaleWidthPercent > 0
+                        ? video.ShowcaseBrandLogoScaleWidthPercent
+                        : ShowcaseBrandOverlayHelper.DefaultScaleWidthPercent),
+                BrandLogoMarginX = ShowcaseBrandOverlayHelper.ClampMargin(video.ShowcaseBrandLogoMarginX),
+                BrandLogoMarginY = ShowcaseBrandOverlayHelper.ClampMargin(video.ShowcaseBrandLogoMarginY),
+                BrandLogoOpacityPercent = ShowcaseBrandOverlayHelper.ClampOpacityPercent(
+                    video.ShowcaseBrandLogoOpacityPercent > 0
+                        ? video.ShowcaseBrandLogoOpacityPercent
+                        : ShowcaseBrandOverlayHelper.DefaultOpacityPercent)
             };
         }
 

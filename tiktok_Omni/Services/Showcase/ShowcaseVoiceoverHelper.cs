@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -79,6 +80,50 @@ namespace tiktok_Omni.Services.Showcase
             return HasCompleteVoiceover(video, scenes) && IsVoiceoverSyncedToClips(video, scenes);
         }
 
+        /// <summary>
+        /// Chế độ Chỉ Zoom: clip Ken Burns được tạo lại (cùng ảnh, file mới) nhưng thoại vẫn hợp lệ —
+        /// cập nhật fingerprint thay vì bắt chạy Gemini «Tạo lời thoại» lại.
+        /// </summary>
+        public static bool TryResyncFingerprintForZoomOnlyClipRefresh(
+            ShowcaseVideoItem video,
+            IList<AiVideoGenInputItem> scenes,
+            string clipModeId)
+        {
+            if (video == null || scenes == null || scenes.Count == 0)
+            {
+                return false;
+            }
+
+            var mode = ShowcaseClipModePresets.ResolveIdForGemini(clipModeId);
+            if (!string.Equals(mode, ShowcaseClipModePresets.ZoomOnlyId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (video.ShowcaseVoiceoverClipFingerprint == 0)
+            {
+                return false;
+            }
+
+            if (!HasCompleteVoiceover(video, scenes))
+            {
+                return false;
+            }
+
+            if (IsVoiceoverSyncedToClips(video, scenes))
+            {
+                return false;
+            }
+
+            if (ShowcaseClipStatusHelper.CountScenesWithClip(scenes) == 0)
+            {
+                return false;
+            }
+
+            video.ShowcaseVoiceoverClipFingerprint = ComputeClipFingerprint(scenes);
+            return true;
+        }
+
         public static long ComputeClipFingerprint(IList<AiVideoGenInputItem> scenes)
         {
             if (scenes == null || scenes.Count == 0)
@@ -113,6 +158,8 @@ namespace tiktok_Omni.Services.Showcase
 
         {
 
+            SyncSilentFlagsFromVoiceover(scenes);
+
             return scenes?.Count(s => s != null && !s.ShowcaseSceneSilent && !string.IsNullOrWhiteSpace(s.SceneVoiceover)) ?? 0;
 
         }
@@ -123,7 +170,57 @@ namespace tiktok_Omni.Services.Showcase
 
         {
 
+            SyncSilentFlagsFromVoiceover(scenes);
+
             return scenes?.Count(s => s != null && s.ShowcaseSceneSilent) ?? 0;
+
+        }
+
+
+
+        /// <summary>Cảnh đã có lời thoại thì bỏ cờ im — tránh nhãn «4/5 voice · 1 im» khi hub vẫn hiện đủ thoại.</summary>
+
+        public static void SyncSilentFlagsFromVoiceover(IList<AiVideoGenInputItem> scenes)
+
+        {
+
+            if (scenes == null || scenes.Count == 0)
+
+            {
+
+                return;
+
+            }
+
+
+
+            foreach (var scene in scenes)
+
+            {
+
+                if (scene == null)
+
+                {
+
+                    continue;
+
+                }
+
+
+
+                if (!string.IsNullOrWhiteSpace(scene.SceneVoiceover))
+
+                {
+
+                    scene.ShowcaseSceneSilent = false;
+
+                }
+
+            }
+
+
+
+            EnforceMaxSilentScenes(scenes);
 
         }
 

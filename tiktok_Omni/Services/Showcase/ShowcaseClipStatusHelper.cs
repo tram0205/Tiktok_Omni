@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -28,6 +29,41 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             return count;
+        }
+
+        public static bool HasAnyClipAfterRefresh(string clipsDir, IList<AiVideoGenInputItem> scenes, Action<string> log = null)
+        {
+            if (scenes == null || scenes.Count == 0)
+            {
+                return false;
+            }
+
+            ShowcaseSessionService.RefreshClipStatus(clipsDir, scenes, log);
+            return CountScenesWithClip(scenes) > 0;
+        }
+
+        public static string BuildNoClipsForVoiceoverMessage(string productName, string clipModeId)
+        {
+            var mode = ShowcaseClipModePresets.ResolveIdForGemini(clipModeId);
+            var name = string.IsNullOrWhiteSpace(productName) ? "Video" : "«" + productName.Trim() + "»";
+
+            if (string.Equals(mode, ShowcaseClipModePresets.ZoomOnlyId, StringComparison.Ordinal))
+            {
+                return name + " chưa có clip trong veo_clips.\r\n\r\n"
+                       + "Chế độ Chỉ Zoom: bấm «Tạo clip Zoom» trước, rồi «Tạo lời thoại».\r\n\r\n"
+                       + "Thoại từ «Tạo kịch bản» chỉ là bản nháp theo ảnh — chưa khớp clip.";
+            }
+
+            if (ShowcaseClipModePresets.ModeAllowsInAppZoom(mode))
+            {
+                return name + " chưa có clip trong veo_clips.\r\n\r\n"
+                       + "Tạo clip (Zoom / Veo / …) hoặc bỏ file scene_01.mp4, scene_02.mp4, … vào veo_clips rồi bấm lại.\r\n\r\n"
+                       + "Thoại từ «Tạo kịch bản» chỉ là bản nháp theo ảnh — chưa khớp clip.";
+            }
+
+            return name + " chưa có clip trong veo_clips.\r\n\r\n"
+                   + "Bỏ ít nhất scene_01.mp4 vào veo_clips (hoặc tạo clip bằng công cụ video) rồi bấm «Tạo lời thoại» lại.\r\n\r\n"
+                   + "Thoại từ «Tạo kịch bản» chỉ là bản nháp theo ảnh — chưa khớp clip.";
         }
     }
 }

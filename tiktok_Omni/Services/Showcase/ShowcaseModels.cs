@@ -38,6 +38,10 @@ namespace tiktok_Omni.Services.Showcase
         public string BackgroundMusicFile { get; set; } = string.Empty;
 
         public string BackgroundMusicGeminiHint { get; set; } = string.Empty;
+
+        /// <summary>Gợi ý chuyển cảnh, phụ đề, giọng, tốc độ… từ cùng lần gọi «Tạo kịch bản».</summary>
+        public ShowcaseGeminiProductionHintsHelper.Hints ProductionHints { get; set; }
+            = new ShowcaseGeminiProductionHintsHelper.Hints();
     }
 
     /// <summary>Kết quả thoại Showcase do Gemini xem clip phân cảnh sinh ra.</summary>
@@ -76,6 +80,25 @@ namespace tiktok_Omni.Services.Showcase
         public string hook_sfx_hint { get; set; }
         public string background_music_id { get; set; }
         public string background_music_hint { get; set; }
+        public double transition_seconds { get; set; }
+        public string transition_hint { get; set; }
+        public bool subtitle_enabled { get; set; }
+        public bool hook_subtitle_enabled { get; set; }
+        public string body_subtitle_look_id { get; set; }
+        public string hook_subtitle_look_id { get; set; }
+        public string hook_subtitle_animation_id { get; set; }
+        public string body_subtitle_animation_id { get; set; }
+        public string subtitle_position { get; set; }
+        public string hook_style_key { get; set; }
+        public string body_style_key { get; set; }
+        public string voice_preset_id { get; set; }
+        public string body_voice_preset_id { get; set; }
+        public string voice_age_id { get; set; }
+        public string voice_tone_id { get; set; }
+        public string tts_engine { get; set; }
+        public int hook_narration_speed_percent { get; set; }
+        public int body_narration_speed_percent { get; set; }
+        public int music_volume_percent { get; set; } = -1;
         public List<ShowcaseSceneDto> scenes { get; set; }
     }
 
@@ -92,6 +115,7 @@ namespace tiktok_Omni.Services.Showcase
         public string kling_prompt { get; set; }
         public string zoom_hint { get; set; }
         public string zoom_style { get; set; }
+        public string zoom_speed { get; set; }
         public double clip_duration_seconds { get; set; }
         public int image_index { get; set; }
         public string sfx_id { get; set; }

@@ -2188,24 +2188,40 @@ namespace tiktok_Omni
 
         private void BtnPhilosophyStopAll_Click(object sender, EventArgs e)
         {
+            CancelAllPhilosophyWorkForEmergencyStop(logPrefix: "Triết lý");
+        }
+
+        private void CancelAllPhilosophyWorkForEmergencyStop(string logPrefix = null)
+        {
+            var prefix = string.IsNullOrWhiteSpace(logPrefix) ? "[Emergency]" : logPrefix + ":";
+            var cancelled = false;
+
             if (_philosophyScriptGenRunning)
             {
-                LogPhilosophy("Triết lý: đang dừng sinh kịch bản…");
-                _philosophyScriptGenCts?.Cancel();
+                LogPhilosophy(prefix + " đang dừng sinh kịch bản…");
+                TryCancel(_philosophyScriptGenCts);
+                cancelled = true;
             }
 
             if (_philosophyScenePromptRunning)
             {
-                LogPhilosophy("Triết lý: đang dừng tạo prompt phân cảnh…");
-                _philosophyScenePromptCts?.Cancel();
+                LogPhilosophy(prefix + " đang dừng tạo prompt phân cảnh…");
+                TryCancel(_philosophyScenePromptCts);
+                cancelled = true;
             }
 
             if (_philosophyRenderRunning)
             {
                 _philosophyRenderPaused = true;
-                LogPhilosophy("Triết lý: đang dừng render… (chờ bước hiện tại kết thúc)");
+                LogPhilosophy(prefix + " đang dừng render… (chờ bước hiện tại kết thúc)");
                 SetPhilosophyProgress("Đang dừng…", 0, indeterminate: true);
-                _philosophyRenderCts?.Cancel();
+                TryCancel(_philosophyRenderCts);
+                cancelled = true;
+            }
+
+            if (cancelled)
+            {
+                UpdatePhilosophyBusyControlStates();
             }
         }
 

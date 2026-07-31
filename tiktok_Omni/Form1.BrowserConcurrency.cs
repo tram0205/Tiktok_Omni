@@ -91,6 +91,29 @@ namespace tiktok_Omni
                 j != null && (j.Kind == OmniJobKind.AutoPost || j.Kind == OmniJobKind.HuntAffiliate));
         }
 
+        private void CancelRunningWarmupWorkForEmergencyStop()
+        {
+            if (!_isWarmupQueueRunning && _warmupCancellation == null && _warmupQueueCancellation == null)
+            {
+                return;
+            }
+
+            CancelWarmupBrowserWork();
+        }
+
+        /// <summary>Dừng phiên browser đang chạy — không hủy job Pending trong hàng đợi.</summary>
+        private void CancelRunningAffiliateBrowserWorkForEmergencyStop()
+        {
+            TryCancel(_huntCancellation);
+            if (_revenueFetchRunning)
+            {
+                TryCancel(_revenueCancellation);
+            }
+
+            TryCancel(_activeJobCancellation);
+            TryCancel(_autoPostCancellation);
+        }
+
         /// <summary>Hủy mọi job nền trước khi đóng app (Ctrl+C / nút X).</summary>
         internal void ShutdownAllAutomationWork()
         {

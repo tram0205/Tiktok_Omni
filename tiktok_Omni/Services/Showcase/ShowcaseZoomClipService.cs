@@ -25,7 +25,9 @@ namespace tiktok_Omni.Services.Showcase
             Action<string> logAction,
             CancellationToken cancellationToken,
             double durationSeconds = ShowcaseSceneDurationHelper.DefaultClipSeconds,
-            ShowcaseOutputAspectPreset outputCanvas = null)
+            ShowcaseOutputAspectPreset outputCanvas = null,
+            string zoomSpeedId = null,
+            ShowcaseZoomAspectFitMode aspectFitMode = ShowcaseZoomAspectFitMode.Crop)
         {
             outputCanvas = outputCanvas ?? ShowcaseOutputAspectPresets.Vertical9x16;
             if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
@@ -50,13 +52,24 @@ namespace tiktok_Omni.Services.Showcase
                 resolvedStyle = ShowcaseZoomStyleCatalog.DefaultId;
             }
 
-            var vf = ShowcaseZoomStyleCatalog.BuildVideoFilter(durationSeconds, sceneIndex, resolvedStyle, outputCanvas);
+            var resolvedSpeed = ShowcaseZoomSpeedCatalog.ResolveSpeedId(zoomSpeedId, null);
+            var vf = ShowcaseZoomStyleCatalog.BuildVideoFilter(
+                durationSeconds,
+                sceneIndex,
+                resolvedStyle,
+                outputCanvas,
+                resolvedSpeed,
+                aspectFitMode);
             var durationText = Math.Max(2.0d, durationSeconds).ToString("0.00", CultureInfo.InvariantCulture);
             var args =
                 "-y -loop 1 -framerate 30 -t " + durationText +
                 " -i \"" + imagePath + "\" -vf \"" + vf + "\" -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -an \"" + outputPath + "\"";
 
             logAction?.Invoke("[Showcase] Zoom scene " + (sceneIndex + 1) + " style=" + resolvedStyle
+                + " speed=" + resolvedSpeed
+                + " fit=" + (aspectFitMode == ShowcaseZoomAspectFitMode.BlurPad ? "blur" : "crop")
+                + " dur=" + durationText + "s"
+                + " " + ShowcaseZoomSpeedCatalog.FormatDeltaLog(resolvedSpeed, sceneIndex)
                 + " canvas=" + outputCanvas.Width + "x" + outputCanvas.Height + ": " + Path.GetFileName(outputPath));
 
             await RunFfmpegAsync(ffmpegExecutable, args, logAction, cancellationToken).ConfigureAwait(false);

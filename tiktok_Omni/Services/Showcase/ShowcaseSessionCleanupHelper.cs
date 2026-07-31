@@ -11,7 +11,8 @@ namespace tiktok_Omni.Services.Showcase
         public static void PrepareForFreshRender(
             string sessionBase,
             string previousOutputPath,
-            Action<string> log)
+            Action<string> log,
+            bool preserveSessionAudio = false)
         {
             if (string.IsNullOrWhiteSpace(sessionBase))
             {
@@ -34,7 +35,10 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             ClearPreviousVideoOutputs(sessionFull, previousOutputPath, log);
-            ClearPreviousAudio(sessionFull, log);
+            if (!preserveSessionAudio)
+            {
+                ClearPreviousAudio(sessionFull, log);
+            }
         }
 
         public static void ClearPreviousVideoOutputs(

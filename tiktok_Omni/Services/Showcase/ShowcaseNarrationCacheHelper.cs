@@ -154,6 +154,8 @@ namespace tiktok_Omni.Services.Showcase
             sb.AppendLine("elBody:" + (bodyPreset != null && bodyPreset.ElevenLabsExpressiveBody ? "1" : "0"));
             sb.AppendLine("hookElPersona:" + hookSeg.ElevenPersona);
             sb.AppendLine("bodyElPersona:" + bodySeg.ElevenPersona);
+            sb.AppendLine("hookElLang:" + ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(hookSeg.VoiceLanguageId));
+            sb.AppendLine("bodyElLang:" + ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(bodySeg.VoiceLanguageId));
             sb.AppendLine("hookElTone:" + hookSeg.ElevenToneId);
             sb.AppendLine("bodyElTone:" + bodySeg.ElevenToneId);
             sb.AppendLine("hookElVoiceSettings:" + DescribeHookVoiceSettings(hookSeg));

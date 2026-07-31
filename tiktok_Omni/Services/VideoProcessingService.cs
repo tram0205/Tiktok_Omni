@@ -408,7 +408,12 @@ namespace tiktok_Omni.Services
                     ". Hãy tạo clip (đúng tên scene_XX) và bỏ vào thư mục veo_clips trước khi Render.");
             }
 
-            if (!overviewPreview && string.IsNullOrWhiteSpace(settings?.AiApiKey))
+            var sessionBaseEarly = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(orderedScenes);
+            var hasPreRenderedAudio = !overviewPreview
+                && !string.IsNullOrWhiteSpace(sessionBaseEarly)
+                && ShowcaseNarrationCacheHelper.HasFullMixPreviewFile(sessionBaseEarly);
+
+            if (!overviewPreview && !hasPreRenderedAudio && string.IsNullOrWhiteSpace(settings?.AiApiKey))
             {
                 throw new InvalidOperationException("Cần AI API Key để tạo giọng đọc (voice-over).");
             }
@@ -422,7 +427,7 @@ namespace tiktok_Omni.Services
             ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(storageRoot, resolvedProfile);
             var cat = string.IsNullOrWhiteSpace(category) ? "Showcase" : category.Trim();
 
-            var sessionBase = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(orderedScenes);
+            var sessionBase = sessionBaseEarly;
             if (string.IsNullOrWhiteSpace(sessionBase))
             {
                 sessionBase = ProfileScopedPaths.CreateGeneratedSessionFolder(resolvedProfile, cat);
@@ -438,21 +443,42 @@ namespace tiktok_Omni.Services
             Directory.CreateDirectory(audioDir);
             Directory.CreateDirectory(outputDir);
 
+            var preRenderedAudioPath = hasPreRenderedAudio
+                ? ShowcaseNarrationCacheHelper.GetFullMixPreviewPath(sessionBase)
+                : null;
+
             var previousOutput = orderedScenes
                 .Select(s => (s?.OutputVideoPath ?? string.Empty).Trim())
                 .FirstOrDefault(p => !string.IsNullOrEmpty(p));
             if (!overviewPreview)
             {
-                ShowcaseSessionCleanupHelper.PrepareForFreshRender(sessionBase, previousOutput, logAction);
+                ShowcaseSessionCleanupHelper.PrepareForFreshRender(
+                    sessionBase,
+                    previousOutput,
+                    logAction,
+                    preserveSessionAudio: hasPreRenderedAudio);
             }
             else
             {
                 logAction?.Invoke("[Showcase] Tổng quan — giữ audio/clip hiện có, ghi đè overview_preview.mp4.");
             }
 
-            progressCallback?.Invoke(5, "Tạo giọng đọc");
+            progressCallback?.Invoke(5, hasPreRenderedAudio ? "Chuẩn bị audio" : "Tạo giọng đọc");
             string narrationFile;
-            if (overviewPreview)
+            string narrationPathForSubtitles = null;
+            if (hasPreRenderedAudio)
+            {
+                narrationFile = preRenderedAudioPath;
+                var bareNarration = Path.Combine(audioDir, ShowcaseNarrationCacheHelper.NarrationFileName);
+                if (File.Exists(bareNarration))
+                {
+                    narrationPathForSubtitles = bareNarration;
+                }
+
+                logAction?.Invoke("[Showcase] Dùng audio thành phẩm tab Âm thanh — bỏ qua TTS/SFX/nhạc nền → "
+                    + preRenderedAudioPath);
+            }
+            else if (overviewPreview)
             {
                 narrationFile = await EnsureShowcaseOverviewNarrationAsync(
                     orderedScenes,
@@ -530,7 +556,9 @@ namespace tiktok_Omni.Services
                 renderSettings,
                 subtitleOptions,
                 orderedScenes,
-                ctaText).ConfigureAwait(false);
+                ctaText,
+                preRenderedAudioPath,
+                narrationPathForSubtitles).ConfigureAwait(false);
 
             progressCallback?.Invoke(90, "CTA & hoàn tất");
             var polished = await _affiliatePostProcessing.ApplyCtaTailWithTextOverlayAsync(
@@ -893,9 +921,11 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken)
         {
             var musicVolume = musicVolumeLinear.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            var narrGain = ShowcaseAudioMixHelper.FormatGain(ShowcaseAudioMixHelper.NarrationPremixGain);
             var args = "-y -i \"" + narrationPath + "\" -stream_loop -1 -i \"" + musicPath
-                       + "\" -filter_complex \"[0:a]volume=1.0[narr];[1:a]volume=" + musicVolume
-                       + "[music];[narr][music]amix=inputs=2:duration=first:dropout_transition=2[aout]\" -map \"[aout]\" -c:a libmp3lame -q:a 2 \""
+                       + "\" -filter_complex \"[0:a]volume=" + narrGain + "[narr];[1:a]volume=" + musicVolume
+                       + "[music];[narr][music]amix=inputs=2" + ShowcaseAudioMixHelper.AmixWithMusicSuffix
+                       + "[aout]\" -map \"[aout]\" -c:a libmp3lame -q:a 2 \""
                        + outputPath + "\"";
             await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
         }
@@ -2362,40 +2392,14 @@ namespace tiktok_Omni.Services
         private static async Task RunFfmpegAsync(string args, Action<string> logAction, CancellationToken cancellationToken)
         {
             var ffmpegExecutable = ResolveFfmpegExecutablePath();
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = ffmpegExecutable,
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true
-            };
-
-            using (var process = new Process { StartInfo = startInfo })
-            {
-                process.Start();
-                var stdOut = process.StandardOutput.ReadToEndAsync();
-                var stdErr = process.StandardError.ReadToEndAsync();
-                await ProcessCancellationHelper.WaitUntilExitAsync(process, cancellationToken).ConfigureAwait(false);
-
-                var outText = await stdOut.ConfigureAwait(false);
-                var errText = await stdErr.ConfigureAwait(false);
-
-                if (process.ExitCode != 0)
-                {
-                    throw new InvalidOperationException("FFmpeg failed: " + (string.IsNullOrWhiteSpace(errText) ? outText : errText));
-                }
-
-                if (!string.IsNullOrWhiteSpace(errText))
-                {
-                    var line = errText.Split('\n').LastOrDefault(x => !string.IsNullOrWhiteSpace(x));
-                    if (!string.IsNullOrWhiteSpace(line))
-                    {
-                        logAction?.Invoke("FFmpeg: " + line.Trim());
-                    }
-                }
-            }
+            await FfmpegProcessRunner.RunAsync(
+                    ffmpegExecutable,
+                    args,
+                    logAction,
+                    cancellationToken,
+                    logPrefix: "FFmpeg",
+                    timeoutSeconds: FfmpegProcessRunner.DefaultTimeoutSeconds)
+                .ConfigureAwait(false);
         }
 
         private static string ResolveFfmpegExecutablePath()
@@ -2626,7 +2630,9 @@ namespace tiktok_Omni.Services
             }
 
             var musicVolumeFilter = musicVolume.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            return $"-y -i \"{concatFile}\" -i \"{narrationFile}\" -stream_loop -1 -i \"{backgroundMusicFile}\" -filter_complex \"[1:a]volume=1.0[voice];[2:a]volume={musicVolumeFilter}[music];[voice][music]amix=inputs=2:duration=first:dropout_transition=2[aout]\" -map 0:v:0 -map \"[aout]\" -vf \"{vf}\" -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -shortest \"{outputFile}\"";
+            var narrGain = ShowcaseAudioMixHelper.FormatGain(ShowcaseAudioMixHelper.NarrationPremixGain);
+            var amix = ShowcaseAudioMixHelper.AmixWithMusicSuffix;
+            return $"-y -i \"{concatFile}\" -i \"{narrationFile}\" -stream_loop -1 -i \"{backgroundMusicFile}\" -filter_complex \"[1:a]volume={narrGain}[voice];[2:a]volume={musicVolumeFilter}[music];[voice][music]amix=inputs=2{amix}[aout]\" -map 0:v:0 -map \"[aout]\" -vf \"{vf}\" -r 30 -c:v libx264 -preset medium -pix_fmt yuv420p -c:a aac -shortest \"{outputFile}\"";
         }
 
         private static string BuildSlideshowVideoFilterChain(string subtitleVideoFilter)
@@ -2956,12 +2962,20 @@ namespace tiktok_Omni.Services
             ShowcasePerVideoRenderSettings renderSettings = null,
             AssSubtitleGeneratorOptions subtitleOptions = null,
             IList<AiVideoGenInputItem> showcaseOrderedScenes = null,
-            string showcaseCtaText = null)
+            string showcaseCtaText = null,
+            string preRenderedFullMixPath = null,
+            string narrationPathForSubtitles = null)
         {
             if (clipFiles == null || clipFiles.Count == 0)
             {
                 throw new InvalidOperationException("No Veo clips found to render.");
             }
+
+            var usePreRenderedAudio = !string.IsNullOrWhiteSpace(preRenderedFullMixPath)
+                && File.Exists(preRenderedFullMixPath.Trim());
+            var subtitleSourcePath = !string.IsNullOrWhiteSpace(narrationPathForSubtitles)
+                ? narrationPathForSubtitles.Trim()
+                : narrationTrackPath;
 
             var renderDir = Path.Combine(Path.GetDirectoryName(outputFile) ?? AppDomain.CurrentDomain.BaseDirectory, "render_work");
             Directory.CreateDirectory(renderDir);
@@ -2980,19 +2994,47 @@ namespace tiktok_Omni.Services
                 var normalized = Path.Combine(renderDir, $"normalized_{i + 1:D2}.mp4");
                 var sourceDuration = await GetVideoDurationSecondsAsync(clipFiles[i], logAction, cancellationToken).ConfigureAwait(false);
                 var kenBurnsVf = BuildKenBurnsFilter(sourceDuration, i, hookText, outputCanvas);
-                var args = $"-y -i \"{clipFiles[i]}\" -vf \"{kenBurnsVf}\" -r 30 -c:v libx264 -preset slow -crf 14 -b:v 18M -maxrate 24M -bufsize 48M -pix_fmt yuv420p -c:a aac -b:a 320k -ar 48000 \"{normalized}\"";
+                string audioEncodeArgs;
+                if (usePreRenderedAudio)
+                {
+                    audioEncodeArgs = "-an";
+                }
+                else
+                {
+                    var clipHasAudio = await HasAudioStreamAsync(clipFiles[i], logAction, cancellationToken).ConfigureAwait(false);
+                    audioEncodeArgs = clipHasAudio
+                        ? "-c:a aac -b:a 320k -ar 48000"
+                        : "-an";
+                }
+
+                var args = $"-y -i \"{clipFiles[i]}\" -vf \"{kenBurnsVf}\" -r 30 -c:v libx264 -preset slow -crf 14 -b:v 18M -maxrate 24M -bufsize 48M -pix_fmt yuv420p {audioEncodeArgs} \"{normalized}\"";
                 await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
                 normalizedClips.Add(normalized);
             }
 
             var stitched = Path.Combine(renderDir, "stitched.mp4");
             var transitionDuration = transitionDurationOverride ?? ResolveTransitionDuration(settings);
-            await BuildSmoothTransitionVideoVariableAsync(
-                normalizedClips,
-                stitched,
-                transitionDuration,
-                logAction,
-                cancellationToken).ConfigureAwait(false);
+            if (usePreRenderedAudio)
+            {
+                logAction?.Invoke("[Showcase] Ghép cảnh chỉ video — audio lấy từ full_mix_preview.mp3.");
+                await BuildSmoothTransitionVideoOnlyAsync(
+                        normalizedClips,
+                        stitched,
+                        transitionDuration,
+                        logAction,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await BuildSmoothTransitionVideoVariableAsync(
+                        normalizedClips,
+                        stitched,
+                        transitionDuration,
+                        logAction,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             var ffmpegExe = ResolveFfmpegExecutablePath();
             FfmpegToolkitService.TryResolve(settings, out var renderToolkit, out _);
@@ -3006,59 +3048,72 @@ namespace tiktok_Omni.Services
                     renderDir,
                     narrationSpeedPercent,
                     logAction,
-                    cancellationToken)
+                    cancellationToken,
+                    preserveAudioSource: usePreRenderedAudio)
                 .ConfigureAwait(false);
             stitched = avSync.VideoPath;
             var narrationForRender = avSync.NarrationPath;
             var stitchedDuration = avSync.TargetDurationSeconds > 0.01d
                 ? avSync.TargetDurationSeconds
                 : await GetVideoDurationSecondsAsync(stitched, logAction, cancellationToken).ConfigureAwait(false);
-            var transitionDurationForSfx = transitionDurationOverride ?? ResolveTransitionDuration(settings);
-            narrationForRender = await ShowcaseSfxMixHelper.MixIntoNarrationIfNeededAsync(
-                    ffmpegExe,
-                    ffprobeExe,
-                    narrationForRender,
-                    showcaseOrderedScenes,
-                    clipFiles,
-                    new ShowcaseSfxMixHelper.HookSfxOptions
-                    {
-                        Enabled = renderSettings?.HookSfxEnabled ?? false,
-                        FileName = renderSettings?.HookSfxFile ?? string.Empty,
-                        OffsetSeconds = renderSettings?.HookSfxOffsetSeconds ?? 0d,
-                        VolumePercent = renderSettings?.HookSfxVolumePercent > 0
-                            ? renderSettings.HookSfxVolumePercent
-                            : ShowcaseSfxCatalog.DefaultVolumePercent
-                    },
-                    new ShowcaseSfxMixHelper.CtaSfxOptions
-                    {
-                        Enabled = renderSettings?.CtaSfxEnabled ?? false,
-                        FileName = renderSettings?.CtaSfxFile ?? string.Empty,
-                        OffsetSeconds = renderSettings?.CtaSfxOffsetSeconds ?? 0d,
-                        VolumePercent = renderSettings?.CtaSfxVolumePercent > 0
-                            ? renderSettings.CtaSfxVolumePercent
-                            : ShowcaseSfxCatalog.DefaultVolumePercent
-                    },
-                    renderSettings?.SfxMasterEnabled ?? true,
-                    transitionDurationForSfx,
+            string preparedTrendMusic = null;
+            if (!usePreRenderedAudio)
+            {
+                var transitionDurationForSfx = transitionDurationOverride ?? ResolveTransitionDuration(settings);
+                narrationForRender = await ShowcaseSfxMixHelper.MixIntoNarrationIfNeededAsync(
+                        ffmpegExe,
+                        ffprobeExe,
+                        narrationForRender,
+                        showcaseOrderedScenes,
+                        clipFiles,
+                        new ShowcaseSfxMixHelper.HookSfxOptions
+                        {
+                            Enabled = renderSettings?.HookSfxEnabled ?? false,
+                            FileName = renderSettings?.HookSfxFile ?? string.Empty,
+                            OffsetSeconds = renderSettings?.HookSfxOffsetSeconds ?? 0d,
+                            VolumePercent = renderSettings?.HookSfxVolumePercent > 0
+                                ? renderSettings.HookSfxVolumePercent
+                                : ShowcaseSfxCatalog.DefaultVolumePercent
+                        },
+                        new ShowcaseSfxMixHelper.CtaSfxOptions
+                        {
+                            Enabled = renderSettings?.CtaSfxEnabled ?? false,
+                            FileName = renderSettings?.CtaSfxFile ?? string.Empty,
+                            OffsetSeconds = renderSettings?.CtaSfxOffsetSeconds ?? 0d,
+                            VolumePercent = renderSettings?.CtaSfxVolumePercent > 0
+                                ? renderSettings.CtaSfxVolumePercent
+                                : ShowcaseSfxCatalog.DefaultVolumePercent
+                        },
+                        renderSettings?.SfxMasterEnabled ?? true,
+                        transitionDurationForSfx,
+                        stitchedDuration,
+                        settings,
+                        renderDir,
+                        logAction,
+                        cancellationToken).ConfigureAwait(false);
+                var trendMusic = ResolveBackgroundMusicFile(settings, renderSettings, logAction);
+                preparedTrendMusic = await PrepareBackgroundMusicForRenderAsync(
+                    trendMusic,
                     stitchedDuration,
                     settings,
                     renderDir,
                     logAction,
                     cancellationToken).ConfigureAwait(false);
-            var trendMusic = ResolveBackgroundMusicFile(settings, renderSettings, logAction);
-            var preparedTrendMusic = await PrepareBackgroundMusicForRenderAsync(
-                trendMusic,
-                stitchedDuration,
-                settings,
-                renderDir,
-                logAction,
-                cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                logAction?.Invoke("[Showcase] Bỏ qua trộn SFX/nhạc nền — dùng full_mix_preview.mp3.");
+            }
+
             var hasAmbientAudio = await HasAudioStreamAsync(stitched, logAction, cancellationToken).ConfigureAwait(false);
             var fingerprintVariant = BuildRenderFingerprintVariant();
-            var showcaseTiming = ShowcaseNarrationTimingManifest.TryLoadFromNarrationPath(narrationTrackPath);
+            var showcaseTiming = ShowcaseNarrationTimingManifest.TryLoadFromNarrationPath(subtitleSourcePath);
             var karaokeScript = showcaseTiming != null
                 ? ShowcaseKaraokeTimingHelper.ResolveDisplayScript(showcaseTiming, narrationScript)
                 : narrationScript;
+            var karaokeNarrationPath = !string.IsNullOrWhiteSpace(narrationPathForSubtitles)
+                ? narrationPathForSubtitles.Trim()
+                : narrationForRender;
             KaraokeAssSubtitleService.KaraokeAssBurnInResult karaokeBurnIn = null;
             try
             {
@@ -3070,7 +3125,7 @@ namespace tiktok_Omni.Services
                     karaokeBurnIn = await KaraokeAssSubtitleService.TryCreateShowcaseBurnInAsync(
                         ffmpegExe,
                         karaokeScript,
-                        narrationForRender,
+                        karaokeNarrationPath,
                         renderDir,
                         logAction,
                         cancellationToken,
@@ -3089,6 +3144,43 @@ namespace tiktok_Omni.Services
                 }
 
                 var captionVideoFilter = karaokeBurnIn?.VideoFilterFragment ?? string.Empty;
+                var logoPlan = ShowcaseBrandOverlayHelper.BuildRenderPlan(renderSettings, outputCanvas.Width);
+                if (logoPlan.IsActive)
+                {
+                    logAction?.Invoke("[Showcase] Logo thương hiệu: "
+                        + ShowcaseBrandLogoPositionCatalog.GetDisplayLabel(logoPlan.PositionId)
+                        + " · " + logoPlan.ScaleWidthPercent + "% — "
+                        + Path.GetFileName(logoPlan.LogoPath));
+                }
+
+                var variantGradeForOverlay = string.Empty;
+                stitched = await ShowcaseBrandOverlayHelper.ApplyVideoOverlaysIfNeededAsync(
+                    stitched,
+                    renderDir,
+                    captionVideoFilter,
+                    variantGradeForOverlay,
+                    logoPlan,
+                    (args, ct) => RunFfmpegAsync(args, logAction, ct),
+                    cancellationToken).ConfigureAwait(false);
+                captionVideoFilter = string.Empty;
+
+                if (usePreRenderedAudio)
+                {
+                    var copyVideo = string.IsNullOrWhiteSpace(captionVideoFilter);
+                    logAction?.Invoke(copyVideo
+                        ? "[Showcase] Ghép video + audio thành phẩm (copy video, không encode lại)…"
+                        : "[Showcase] Ghép video + audio thành phẩm (có phụ đề)…");
+                    var preMuxArgs = BuildPreRenderedAudioMuxArgs(
+                        stitched,
+                        outputFile,
+                        narrationForRender,
+                        captionVideoFilter,
+                        fingerprintVariant,
+                        copyVideoStream: copyVideo);
+                    await RunFfmpegAsync(preMuxArgs, logAction, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
                 if (string.IsNullOrWhiteSpace(preparedTrendMusic))
                 {
                     var noMusicArgs = BuildMetadataRenderArgs(
@@ -3122,6 +3214,38 @@ namespace tiktok_Omni.Services
             }
         }
 
+        private static string BuildPreRenderedAudioMuxArgs(
+            string stitchedInput,
+            string outputFile,
+            string preRenderedAudioPath,
+            string captionVideoFilter,
+            RenderFingerprintVariant fingerprintVariant,
+            bool copyVideoStream = false)
+        {
+            var tagTitle = "tiktok_omni_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            var tagComment = "rendered_" + DateTime.Now.ToString("yyyyMMddHHmmss");
+            var safeVariant = fingerprintVariant ?? new RenderFingerprintVariant();
+            var audioArgs = "-c:a aac -b:a 320k -ar " + safeVariant.AudioSampleRate + " -movflags +faststart";
+            var metaArgs = "-map_metadata -1 -metadata title=\"" + tagTitle + "\" -metadata comment=\"" + tagComment
+                + "\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\"";
+
+            if (copyVideoStream && string.IsNullOrWhiteSpace(captionVideoFilter))
+            {
+                return "-y -i \"" + stitchedInput + "\" -i \"" + preRenderedAudioPath
+                    + "\" -map 0:v:0 -map 1:a:0 " + metaArgs + " -c:v copy " + audioArgs + " \"" + outputFile + "\"";
+            }
+
+            var qualityArgs = "-c:v libx264 -preset veryfast -crf 20 -profile:v high -level 4.2 -pix_fmt yuv420p -movflags +faststart -c:a aac -b:a 320k" +
+                              " -r " + safeVariant.FrameRateText +
+                              " -ar " + safeVariant.AudioSampleRate;
+            var variantGrade = "drawbox=x=0:y=0:w=iw:h=ih:color=" + safeVariant.ColorHex + "@0.01:t=fill";
+            var mergedVf = string.IsNullOrWhiteSpace(captionVideoFilter)
+                ? variantGrade
+                : captionVideoFilter + "," + variantGrade;
+            var vfArg = $" -vf \"{mergedVf}\"";
+            return $"-y -i \"{stitchedInput}\" -i \"{preRenderedAudioPath}\" -map 0:v:0 -map 1:a:0{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} \"{outputFile}\"";
+        }
+
         private static string BuildMetadataRenderArgs(string stitchedInput, string outputFile, string narrationPath, string musicPath, string musicVolume, bool hasAmbientAudio, string captionVideoFilter, RenderFingerprintVariant fingerprintVariant)
         {
             var tagTitle = "tiktok_omni_" + Guid.NewGuid().ToString("N").Substring(0, 8);
@@ -3136,16 +3260,18 @@ namespace tiktok_Omni.Services
                 ? variantGrade
                 : captionVideoFilter + "," + variantGrade;
             var vfArg = $" -vf \"{mergedVf}\"";
+            var narrGain = ShowcaseAudioMixHelper.FormatGain(ShowcaseAudioMixHelper.NarrationPremixGain);
+            var amixMusic = ShowcaseAudioMixHelper.AmixWithMusicSuffix;
             if (string.IsNullOrWhiteSpace(musicPath))
             {
                 if (hasNarration)
                 {
                     if (hasAmbientAudio)
                     {
-                        return $"-y -i \"{stitchedInput}\" -i \"{narrationPath}\" -filter_complex \"[0:a]volume=0.20[amb];[1:a]volume=1.0[narr];[amb][narr]amix=inputs=2:duration=first:dropout_transition=2[aout]\" -map 0:v:0 -map \"[aout]\"{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} -shortest \"{outputFile}\"";
+                        return $"-y -i \"{stitchedInput}\" -i \"{narrationPath}\" -filter_complex \"[0:a]volume=0.20[amb];[1:a]volume={narrGain}[narr];[amb][narr]amix=inputs=2{amixMusic}[aout]\" -map 0:v:0 -map \"[aout]\"{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} -shortest \"{outputFile}\"";
                     }
 
-                    return $"-y -i \"{stitchedInput}\" -i \"{narrationPath}\" -filter_complex \"[1:a]volume=1.0[aout]\" -map 0:v:0 -map \"[aout]\"{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} -shortest \"{outputFile}\"";
+                    return $"-y -i \"{stitchedInput}\" -i \"{narrationPath}\" -filter_complex \"[1:a]volume={narrGain}[aout]\" -map 0:v:0 -map \"[aout]\"{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} -shortest \"{outputFile}\"";
                 }
 
                 if (hasAmbientAudio)
@@ -3160,10 +3286,10 @@ namespace tiktok_Omni.Services
             {
                 if (hasAmbientAudio)
                 {
-                    return $"-y -i \"{stitchedInput}\" -i \"{narrationPath}\" -stream_loop -1 -i \"{musicPath}\" -filter_complex \"[0:a]volume=0.20[amb];[1:a]volume=1.0[narr];[2:a]volume={musicVolume}[music];[amb][narr][music]amix=inputs=3:duration=first:dropout_transition=2[aout]\" -map 0:v:0 -map \"[aout]\"{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} -shortest \"{outputFile}\"";
+                    return $"-y -i \"{stitchedInput}\" -i \"{narrationPath}\" -stream_loop -1 -i \"{musicPath}\" -filter_complex \"[0:a]volume=0.20[amb];[1:a]volume={narrGain}[narr];[2:a]volume={musicVolume}[music];[amb][narr][music]amix=inputs=3{amixMusic}[aout]\" -map 0:v:0 -map \"[aout]\"{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} -shortest \"{outputFile}\"";
                 }
 
-                return $"-y -i \"{stitchedInput}\" -i \"{narrationPath}\" -stream_loop -1 -i \"{musicPath}\" -filter_complex \"[1:a]volume=1.0[narr];[2:a]volume={musicVolume}[music];[narr][music]amix=inputs=2:duration=first:dropout_transition=2[aout]\" -map 0:v:0 -map \"[aout]\"{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} -shortest \"{outputFile}\"";
+                return $"-y -i \"{stitchedInput}\" -i \"{narrationPath}\" -stream_loop -1 -i \"{musicPath}\" -filter_complex \"[1:a]volume={narrGain}[narr];[2:a]volume={musicVolume}[music];[narr][music]amix=inputs=2{amixMusic}[aout]\" -map 0:v:0 -map \"[aout]\"{vfArg} -map_metadata -1 -metadata title=\"{tagTitle}\" -metadata comment=\"{tagComment}\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\" {qualityArgs} -shortest \"{outputFile}\"";
             }
 
             if (hasAmbientAudio)
@@ -3399,6 +3525,29 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException("No clips to stitch.");
             }
 
+            var clipsHaveAudio = true;
+            for (var i = 0; i < clipFiles.Count; i++)
+            {
+                if (!await HasAudioStreamAsync(clipFiles[i], logAction, cancellationToken).ConfigureAwait(false))
+                {
+                    clipsHaveAudio = false;
+                    break;
+                }
+            }
+
+            if (!clipsHaveAudio)
+            {
+                logAction?.Invoke("[Showcase] Clip không đồng nhất audio — ghép cảnh chỉ video (audio gắn sau).");
+                await BuildSmoothTransitionVideoOnlyAsync(
+                        clipFiles,
+                        outputFile,
+                        transitionDurationSeconds,
+                        logAction,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+
             if (clipFiles.Count == 1)
             {
                 var singleArgs = $"-y -i \"{clipFiles[0]}\" -c:v libx264 -preset slow -crf 14 -b:v 18M -maxrate 24M -bufsize 48M -pix_fmt yuv420p -c:a aac -b:a 320k \"{outputFile}\"";
@@ -3453,6 +3602,64 @@ namespace tiktok_Omni.Services
             catch (Exception)
             {
                 // Fallback to fade if hblur is unavailable on current ffmpeg build.
+                var fallbackArgs = args.Replace("transition=hblur", "transition=fade");
+                await RunFfmpegAsync(fallbackArgs, logAction, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task BuildSmoothTransitionVideoOnlyAsync(
+            IList<string> clipFiles,
+            string outputFile,
+            double transitionDurationSeconds,
+            Action<string> logAction,
+            CancellationToken cancellationToken)
+        {
+            if (clipFiles.Count == 1)
+            {
+                var singleArgs = $"-y -i \"{clipFiles[0]}\" -c:v libx264 -preset slow -crf 14 -b:v 18M -maxrate 24M -bufsize 48M -pix_fmt yuv420p -an \"{outputFile}\"";
+                await RunFfmpegAsync(singleArgs, logAction, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var durations = new List<double>();
+            for (var i = 0; i < clipFiles.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var d = await GetVideoDurationSecondsAsync(clipFiles[i], logAction, cancellationToken).ConfigureAwait(false);
+                durations.Add(Math.Max(2.0d, d));
+            }
+
+            var inputBuilder = new StringBuilder();
+            for (var i = 0; i < clipFiles.Count; i++)
+            {
+                inputBuilder.Append("-i \"").Append(clipFiles[i]).Append("\" ");
+            }
+
+            var transitionName = new[] { "fade", "hblur" }[DateTime.Now.Millisecond % 2];
+            var filter = new StringBuilder();
+            var currentVideo = "[0:v]";
+            var timeline = durations[0];
+            for (var i = 1; i < clipFiles.Count; i++)
+            {
+                var outV = i == clipFiles.Count - 1 ? "[vout]" : $"[vx{i}]";
+                var offset = Math.Max(0.1d, timeline - transitionDurationSeconds);
+                filter.Append(currentVideo)
+                      .Append("[").Append(i).Append(":v]")
+                      .Append("xfade=transition=").Append(transitionName)
+                      .Append(":duration=").Append(transitionDurationSeconds.ToString("0.00", CultureInfo.InvariantCulture))
+                      .Append(":offset=").Append(offset.ToString("0.00", CultureInfo.InvariantCulture))
+                      .Append(outV).Append(";");
+                currentVideo = outV;
+                timeline += durations[i] - transitionDurationSeconds;
+            }
+
+            var args = $"-y {inputBuilder}-filter_complex \"{filter}\" -map \"[vout]\" -an -r 30 -c:v libx264 -preset slow -crf 14 -b:v 18M -maxrate 24M -bufsize 48M -pix_fmt yuv420p \"{outputFile}\"";
+            try
+            {
+                await RunFfmpegAsync(args, logAction, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
                 var fallbackArgs = args.Replace("transition=hblur", "transition=fade");
                 await RunFfmpegAsync(fallbackArgs, logAction, cancellationToken).ConfigureAwait(false);
             }

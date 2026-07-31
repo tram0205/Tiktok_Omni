@@ -504,12 +504,17 @@ namespace tiktok_Omni
                         case ScriptGridRowKind.Scene when tag.Scene != null:
                             tag.Scene.SceneVoiceover = voice;
                             tag.Scene.ShowcaseTheme = _video.ShowcaseTheme;
+                            if (voice.Length > 0)
+                            {
+                                tag.Scene.ShowcaseSceneSilent = false;
+                            }
                             break;
                     }
                 }
             }
 
             _video.ApplySettingsToScenes();
+            ShowcaseVoiceoverHelper.SyncSilentFlagsFromVoiceover(_video.Scenes);
             ShowcaseSubtitleDisplayHelper.SyncDisplayTextFromSpeechEdits(_video, _speechBeforeEdit);
             ShowcaseContentDisplayHelper.RefreshContentLabels(_video);
             return true;

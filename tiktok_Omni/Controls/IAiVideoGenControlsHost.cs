@@ -64,6 +64,21 @@ namespace tiktok_Omni.Controls
         /// <summary>Showcase sản phẩm: thêm một dòng video mới trên lưới (mỗi dòng = 1 video, cảnh nằm trên storyboard).</summary>
         void AddShowcaseVideoRow();
 
+        /// <summary>Showcase sản phẩm: sao chép dòng đang chọn — bản sao thêm ở cuối lưới.</summary>
+        void CopyShowcaseVideoRow();
+
+        /// <summary>Showcase sản phẩm: đưa dòng đang chọn lên một vị trí trên lưới.</summary>
+        void MoveShowcaseVideoRowUp();
+
+        /// <summary>Showcase sản phẩm: đưa dòng đang chọn xuống một vị trí trên lưới.</summary>
+        void MoveShowcaseVideoRowDown();
+
+        /// <summary>Showcase sản phẩm: mở thùng rác — khôi phục dòng đã xóa (giữ 24 giờ).</summary>
+        void OpenShowcaseTrash();
+
+        /// <summary>Showcase: đẩy dòng đã render sang tab Đăng tự động (TikTok + Facebook + YouTube).</summary>
+        void PushShowcaseSelectionToAutoPost();
+
         /// <summary>Showcase sản phẩm: chọn ảnh trực tiếp từ máy (không cần link sản phẩm) để thêm cảnh mới.</summary>
         Task AddShowcaseImagesFromFilesAsync();
 
@@ -73,6 +88,8 @@ namespace tiktok_Omni.Controls
         void EndShowcaseTabWork();
 
         Task HandleShowcaseStopResumeAsync();
+
+        void RefreshShowcaseStopButton();
 
         /// <summary>True sau khi bấm «Dừng» — workflow bị khóa đến khi «Tiếp tục».</summary>
         bool IsShowcaseTabPaused { get; }

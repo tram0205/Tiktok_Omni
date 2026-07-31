@@ -71,6 +71,11 @@ namespace tiktok_Omni
                 tslStatusMain.Text = $"Jobs: {running} chạy, {pending} chờ";
             }
 
+            if (job.Kind == OmniJobKind.AffiliateDeepRender)
+            {
+                RefreshShowcaseStopButtonState();
+            }
+
             // ── Schedule-entry status sync ────────────────────────────────────────
             // Note: the InvokeRequired guard at the top of this method already
             // ensures we are on the UI thread (via BeginInvoke). The explicit

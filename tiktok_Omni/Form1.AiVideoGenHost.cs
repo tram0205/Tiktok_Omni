@@ -541,7 +541,14 @@ namespace tiktok_Omni
                     var grid = GetActiveProductGrid();
                     if (grid != null && TryDeleteSelectedProductInputGridRows(grid, out var deleted) && deleted > 0)
                     {
-                        Log("[Grid] Đã xóa " + deleted + " dòng.");
+                        if (ReferenceEquals(grid, dgvDeepDiveInput))
+                        {
+                            Log("[Grid] Đã xóa " + deleted + " dòng — đã chuyển vào thùng rác (giữ 24 giờ).");
+                        }
+                        else
+                        {
+                            Log("[Grid] Đã xóa " + deleted + " dòng.");
+                        }
                     }
 
                     return;

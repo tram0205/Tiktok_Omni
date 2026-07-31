@@ -2,7 +2,7 @@ using System;
 
 namespace tiktok_Omni.Services.Showcase
 {
-    /// <summary>Chuẩn bị text ElevenLabs Showcase — cùng voice_id, khác audio tag theo HookStyleCatalog (v3).</summary>
+    /// <summary>Chuẩn bị text ElevenLabs Showcase — hook đọc thuần; thân/CTA có thể dùng audio tag theo tone/phong cách.</summary>
     public static class ShowcaseElevenLabsTextHelper
     {
         public enum SegmentKind
@@ -40,11 +40,19 @@ namespace tiktok_Omni.Services.Showcase
             switch (kind)
             {
                 case SegmentKind.Hook:
+                    return PrepareHook(line, log);
                 case SegmentKind.Cta:
                     return PrepareHookOrCta(line, showcaseTts.HookStyleKey, isV3, log);
                 default:
                     return PrepareBody(line, showcaseTts.BodyStyleKey, showcaseTts.BodyVoiceToneId, isV3, log);
             }
+        }
+
+        /// <summary>Hook — không chèn [mischievously]/[excited]… (tránh tiếng đệm trước câu).</summary>
+        private static string PrepareHook(string line, Action<string> log)
+        {
+            log?.Invoke("[TTS] ElevenLabs hook · đọc thuần (không audio tag, không ngắt đệm).");
+            return line;
         }
 
         private static string PrepareHookOrCta(string line, string hookStyleKey, bool isV3, Action<string> log)
@@ -136,14 +144,7 @@ namespace tiktok_Omni.Services.Showcase
 
         private static string ApplyPauseOnly(string line, SegmentKind kind)
         {
-            switch (kind)
-            {
-                case SegmentKind.Hook:
-                case SegmentKind.Cta:
-                    return ElevenLabsTtsHelper.ApplyHookDeliveryPauses(line);
-                default:
-                    return line;
-            }
+            return line;
         }
     }
 }

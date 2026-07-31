@@ -54,6 +54,17 @@ namespace tiktok_Omni.Services.Showcase
         /// <summary>voice_id đã cấu hình trong Cài đặt cho persona; null nếu chọn Mặc định hoặc ô đang trống.</summary>
         public static string ResolveVoiceId(string personaKey, AppSettings settings)
         {
+            return ResolveVoiceId(personaKey, settings, ShowcaseVoicePresetDimensions.Language.ViSouth);
+        }
+
+        /// <summary>voice_id theo persona + vùng miền (6 ô Cài đặt = miền Nam).</summary>
+        public static string ResolveVoiceId(string personaKey, AppSettings settings, string languageId)
+        {
+            return ElevenVoiceRegionHelper.ResolveVoiceId(personaKey, languageId, settings);
+        }
+
+        internal static string ResolveConfiguredVoiceId(string personaKey, AppSettings settings)
+        {
             personaKey = Normalize(personaKey);
             if (settings == null || string.Equals(personaKey, None, StringComparison.OrdinalIgnoreCase))
             {

@@ -34,6 +34,8 @@ namespace tiktok_Omni.Services
 
         public string ShowcaseClipModeId { get; set; } = ShowcaseClipModePresets.DefaultId;
 
+        public string ShowcaseVideoFormatId { get; set; } = ShowcaseVideoFormatPresets.DefaultId;
+
         public string ShowcaseOutputAspectId { get; set; } = ShowcaseOutputAspectPresets.DefaultId;
 
         public string ShowcaseHookText { get; set; } = string.Empty;
@@ -114,6 +116,8 @@ namespace tiktok_Omni.Services
 
         public string ShowcaseVoiceAgeId { get; set; } = string.Empty;
 
+        public string ShowcaseVoiceGenderId { get; set; } = string.Empty;
+
         public string ShowcaseVoiceLanguageId { get; set; } = string.Empty;
 
         public string ShowcaseHookElevenPersona { get; set; } = string.Empty;
@@ -135,6 +139,8 @@ namespace tiktok_Omni.Services
         public string ShowcaseBodyVoicePresetId { get; set; } = string.Empty;
 
         public string ShowcaseBodyVoiceAgeId { get; set; } = string.Empty;
+
+        public string ShowcaseBodyVoiceGenderId { get; set; } = string.Empty;
 
         public string ShowcaseBodyVoiceLanguageId { get; set; } = string.Empty;
 
@@ -177,6 +183,20 @@ namespace tiktok_Omni.Services
         public string ShowcaseCtaSfxGeminiHint { get; set; } = string.Empty;
 
         public double ShowcaseTransitionSeconds { get; set; } = 0.6;
+
+        public bool ShowcaseBrandLogoEnabled { get; set; }
+
+        public string ShowcaseBrandLogoFile { get; set; } = string.Empty;
+
+        public string ShowcaseBrandLogoPositionId { get; set; } = ShowcaseBrandLogoPositionCatalog.BottomRight;
+
+        public int ShowcaseBrandLogoScaleWidthPercent { get; set; } = ShowcaseBrandOverlayHelper.DefaultScaleWidthPercent;
+
+        public int ShowcaseBrandLogoMarginX { get; set; } = ShowcaseBrandOverlayHelper.DefaultMargin;
+
+        public int ShowcaseBrandLogoMarginY { get; set; } = ShowcaseBrandOverlayHelper.DefaultMargin;
+
+        public int ShowcaseBrandLogoOpacityPercent { get; set; } = ShowcaseBrandOverlayHelper.DefaultOpacityPercent;
 
         public string PipelineStatus { get; set; } = "Chờ";
 
@@ -287,6 +307,7 @@ namespace tiktok_Omni.Services
                 ShowcaseUserTheme = video.ShowcaseUserTheme ?? string.Empty,
                 ShowcaseProductTypePrompt = video.ShowcaseProductTypePrompt ?? string.Empty,
                 ShowcaseClipModeId = ShowcaseClipModePresets.ResolveIdForGemini(video.ShowcaseClipModeId),
+                ShowcaseVideoFormatId = ShowcaseVideoFormatPresets.ResolveId(video.ShowcaseVideoFormatId),
                 ShowcaseOutputAspectId = ShowcaseOutputAspectPresets.ResolveId(
                     video.ShowcaseOutputAspectId,
                     null),
@@ -329,6 +350,7 @@ namespace tiktok_Omni.Services
                 ShowcaseBodyTtsEngine = video.ShowcaseBodyTtsEngine ?? string.Empty,
                 ShowcaseVoicePresetId = video.ShowcaseVoicePresetId ?? string.Empty,
                 ShowcaseVoiceAgeId = video.ShowcaseVoiceAgeId ?? string.Empty,
+                ShowcaseVoiceGenderId = video.ShowcaseVoiceGenderId ?? string.Empty,
                 ShowcaseVoiceLanguageId = video.ShowcaseVoiceLanguageId ?? string.Empty,
                 ShowcaseHookElevenPersona = video.ShowcaseHookElevenPersona ?? string.Empty,
                 ShowcaseVoiceToneId = video.ShowcaseVoiceToneId ?? string.Empty,
@@ -340,6 +362,7 @@ namespace tiktok_Omni.Services
                 ShowcaseEdgePitchOffsetHz = video.ShowcaseEdgePitchOffsetHz,
                 ShowcaseBodyVoicePresetId = video.ShowcaseBodyVoicePresetId ?? string.Empty,
                 ShowcaseBodyVoiceAgeId = video.ShowcaseBodyVoiceAgeId ?? string.Empty,
+                ShowcaseBodyVoiceGenderId = video.ShowcaseBodyVoiceGenderId ?? string.Empty,
                 ShowcaseBodyVoiceLanguageId = video.ShowcaseBodyVoiceLanguageId ?? string.Empty,
                 ShowcaseBodyElevenPersona = video.ShowcaseBodyElevenPersona ?? string.Empty,
                 ShowcaseBodyVoiceToneId = video.ShowcaseBodyVoiceToneId ?? string.Empty,
@@ -361,6 +384,13 @@ namespace tiktok_Omni.Services
                 ShowcaseCtaSfxVolumePercent = video.ShowcaseCtaSfxVolumePercent,
                 ShowcaseCtaSfxGeminiHint = video.ShowcaseCtaSfxGeminiHint ?? string.Empty,
                 ShowcaseTransitionSeconds = video.ShowcaseTransitionSeconds,
+                ShowcaseBrandLogoEnabled = video.ShowcaseBrandLogoEnabled,
+                ShowcaseBrandLogoFile = video.ShowcaseBrandLogoFile ?? string.Empty,
+                ShowcaseBrandLogoPositionId = video.ShowcaseBrandLogoPositionId ?? ShowcaseBrandLogoPositionCatalog.BottomRight,
+                ShowcaseBrandLogoScaleWidthPercent = video.ShowcaseBrandLogoScaleWidthPercent,
+                ShowcaseBrandLogoMarginX = video.ShowcaseBrandLogoMarginX,
+                ShowcaseBrandLogoMarginY = video.ShowcaseBrandLogoMarginY,
+                ShowcaseBrandLogoOpacityPercent = video.ShowcaseBrandLogoOpacityPercent,
                 PipelineStatus = video.PipelineStatus ?? "Chờ",
                 OutputVideoPath = video.OutputVideoPath ?? string.Empty,
                 ShowcaseSessionBaseDir = video.ShowcaseSessionBaseDir ?? string.Empty,
@@ -390,6 +420,7 @@ namespace tiktok_Omni.Services
                 ShowcaseUserTheme = entry.ShowcaseUserTheme ?? string.Empty,
                 ShowcaseProductTypePrompt = entry.ShowcaseProductTypePrompt ?? string.Empty,
                 ShowcaseClipModeId = ShowcaseClipModePresets.ResolveIdForGemini(entry.ShowcaseClipModeId),
+                ShowcaseVideoFormatId = ShowcaseVideoFormatPresets.ResolveId(entry.ShowcaseVideoFormatId),
                 ShowcaseOutputAspectId = ShowcaseOutputAspectPresets.ResolveId(entry.ShowcaseOutputAspectId, null),
                 ShowcaseHookText = entry.ShowcaseHookText ?? string.Empty,
                 ShowcaseSubtitleDisplayHook = entry.ShowcaseSubtitleDisplayHook ?? string.Empty,
@@ -432,6 +463,7 @@ namespace tiktok_Omni.Services
                 ShowcaseBodyTtsEngine = entry.ShowcaseBodyTtsEngine ?? string.Empty,
                 ShowcaseVoicePresetId = entry.ShowcaseVoicePresetId ?? string.Empty,
                 ShowcaseVoiceAgeId = entry.ShowcaseVoiceAgeId ?? string.Empty,
+                ShowcaseVoiceGenderId = entry.ShowcaseVoiceGenderId ?? string.Empty,
                 ShowcaseVoiceLanguageId = entry.ShowcaseVoiceLanguageId ?? string.Empty,
                 ShowcaseHookElevenPersona = entry.ShowcaseHookElevenPersona ?? string.Empty,
                 ShowcaseVoiceToneId = entry.ShowcaseVoiceToneId ?? string.Empty,
@@ -443,6 +475,7 @@ namespace tiktok_Omni.Services
                 ShowcaseEdgePitchOffsetHz = entry.ShowcaseEdgePitchOffsetHz,
                 ShowcaseBodyVoicePresetId = entry.ShowcaseBodyVoicePresetId ?? string.Empty,
                 ShowcaseBodyVoiceAgeId = entry.ShowcaseBodyVoiceAgeId ?? string.Empty,
+                ShowcaseBodyVoiceGenderId = entry.ShowcaseBodyVoiceGenderId ?? string.Empty,
                 ShowcaseBodyVoiceLanguageId = entry.ShowcaseBodyVoiceLanguageId ?? string.Empty,
                 ShowcaseBodyElevenPersona = entry.ShowcaseBodyElevenPersona ?? string.Empty,
                 ShowcaseBodyVoiceToneId = entry.ShowcaseBodyVoiceToneId ?? string.Empty,
@@ -464,6 +497,17 @@ namespace tiktok_Omni.Services
                 ShowcaseCtaSfxVolumePercent = entry.ShowcaseCtaSfxVolumePercent,
                 ShowcaseCtaSfxGeminiHint = entry.ShowcaseCtaSfxGeminiHint ?? string.Empty,
                 ShowcaseTransitionSeconds = entry.ShowcaseTransitionSeconds > 0 ? entry.ShowcaseTransitionSeconds : 0.6,
+                ShowcaseBrandLogoEnabled = entry.ShowcaseBrandLogoEnabled,
+                ShowcaseBrandLogoFile = entry.ShowcaseBrandLogoFile ?? string.Empty,
+                ShowcaseBrandLogoPositionId = entry.ShowcaseBrandLogoPositionId ?? ShowcaseBrandLogoPositionCatalog.BottomRight,
+                ShowcaseBrandLogoScaleWidthPercent = entry.ShowcaseBrandLogoScaleWidthPercent > 0
+                    ? entry.ShowcaseBrandLogoScaleWidthPercent
+                    : ShowcaseBrandOverlayHelper.DefaultScaleWidthPercent,
+                ShowcaseBrandLogoMarginX = entry.ShowcaseBrandLogoMarginX,
+                ShowcaseBrandLogoMarginY = entry.ShowcaseBrandLogoMarginY,
+                ShowcaseBrandLogoOpacityPercent = entry.ShowcaseBrandLogoOpacityPercent > 0
+                    ? entry.ShowcaseBrandLogoOpacityPercent
+                    : ShowcaseBrandOverlayHelper.DefaultOpacityPercent,
                 PipelineStatus = entry.PipelineStatus ?? "Chờ",
                 OutputVideoPath = entry.OutputVideoPath ?? string.Empty,
                 ShowcaseSessionBaseDir = entry.ShowcaseSessionBaseDir ?? string.Empty,
@@ -569,6 +613,13 @@ namespace tiktok_Omni.Services
                 && string.Equals(scene.ShowcaseClipTool, ShowcaseClipToolHelper.ToolZoom, StringComparison.Ordinal))
             {
                 scene.ShowcaseZoomStyleId = ShowcaseZoomStyleCatalog.InferFromZoomHint(scene.ZoomHint);
+            }
+
+            scene.ShowcaseZoomSpeedId = ShowcaseZoomSpeedCatalog.NormalizeId(scene.ShowcaseZoomSpeedId);
+            if (string.IsNullOrEmpty(scene.ShowcaseZoomSpeedId)
+                && string.Equals(scene.ShowcaseClipTool, ShowcaseClipToolHelper.ToolZoom, StringComparison.Ordinal))
+            {
+                scene.ShowcaseZoomSpeedId = ShowcaseZoomSpeedCatalog.ResolveSpeedId(null, scene.ZoomHint);
             }
             if (scene.ShowcaseClipDurationSeconds > 0)
             {

@@ -159,6 +159,126 @@ namespace tiktok_Omni
             NotifyShowcaseDraftDirty();
         }
 
+        void IAiVideoGenControlsHost.CopyShowcaseVideoRow()
+        {
+            EnsureShowcaseVideoBufferMigrated();
+            if (!TryGetShowcaseSelectedVideosOrdered(out var sources, "Chọn ít nhất một dòng video trên lưới để sao chép."))
+            {
+                return;
+            }
+
+            var buffer = GetShowcaseVideoBuffer();
+            ShowcaseVideoItem lastClone = null;
+            foreach (var source in sources)
+            {
+                var clone = CloneShowcaseVideoRow(source);
+                if (clone == null)
+                {
+                    continue;
+                }
+
+                buffer.Add(clone);
+                lastClone = clone;
+            }
+
+            if (lastClone == null)
+            {
+                return;
+            }
+
+            _activeShowcaseVideoId = lastClone.VideoId;
+            _showcaseSession = null;
+            SyncBuffersToGrids();
+            SelectShowcaseVideoGridRow(lastClone);
+            RefreshAffiliateDeepStoryboard();
+            RefreshAiVideoGenModeReadinessLabels();
+            LogShowcase("[Showcase] Đã sao chép " + sources.Count + " dòng — bản sao nằm cuối lưới («" + lastClone.ProductName + "»).");
+            NotifyShowcaseDraftDirty();
+        }
+
+        void IAiVideoGenControlsHost.MoveShowcaseVideoRowUp()
+        {
+            TryMoveShowcaseVideoRow(-1);
+        }
+
+        void IAiVideoGenControlsHost.MoveShowcaseVideoRowDown()
+        {
+            TryMoveShowcaseVideoRow(1);
+        }
+
+        private void TryMoveShowcaseVideoRow(int direction)
+        {
+            if (direction == 0)
+            {
+                return;
+            }
+
+            EnsureShowcaseVideoBufferMigrated();
+            if (!TryGetShowcaseSelectedVideosOrdered(out var selected, "Chọn một dòng video trên lưới để di chuyển."))
+            {
+                return;
+            }
+
+            var video = selected[0];
+            var buffer = GetShowcaseVideoBuffer();
+            var visible = buffer.Where(ShouldShowShowcaseVideo).ToList();
+            var visibleIndex = visible.FindIndex(v => v != null && v.VideoId == video.VideoId);
+            if (visibleIndex < 0)
+            {
+                return;
+            }
+
+            var targetVisibleIndex = visibleIndex + direction;
+            if (targetVisibleIndex < 0 || targetVisibleIndex >= visible.Count)
+            {
+                return;
+            }
+
+            var swapWith = visible[targetVisibleIndex];
+            var bufferIndex = buffer.IndexOf(video);
+            var swapBufferIndex = buffer.IndexOf(swapWith);
+            if (bufferIndex < 0 || swapBufferIndex < 0)
+            {
+                return;
+            }
+
+            buffer[bufferIndex] = swapWith;
+            buffer[swapBufferIndex] = video;
+
+            SyncBuffersToGrids();
+            SelectShowcaseVideoGridRow(video);
+            RefreshAffiliateDeepStoryboard();
+            NotifyShowcaseDraftDirty();
+        }
+
+        private static ShowcaseVideoItem CloneShowcaseVideoRow(ShowcaseVideoItem source)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            var entry = ShowcaseDraftStore.FromVideo(source, CloneAiVideoGenItem);
+            var clone = ShowcaseDraftStore.ToVideo(entry, CloneAiVideoGenItem);
+            clone.VideoId = Guid.NewGuid();
+
+            var baseName = (source.ProductName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(baseName))
+            {
+                baseName = "Video";
+            }
+
+            clone.ProductName = baseName + " (bản sao)";
+            clone.PipelineStatus = "Chờ";
+            clone.OutputVideoPath = string.Empty;
+            clone.ShowcaseSessionBaseDir = string.Empty;
+            clone.ShowcaseClipsDir = string.Empty;
+            clone.ShowcaseVoiceoverClipFingerprint = 0;
+            clone.ApplySettingsToScenes();
+            clone.RefreshDisplayFields();
+            return clone;
+        }
+
         private void SelectShowcaseVideoGridRow(ShowcaseVideoItem video)
         {
             if (video == null || dgvDeepDiveInput == null || dgvDeepDiveInput.IsDisposed)
@@ -404,6 +524,11 @@ namespace tiktok_Omni
         private string GetShowcaseClipModeForVideo(ShowcaseVideoItem video)
         {
             return ShowcaseClipModePresets.ResolveIdForGemini(video?.ShowcaseClipModeId);
+        }
+
+        private string GetShowcaseVideoFormatForVideo(ShowcaseVideoItem video)
+        {
+            return ShowcaseVideoFormatPresets.ResolveId(video?.ShowcaseVideoFormatId);
         }
 
         private string GetShowcaseOutputAspectIdForVideo(ShowcaseVideoItem video)

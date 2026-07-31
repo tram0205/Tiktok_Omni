@@ -94,6 +94,9 @@ namespace tiktok_Omni.Services
         /// <summary>Showcase: preset zoom FFmpeg — push_in, pan_left, drift, … (<see cref="ShowcaseZoomStyleCatalog"/>).</summary>
         public string ShowcaseZoomStyleId { get; set; } = string.Empty;
 
+        /// <summary>Showcase: tốc độ Ken Burns — slow, medium, fast (<see cref="ShowcaseZoomSpeedCatalog"/>).</summary>
+        public string ShowcaseZoomSpeedId { get; set; } = string.Empty;
+
         /// <summary>Showcase: thời lượng clip gợi ý (giây) — Gemini / ước từ thoại; dùng cho clip Zoom FFmpeg.</summary>
         public double ShowcaseClipDurationSeconds { get; set; }
 

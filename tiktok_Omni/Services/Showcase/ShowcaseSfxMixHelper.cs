@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -208,7 +207,8 @@ namespace tiktok_Omni.Services.Showcase
                 inputs.Add("-i \"" + cue.Path + "\"");
             }
 
-            var filterParts = new List<string> { "[0:a]aresample=48000,volume=1.0[narr]" };
+            var narrGain = ShowcaseAudioMixHelper.FormatGain(ShowcaseAudioMixHelper.NarrationPremixGain);
+            var filterParts = new List<string> { "[0:a]aresample=48000,volume=" + narrGain + "[narr]" };
             var mixLabels = new List<string> { "[narr]" };
             for (var i = 0; i < cues.Count; i++)
             {
@@ -221,42 +221,21 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             filterParts.Add(string.Join("", mixLabels) + "amix=inputs=" + mixLabels.Count +
-                            ":duration=first:dropout_transition=0.3[aout]");
+                            ShowcaseAudioMixHelper.AmixWithSfxSuffix + "[aout]");
 
             var args = "-y " + string.Join(" ", inputs) +
                        " -filter_complex \"" + string.Join(";", filterParts) + "\"" +
                        " -map \"[aout]\" -c:a libmp3lame -q:a 4 \"" + outputPath + "\"";
 
             logAction?.Invoke("[Showcase SFX] FFmpeg trộn " + cues.Count + " track…");
-            await RunFfmpegAsync(ffmpeg, args, logAction, cancellationToken).ConfigureAwait(false);
-        }
-
-        private static async Task RunFfmpegAsync(
-            string ffmpegExecutable,
-            string args,
-            Action<string> logAction,
-            CancellationToken cancellationToken)
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = ffmpegExecutable,
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using (var process = new Process { StartInfo = psi })
-            {
-                process.Start();
-                await ProcessCancellationHelper.WaitUntilExitAsync(process, cancellationToken, 180).ConfigureAwait(false);
-                if (process.ExitCode != 0)
-                {
-                    var err = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
-                    logAction?.Invoke("[Showcase SFX] FFmpeg: " + err);
-                    throw new InvalidOperationException("FFmpeg SFX mix failed (exit " + process.ExitCode + ").");
-                }
-            }
+            await FfmpegProcessRunner.RunAsync(
+                    ffmpeg,
+                    args,
+                    logAction,
+                    cancellationToken,
+                    logPrefix: "[Showcase SFX]",
+                    timeoutSeconds: FfmpegProcessRunner.DefaultTimeoutSeconds)
+                .ConfigureAwait(false);
         }
     }
 }

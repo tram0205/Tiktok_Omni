@@ -28,7 +28,14 @@ namespace tiktok_Omni.Services.Showcase
         public static ShowcaseThemePreset Auto { get; } =
             new ShowcaseThemePreset("auto", "— Tự động (Gemini) —", string.Empty);
 
-        public static IReadOnlyList<ShowcaseThemePreset> All { get; } = new[]
+        public static ShowcaseThemePreset Custom { get; } =
+            new ShowcaseThemePreset("custom", "Tuỳ chỉnh: người dùng tự nhập", string.Empty);
+
+        public static bool IsCustomPreset(ShowcaseThemePreset preset) =>
+            preset != null && string.Equals(preset.Id, Custom.Id, StringComparison.Ordinal);
+
+        /// <summary>Chủ đề quảng cáo SP — dùng cho «Quảng cáo SP» và «Không CTA».</summary>
+        public static IReadOnlyList<ShowcaseThemePreset> ProductAdAll { get; } = new[]
         {
             Auto,
             new ShowcaseThemePreset(
@@ -66,10 +73,106 @@ namespace tiktok_Omni.Services.Showcase
             new ShowcaseThemePreset(
                 "gift",
                 "Quà tặng / mùa lễ",
-                "Góc quà tặng: phù hợp tặng người thân/dịp đặc biệt — gợi cảm xúc và lý do nên mua làm quà.")
+                "Góc quà tặng: phù hợp tặng người thân/dịp đặc biệt — gợi cảm xúc và lý do nên mua làm quà."),
+            Custom
         };
 
+        /// <summary>Chủ đề kể chuyện — dùng khi kiểu video «Kể chuyện».</summary>
+        public static IReadOnlyList<ShowcaseThemePreset> StorytellingAll { get; } = new[]
+        {
+            Auto,
+            new ShowcaseThemePreset(
+                "story-journey",
+                "Hành trình / kỷ niệm",
+                "Góc kể chuyện: một hành trình hoặc kỷ niệm cá nhân gắn với sản phẩm — cảm xúc chân thật, không bán hàng cứng."),
+            new ShowcaseThemePreset(
+                "story-moment",
+                "Khoảnh khắc đáng nhớ",
+                "Góc khoảnh khắc: một scene đời thường đẹp (đi chơi, lễ, gặp bạn…) — sản phẩm xuất hiện tự nhiên trong câu chuyện."),
+            new ShowcaseThemePreset(
+                "story-experience",
+                "Trải nghiệm thật",
+                "Góc review nhẹ: chia sẻ cảm nhận thật sau khi dùng/mặc — giọng bạn bè kể, không quảng cáo sáo."),
+            new ShowcaseThemePreset(
+                "story-behind",
+                "Behind the scenes",
+                "Góc hậu trường: chuẩn bị, chọn đồ, may đo, buổi chụp — tò mò quá trình phía sau sản phẩm."),
+            new ShowcaseThemePreset(
+                "story-empathy",
+                "Cảm xúc / đồng cảm",
+                "Góc cảm xúc: nói về cảm giác, tự tin, kỷ niệm gia đình — khách đồng cảm trước, sản phẩm là nhân vật phụ."),
+            Custom
+        };
+
+        /// <summary>Chủ đề tutorial — dùng khi kiểu video «Tutorial / hướng dẫn».</summary>
+        public static IReadOnlyList<ShowcaseThemePreset> TutorialAll { get; } = new[]
+        {
+            Auto,
+            new ShowcaseThemePreset(
+                "tut-outfit",
+                "Cách phối đồ",
+                "Góc hướng dẫn phối: 2–3 combo cụ thể với sản phẩm — từng bước dễ làm theo, nói rõ vì sao hợp."),
+            new ShowcaseThemePreset(
+                "tut-size",
+                "Mẹo chọn size / màu",
+                "Góc chọn đúng: hướng dẫn chọn size, màu, form theo dáng người — giải quyết nỗi lo hay gặp."),
+            new ShowcaseThemePreset(
+                "tut-care",
+                "Bảo quản / giặt",
+                "Góc chăm sóc: cách giặt, phơi, cất sản phẩm để bền — hữu ích, tăng giá trị cảm nhận."),
+            new ShowcaseThemePreset(
+                "tut-compare",
+                "So sánh nhanh",
+                "Góc so sánh ngắn: 2–3 điểm khác biệt rõ (chất liệu, form, giá trị) — giúp khách quyết định nhanh."),
+            new ShowcaseThemePreset(
+                "tut-tips",
+                "Tips ít người biết",
+                "Góc mẹo nhỏ: 1–2 trick dùng/mặc ít người biết — mở đầu hữu ích, sản phẩm là công cụ thực hiện."),
+            Custom
+        };
+
+        /// <summary>Tương thích cũ — alias của <see cref="ProductAdAll"/>.</summary>
+        public static IReadOnlyList<ShowcaseThemePreset> All => ProductAdAll;
+
+        /// <summary>Danh sách chủ đề theo kiểu video đã chọn.</summary>
+        public static IReadOnlyList<ShowcaseThemePreset> ForFormat(string formatId)
+        {
+            var id = ShowcaseVideoFormatPresets.ResolveId(formatId);
+            if (id == ShowcaseVideoFormatPresets.StorytellingId)
+            {
+                return StorytellingAll;
+            }
+
+            if (id == ShowcaseVideoFormatPresets.TutorialId)
+            {
+                return TutorialAll;
+            }
+
+            return ProductAdAll;
+        }
+
+        public static string ThemeSubtitleForFormat(string formatId)
+        {
+            var id = ShowcaseVideoFormatPresets.ResolveId(formatId);
+            if (id == ShowcaseVideoFormatPresets.StorytellingId)
+            {
+                return "Preset kể chuyện + tùy chỉnh → Gemini";
+            }
+
+            if (id == ShowcaseVideoFormatPresets.TutorialId)
+            {
+                return "Preset hướng dẫn + tùy chỉnh → Gemini";
+            }
+
+            return "Preset quảng cáo + tùy chỉnh → Gemini";
+        }
+
         public static int FindIndexByPrompt(string promptHint)
+        {
+            return FindIndexByPromptInList(ForFormat(ShowcaseVideoFormatPresets.DefaultId), promptHint);
+        }
+
+        public static int FindIndexByPromptInList(IReadOnlyList<ShowcaseThemePreset> presets, string promptHint)
         {
             var normalized = Normalize(promptHint);
             if (string.IsNullOrEmpty(normalized))
@@ -77,15 +180,38 @@ namespace tiktok_Omni.Services.Showcase
                 return 0;
             }
 
-            for (var i = 0; i < All.Count; i++)
+            if (presets == null)
             {
-                if (string.Equals(Normalize(All[i].PromptHint), normalized, StringComparison.Ordinal))
+                return 0;
+            }
+
+            for (var i = 0; i < presets.Count; i++)
+            {
+                if (string.Equals(Normalize(presets[i].PromptHint), normalized, StringComparison.Ordinal))
                 {
                     return i;
                 }
             }
 
-            return 0;
+            return -1;
+        }
+
+        public static int FindCustomIndexInList(IReadOnlyList<ShowcaseThemePreset> presets)
+        {
+            if (presets == null)
+            {
+                return -1;
+            }
+
+            for (var i = 0; i < presets.Count; i++)
+            {
+                if (IsCustomPreset(presets[i]))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
 
         public static string GetDisplayLabel(string promptHint)
@@ -96,9 +222,14 @@ namespace tiktok_Omni.Services.Showcase
                 return Auto.DisplayLabel;
             }
 
-            var preset = All.FirstOrDefault(p =>
-                string.Equals(Normalize(p.PromptHint), normalized, StringComparison.Ordinal));
+            var preset = FindPresetByPromptHint(normalized);
             return preset?.DisplayLabel ?? promptHint.Trim();
+        }
+
+        private static ShowcaseThemePreset FindPresetByPromptHint(string normalizedPromptHint)
+        {
+            return ProductAdAll.Concat(StorytellingAll).Concat(TutorialAll)
+                .FirstOrDefault(p => string.Equals(Normalize(p.PromptHint), normalizedPromptHint, StringComparison.Ordinal));
         }
 
         public static string ResolvePromptForGemini(string promptHint) => Normalize(promptHint);
@@ -131,8 +262,13 @@ namespace tiktok_Omni.Services.Showcase
                 return;
             }
 
-            foreach (var preset in All)
+            foreach (var preset in ProductAdAll.Concat(StorytellingAll).Concat(TutorialAll))
             {
+                if (IsCustomPreset(preset))
+                {
+                    continue;
+                }
+
                 if (string.Equals(preset.DisplayLabel, text, StringComparison.OrdinalIgnoreCase))
                 {
                     video.ShowcaseThemePrompt = preset.PromptHint ?? string.Empty;

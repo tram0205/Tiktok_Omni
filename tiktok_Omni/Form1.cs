@@ -7879,6 +7879,7 @@ namespace tiktok_Omni
                 LoadVideoReupDraftIntoGrid();
                 LoadSlideshowDraftIntoBuffer();
                 LoadShowcaseDraftIntoBuffer();
+                InitializeShowcaseTrashMaintenance();
                 LoadAffiliateDraftIntoGrid();
                 LoadHuntProductDraftIntoGrid();
                 LoadSchedule();

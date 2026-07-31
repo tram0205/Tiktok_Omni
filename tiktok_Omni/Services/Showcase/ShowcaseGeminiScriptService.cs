@@ -43,7 +43,9 @@ namespace tiktok_Omni.Services.Showcase
 
             AppSettings settings,
 
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+
+            string userVideoFormatId = null)
 
         {
 
@@ -103,7 +105,9 @@ namespace tiktok_Omni.Services.Showcase
 
                 scenesWithLocalImages.Count,
 
-                settings);
+                settings,
+
+                userVideoFormatId);
 
 
 
@@ -159,6 +163,8 @@ namespace tiktok_Omni.Services.Showcase
 
             var used = new HashSet<int>();
 
+            var mappedScenes = new List<ShowcaseClipToolAlternationHelper.MappedScene>();
+
             foreach (var scene in dto.scenes.OrderBy(s => s.order))
 
             {
@@ -195,81 +201,32 @@ namespace tiktok_Omni.Services.Showcase
 
                 var clipTool = ShowcaseClipToolHelper.EnforceToolForMode(clipModeId, imageKind, scene.clip_tool);
 
-                item.ShowcaseImageKind = imageKind;
+                mappedScenes.Add(new ShowcaseClipToolAlternationHelper.MappedScene
+                {
+                    Item = item,
+                    Dto = scene,
+                    ImageKind = imageKind,
+                    ClipTool = clipTool,
+                    StoryIndex = mappedScenes.Count
+                });
 
+            }
+
+            ShowcaseClipToolAlternationHelper.Apply(mappedScenes, clipModeId);
+
+            foreach (var mapped in mappedScenes)
+            {
+                var item = mapped.Item;
+                var scene = mapped.Dto;
+                var imageKind = mapped.ImageKind;
+                var clipTool = mapped.ClipTool;
+
+                item.ShowcaseImageKind = imageKind;
                 item.ShowcaseClipTool = clipTool;
 
-
-
-                item.VeoPrompt = string.Empty;
-
-                item.KlingPrompt = string.Empty;
-
-                item.ZoomHint = string.Empty;
-                item.ShowcaseZoomStyleId = string.Empty;
-
-
-
-                if (string.Equals(clipTool, ShowcaseClipToolHelper.ToolVeo, StringComparison.Ordinal))
-
-                {
-
-                    item.VeoPrompt = ShowcaseVeoPromptSanitizer.Sanitize(
-
-                        (scene.veo_prompt ?? string.Empty).Trim(),
-
-                        ordered.Count);
-
-                }
-
-                else if (string.Equals(clipTool, ShowcaseClipToolHelper.ToolKling, StringComparison.Ordinal))
-
-                {
-
-                    var klingRaw = (scene.kling_prompt ?? string.Empty).Trim();
-
-                    if (string.IsNullOrWhiteSpace(klingRaw))
-
-                    {
-
-                        klingRaw = (scene.veo_prompt ?? string.Empty).Trim();
-
-                    }
-
-
-
-                    item.KlingPrompt = ShowcaseKlingPromptSanitizer.Sanitize(klingRaw, ordered.Count);
-
-                }
-
-                else
-
-                {
-
-                    var zoomRaw = (scene.zoom_hint ?? string.Empty).Trim();
-
-                    if (string.IsNullOrWhiteSpace(zoomRaw))
-
-                    {
-
-                        zoomRaw = InferDefaultZoomHint(imageKind, scene.veo_prompt);
-
-                    }
-
-
-
-                    item.ZoomHint = zoomRaw;
-                    item.ShowcaseZoomStyleId = ShowcaseZoomStyleCatalog.ResolveStyleId(
-                        scene.zoom_style,
-                        zoomRaw,
-                        imageKind,
-                        ordered.Count);
-                }
-
+                ApplyGeminiClipPrompts(item, scene, imageKind, clipTool, mapped.StoryIndex);
                 ApplyGeminiSfxToScene(item, scene, settings);
-
                 ordered.Add(item);
-
             }
 
 
@@ -290,6 +247,10 @@ namespace tiktok_Omni.Services.Showcase
 
 
 
+            var ctaText = ShowcaseCtaDedupHelper.NormalizeScriptCta(
+                ordered,
+                (dto.cta_text ?? string.Empty).Trim());
+
             return new ShowcaseScriptResult
 
             {
@@ -298,7 +259,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 HookText = (dto.hook_text ?? string.Empty).Trim(),
 
-                CtaText = (dto.cta_text ?? string.Empty).Trim(),
+                CtaText = ctaText,
 
                 OrderedScenes = ordered,
 
@@ -312,10 +273,62 @@ namespace tiktok_Omni.Services.Showcase
 
                 BackgroundMusicFile = ResolveGeminiMusicFile(settings, dto.background_music_id),
 
-                BackgroundMusicGeminiHint = (dto.background_music_hint ?? string.Empty).Trim()
+                BackgroundMusicGeminiHint = (dto.background_music_hint ?? string.Empty).Trim(),
+
+                ProductionHints = ShowcaseGeminiProductionHintsHelper.ResolveFromDto(dto)
 
             };
 
+        }
+
+        private static void ApplyGeminiClipPrompts(
+            AiVideoGenInputItem item,
+            ShowcaseSceneDto scene,
+            string imageKind,
+            string clipTool,
+            int storyIndex)
+        {
+            item.VeoPrompt = string.Empty;
+            item.KlingPrompt = string.Empty;
+            item.ZoomHint = string.Empty;
+            item.ShowcaseZoomStyleId = string.Empty;
+            item.ShowcaseZoomSpeedId = string.Empty;
+
+            if (string.Equals(clipTool, ShowcaseClipToolHelper.ToolVeo, StringComparison.Ordinal))
+            {
+                item.VeoPrompt = ShowcaseVeoPromptSanitizer.Sanitize(
+                    (scene.veo_prompt ?? string.Empty).Trim(),
+                    storyIndex);
+                return;
+            }
+
+            if (string.Equals(clipTool, ShowcaseClipToolHelper.ToolKling, StringComparison.Ordinal))
+            {
+                var klingRaw = (scene.kling_prompt ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(klingRaw))
+                {
+                    klingRaw = (scene.veo_prompt ?? string.Empty).Trim();
+                }
+
+                item.KlingPrompt = ShowcaseKlingPromptSanitizer.Sanitize(klingRaw, storyIndex);
+                return;
+            }
+
+            var zoomRaw = (scene.zoom_hint ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(zoomRaw))
+            {
+                zoomRaw = InferDefaultZoomHint(imageKind, scene.veo_prompt);
+            }
+
+            item.ZoomHint = zoomRaw;
+            item.ShowcaseZoomStyleId = ShowcaseZoomStyleCatalog.ResolveStyleId(
+                scene.zoom_style,
+                zoomRaw,
+                imageKind,
+                storyIndex);
+            item.ShowcaseZoomSpeedId = ShowcaseZoomSpeedCatalog.ResolveSpeedId(
+                scene.zoom_speed,
+                zoomRaw);
         }
 
         private static void ApplyGeminiSfxToScene(AiVideoGenInputItem item, ShowcaseSceneDto scene, AppSettings settings)

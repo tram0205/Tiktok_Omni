@@ -192,7 +192,8 @@ namespace tiktok_Omni.Services.Showcase
 
             }
 
-            if (string.Equals(mode, ShowcaseClipModePresets.ZoomKlingId, StringComparison.Ordinal))
+            if (string.Equals(mode, ShowcaseClipModePresets.ZoomKlingId, StringComparison.Ordinal)
+                || string.Equals(mode, "veo_kling", StringComparison.Ordinal))
 
             {
 
@@ -200,23 +201,149 @@ namespace tiktok_Omni.Services.Showcase
 
             }
 
-            if (ShowcaseClipModePresets.IsGeminiSuggestMode(mode))
+            if (ShowcaseClipModePresets.IsPerSceneToolChoiceMode(mode))
 
             {
 
                 var tool = NormalizeClipTool(suggestedTool);
 
-                return string.IsNullOrEmpty(tool)
+                if (string.IsNullOrEmpty(tool))
 
-                    ? ResolveDefaultTool(mode, imageKind)
+                {
 
-                    : tool;
+                    tool = ResolveDefaultTool(mode, imageKind);
+
+                }
+
+                return ApplyMandatoryToolRules(mode, imageKind, tool);
 
             }
 
 
 
             return ResolveDefaultTool(mode, imageKind);
+
+        }
+
+
+
+        /// <summary>Quy tắc cấm: flatlay không Kling; on-model không Veo — còn lại theo chế độ clip.</summary>
+
+        public static string ApplyMandatoryToolRules(string clipModeId, string imageKind, string tool)
+
+        {
+
+            var mode = ShowcaseClipModePresets.ResolveIdForGemini(clipModeId);
+
+            var flatlay = string.Equals(NormalizeImageKind(imageKind), KindFlatlay, StringComparison.Ordinal);
+
+            var t = NormalizeClipTool(tool);
+
+            if (string.IsNullOrEmpty(t))
+
+            {
+
+                t = ResolveDefaultTool(mode, imageKind);
+
+            }
+
+
+
+            if (flatlay && string.Equals(t, ToolKling, StringComparison.Ordinal))
+
+            {
+
+                t = ShowcaseClipModePresets.ModeAllowsInAppZoom(mode) ? ToolZoom : ToolVeo;
+
+            }
+
+
+
+            if (!flatlay && string.Equals(t, ToolVeo, StringComparison.Ordinal))
+
+            {
+
+                if (string.Equals(mode, "veo_kling", StringComparison.Ordinal)
+
+                    || string.Equals(mode, ShowcaseClipModePresets.KlingOnlyId, StringComparison.Ordinal))
+
+                {
+
+                    t = ToolKling;
+
+                }
+
+                else
+
+                {
+
+                    t = ToolZoom;
+
+                }
+
+            }
+
+
+
+            if (string.Equals(mode, "veo_zoom", StringComparison.Ordinal))
+
+            {
+
+                if (flatlay)
+
+                {
+
+                    return string.Equals(t, ToolZoom, StringComparison.Ordinal) ? ToolZoom : ToolVeo;
+
+                }
+
+                return ToolZoom;
+
+            }
+
+
+
+            if (string.Equals(mode, "veo_kling", StringComparison.Ordinal))
+
+            {
+
+                return flatlay ? ToolVeo : ToolKling;
+
+            }
+
+
+
+            if (string.Equals(mode, ShowcaseClipModePresets.ZoomKlingId, StringComparison.Ordinal))
+
+            {
+
+                return flatlay ? ToolZoom : ToolKling;
+
+            }
+
+
+
+            if (string.Equals(mode, ShowcaseClipModePresets.KlingVeoZoomId, StringComparison.Ordinal)
+
+                || string.Equals(mode, ShowcaseClipModePresets.GeminiSuggestId, StringComparison.Ordinal))
+
+            {
+
+                if (flatlay)
+
+                {
+
+                    return string.Equals(t, ToolZoom, StringComparison.Ordinal) ? ToolZoom : ToolVeo;
+
+                }
+
+                return string.Equals(t, ToolKling, StringComparison.Ordinal) ? ToolKling : ToolZoom;
+
+            }
+
+
+
+            return t;
 
         }
 

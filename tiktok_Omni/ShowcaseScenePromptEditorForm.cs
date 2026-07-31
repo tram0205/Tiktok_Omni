@@ -406,7 +406,14 @@ namespace tiktok_Omni
 
                 var zoomBox = MakeBox(scene.ZoomHint);
 
-                AddLabeledField(section, "Prompt Veo (Flow I2V)", veoBox, 120,
+                var veoLabel = string.Equals(
+                        ShowcaseClipToolHelper.NormalizeImageKind(scene.ShowcaseImageKind),
+                        ShowcaseClipToolHelper.KindFlatlay,
+                        StringComparison.Ordinal)
+                    ? "Prompt Veo flatlay — mô tả đúng ảnh; tay OK (no face), camera/touch only, no restyling"
+                    : "Prompt Veo (Flow I2V)";
+
+                AddLabeledField(section, veoLabel, veoBox, 120,
 
                     tool == ShowcaseClipToolHelper.ToolVeo || tool == ShowcaseClipToolHelper.ToolKling);
 

@@ -42,7 +42,8 @@ namespace tiktok_Omni.Services.Showcase
                         logAction,
                         cancellationToken,
                         duration,
-                        outputCanvas).ConfigureAwait(false);
+                        outputCanvas,
+                        scene?.ShowcaseZoomSpeedId).ConfigureAwait(false);
                 }
 
                 return zoomOut;

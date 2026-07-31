@@ -22,10 +22,11 @@ namespace tiktok_Omni
                 CancelAllApplicationWorkForEmergencyStop();
                 KillZombieBrowserProcesses();
                 KillOrphanFfmpegProcesses();
-                Log("[EMERGENCY] Đã ép dừng mọi tiến trình (queue, job, browser, ffmpeg).");
+                Log("[EMERGENCY] Đã dừng mọi thao tác đang chạy (job chờ/hẹn giờ giữ nguyên).");
                 MessageBox.Show(
                     this,
-                    "Đã ép dừng mọi tiến trình!",
+                    "Đã dừng mọi thao tác đang chạy.\r\n\r\n"
+                    + "Job trong hàng đợi và lịch hẹn giữ nguyên — đến giờ vẫn thực hiện bình thường.",
                     "Dừng khẩn cấp",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -44,17 +45,47 @@ namespace tiktok_Omni
 
         private void CancelAllApplicationWorkForEmergencyStop()
         {
-            CancelWarmupBrowserWork();
-            CancelAffiliateBrowserWork();
-            TryCancel(_affiliateAutoEnrichCts);
-            TryCancel(_affiliateRowEnrichCts);
-            TryCancel(_affiliateCategorizeCts);
-            TryCancel(_aiVideoGenCancellation);
-            TryCancel(_philosophyRenderCts);
-            _philosophyRenderPaused = true;
-            DisposeActiveJobCancellation();
+            CancelRunningWarmupWorkForEmergencyStop();
+            CancelRunningAffiliateBrowserWorkForEmergencyStop();
 
-            _globalJobQueue?.ClearAll();
+            if (_affiliateAutoEnrichRunning)
+            {
+                TryCancel(_affiliateAutoEnrichCts);
+            }
+
+            if (_affiliateRowEnrichRunning)
+            {
+                TryCancel(_affiliateRowEnrichCts);
+            }
+
+            if (_affiliateDownloadingBatch)
+            {
+                TryCancel(_affiliateDownloadBatchCts);
+            }
+
+            TryCancel(_huntProductCancellation);
+            TryCancel(_aiVideoGenCancellation);
+            CancelAllPhilosophyWorkForEmergencyStop();
+            CancelRunningShowcaseTabWorkForEmergencyStop();
+            CancelRunningVideoReupWorkForEmergencyStop();
+
+            if (_mascotBatchCts != null)
+            {
+                TryCancel(_mascotBatchCts);
+            }
+
+            if (_channelHealthCycleRunning)
+            {
+                TryCancel(_channelHealthCycleCts);
+            }
+
+            TryCancel(_activeJobCancellation);
+
+            var stoppedJobs = _globalJobQueue?.CancelRunningOnly() ?? 0;
+            if (stoppedJobs > 0)
+            {
+                Log("[EMERGENCY] Đã dừng " + stoppedJobs + " job đang chạy trong hàng đợi.");
+            }
         }
 
         private static void KillOrphanFfmpegProcesses()

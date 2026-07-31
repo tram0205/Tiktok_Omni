@@ -24,6 +24,8 @@ namespace tiktok_Omni
 
         private void ShowcaseDraftTimer_Tick(object sender, EventArgs e)
         {
+            PurgeShowcaseTrashExpired(logWhenRemoved: false);
+
             if (!_showcaseDraftDirty)
             {
                 return;
@@ -62,6 +64,10 @@ namespace tiktok_Omni
                 .Select(v => ShowcaseDraftStore.ToVideo(v, CloneAiVideoGenItem))
                 .Where(v => v != null)
                 .ToList();
+            foreach (var video in _showcaseVideoBuffer)
+            {
+                video?.RefreshDisplayFields();
+            }
             _deepDiveBuffer = new List<AiVideoGenInputItem>();
             _activeShowcaseVideoId = doc.ActiveVideoId;
             if (_activeShowcaseVideoId.HasValue &&

@@ -26,7 +26,9 @@ namespace tiktok_Omni.Services.Showcase
 
             int sceneCount,
 
-            IReadOnlyList<double> sceneDurationsSeconds = null)
+            IReadOnlyList<double> sceneDurationsSeconds = null,
+
+            string userVideoFormatId = null)
 
         {
 
@@ -39,6 +41,17 @@ namespace tiktok_Omni.Services.Showcase
 
 
             var durationBlock = BuildSceneDurationBlock(sceneCount, sceneDurationsSeconds);
+
+            var formatParts = ShowcaseVideoFormatPromptHelper.Resolve(userVideoFormatId);
+            var ctaSection = formatParts.CtaSectionOverride ?? ShowcaseVoiceoverLanguageStyle.GeminiCtaPromptSection;
+
+            var lastSceneCtaLine = formatParts.SuppressCta
+                ? "   - Cảnh " + sceneCount + ": KHÔNG lồng CTA/lời mời liên hệ — kết bằng câu chốt tự nhiên (cảm xúc/insight về sản phẩm).\r\n"
+                : "   - Cảnh " + sceneCount + ": lồng CTA (câu hỏi / mời tương tác — theo quy tắc CTA) vào cuối đoạn thân — KHÔNG tách thành câu hô hào riêng.\r\n";
+
+            var ctaTextInstruction = formatParts.SuppressCta
+                ? "3) cta_text: để chuỗi rỗng \"\" — video này KHÔNG có CTA/lời mời liên hệ.\r\n"
+                : "3) cta_text: cụm ngắn cho chữ overlay cuối video (≤18 từ) — PHẢI trích từ đuôi voiceover cảnh " + sceneCount + ", KHÔNG viết câu thoại thứ hai.\r\n";
 
 
 
@@ -69,10 +82,10 @@ namespace tiktok_Omni.Services.Showcase
                 "   - Cảnh 1: CHỈ viết hook (1 câu ngắn gây tò mò) — sẽ được TTS đọc RIÊNG, nhấn mạnh.\r\n" +
 
                 "   - Cảnh 2 → " + sceneCount + ": viết thoại thân bài + CTA cuối sao cho KHI GHÉP LIỀN các câu lại vẫn đọc trôi một mạch (app sẽ TTS 1 lần duy nhất).\r\n" +
-
-                "   - Giọng miền Nam tự nhiên (xưng «mình», từ đời thường) — tránh văn phong thuyết minh/trần trụi kiểu miền Bắc.\r\n" +
-
-                "   - Cảnh " + sceneCount + ": lồng câu kêu gọi nhẹ (Bio/link) vào cuối đoạn thân — KHÔNG tách CTA thành câu hô hào riêng.\r\n" +
+                ShowcaseVoiceoverLanguageStyle.GeminiPromptSection +
+                ShowcaseVoiceoverLanguageStyle.GeminiTikTokComplianceSection +
+                ctaSection +
+                lastSceneCtaLine +
 
                 "   - Cảnh giữa: mô tả đúng hình, vừa đủ đọc trong thời lượng clip.\r\n" +
 
@@ -80,7 +93,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 "   - KHÔNG lặp ý giữa các cảnh.\r\n" +
 
-                "3) cta_text: 1 câu CTA ngắn (metadata + chữ overlay cuối video) — lời kêu gọi phải nằm TRONG voiceover cảnh " + sceneCount + ".\r\n" +
+                ctaTextInstruction +
 
                 "4) theme: tóm tắt 3-6 từ chủ đề thực tế của video.\r\n\r\n" +
 

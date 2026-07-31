@@ -85,15 +85,14 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
             {
                 ShowShowcaseBackgroundMusicEditor(video, rowIndex);
             }
+            else if (string.Equals(colName, "colAiShowcaseBrandLogo", StringComparison.Ordinal))
+            {
+                ShowShowcaseBrandLogoEditor(video, rowIndex);
+            }
             else if (string.Equals(colName, "colAiShowcaseScript", StringComparison.Ordinal)
                      || string.Equals(colName, "colAiShowcaseScenePrompt", StringComparison.Ordinal))
             {
                 ShowShowcaseScriptPromptChooser(video, rowIndex);
-            }
-            else if (string.Equals(colName, "colAiStatus", StringComparison.Ordinal)
-                     || string.Equals(colName, "colAiShowcaseOutput", StringComparison.Ordinal))
-            {
-                OpenShowcaseOutputFolderFromGridCell(video);
             }
 
             _showcaseGridEditorClickSuppressUntilTick = Environment.TickCount;
@@ -184,6 +183,17 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
             }
 
             return ok;
+        }
+
+        private async void OpenShowcaseOutputVideoFromGridCell(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            await OpenShowcaseOutputVideoForVideoAsync(video, settings, GetRunningProfileName()).ConfigureAwait(true);
         }
 
         private async void OpenShowcaseOutputFolderFromGridCell(ShowcaseVideoItem video)
@@ -487,6 +497,29 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
             NotifyShowcaseDraftDirty();
         }
 
+        private async void ShowShowcaseBrandLogoEditor(ShowcaseVideoItem video, int gridRowIndex)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ShowcaseBrandOverlayHelper.EnsureVideoDefaults(video);
+            using (var dlg = new ShowcaseBrandLogoEditorForm(video, settings))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+            }
+
+            video.RefreshDisplayFields();
+            SyncShowcaseVideoSettingsToScenes(video);
+            dgvDeepDiveInput?.InvalidateRow(gridRowIndex);
+            NotifyShowcaseDraftDirty();
+        }
+
         private async void ShowShowcaseBackgroundMusicEditor(ShowcaseVideoItem video, int gridRowIndex)
         {
             if (video == null)
@@ -645,7 +678,11 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
 
         private static bool IsShowcaseDualActionGridColumn(string columnName) =>
             string.Equals(columnName, "colAiShowcaseImages", StringComparison.Ordinal)
-            || string.Equals(columnName, "colAiShowcaseSceneSummary", StringComparison.Ordinal);
+            || string.Equals(columnName, "colAiShowcaseSceneSummary", StringComparison.Ordinal)
+            || string.Equals(columnName, "colAiShowcaseOutput", StringComparison.Ordinal);
+
+        private static bool IsShowcaseOutputDualActionColumn(string columnName) =>
+            string.Equals(columnName, "colAiShowcaseOutput", StringComparison.Ordinal);
 
         private const int ShowcaseImagesCellInset = 4;
         private const int ShowcaseImagesCellGap = 4;
@@ -768,27 +805,61 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
 
             graphics.SetClip(cellBounds);
             var isClipsColumn = string.Equals(colName, "colAiShowcaseSceneSummary", StringComparison.Ordinal);
-            dgvDeepDiveInput.Rows[e.RowIndex].Cells[e.ColumnIndex].ToolTipText = isClipsColumn
-                ? (video.SceneCountDisplay ?? "0 cảnh") + " — ➕ thêm clip · 📂 veo_clips"
-                : (video.ShowcaseImagesGridLabel ?? "0 ảnh") + " — ➕ thêm ảnh · 📂 thư mục";
+            var isOutputColumn = IsShowcaseOutputDualActionColumn(colName);
+            if (isOutputColumn)
+            {
+                var outputPath = ShowcaseContentDisplayHelper.TryResolveFinishedVideoPath(video);
+                var outputLabel = ShowcaseContentDisplayHelper.FormatOutputGridLabel(video, outputPath);
+                dgvDeepDiveInput.Rows[e.RowIndex].Cells[e.ColumnIndex].ToolTipText =
+                    outputLabel + " — ▶ xem video · 📂 thư mục output";
+            }
+            else
+            {
+                dgvDeepDiveInput.Rows[e.RowIndex].Cells[e.ColumnIndex].ToolTipText = isClipsColumn
+                    ? (video.SceneCountDisplay ?? "0 cảnh") + " — ➕ thêm clip · 📂 veo_clips"
+                    : (video.ShowcaseImagesGridLabel ?? "0 ảnh") + " — ➕ thêm ảnh · 📂 thư mục";
+            }
 
-            PaintShowcaseImagesActionButton(
-                graphics,
-                addRect,
-                "➕",
-                Color.FromArgb(90, 235, 150),
-                Color.FromArgb(32, 58, 46),
-                Color.FromArgb(70, 130, 95),
-                selected);
+            if (isOutputColumn)
+            {
+                PaintShowcaseImagesActionButton(
+                    graphics,
+                    addRect,
+                    "▶",
+                    Color.FromArgb(130, 175, 255),
+                    Color.FromArgb(32, 42, 58),
+                    Color.FromArgb(70, 95, 140),
+                    selected);
 
-            PaintShowcaseImagesActionButton(
-                graphics,
-                folderRect,
-                "📂",
-                Color.FromArgb(255, 205, 90),
-                Color.FromArgb(58, 50, 32),
-                Color.FromArgb(140, 110, 55),
-                selected);
+                PaintShowcaseImagesActionButton(
+                    graphics,
+                    folderRect,
+                    "📂",
+                    Color.FromArgb(255, 205, 90),
+                    Color.FromArgb(58, 50, 32),
+                    Color.FromArgb(140, 110, 55),
+                    selected);
+            }
+            else
+            {
+                PaintShowcaseImagesActionButton(
+                    graphics,
+                    addRect,
+                    "➕",
+                    Color.FromArgb(90, 235, 150),
+                    Color.FromArgb(32, 58, 46),
+                    Color.FromArgb(70, 130, 95),
+                    selected);
+
+                PaintShowcaseImagesActionButton(
+                    graphics,
+                    folderRect,
+                    "📂",
+                    Color.FromArgb(255, 205, 90),
+                    Color.FromArgb(58, 50, 32),
+                    Color.FromArgb(140, 110, 55),
+                    selected);
+            }
 
             graphics.ResetClip();
         }
@@ -814,6 +885,22 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
             var display = dgvDeepDiveInput.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
             var action = HitTestShowcaseDualActionCell(display.Width, display.Height, new Point(e.X, e.Y));
             var isClipsColumn = string.Equals(colName, "colAiShowcaseSceneSummary", StringComparison.Ordinal);
+            var isOutputColumn = IsShowcaseOutputDualActionColumn(colName);
+            if (isOutputColumn)
+            {
+                if (action == ShowcaseDualActionCellAction.Add)
+                {
+                    OpenShowcaseOutputVideoFromGridCell(video);
+                }
+                else if (action == ShowcaseDualActionCellAction.OpenFolder)
+                {
+                    OpenShowcaseOutputFolderFromGridCell(video);
+                }
+
+                dgvDeepDiveInput.InvalidateCell(e.ColumnIndex, e.RowIndex);
+                return;
+            }
+
             if (action == ShowcaseDualActionCellAction.Add)
             {
                 if (isClipsColumn)

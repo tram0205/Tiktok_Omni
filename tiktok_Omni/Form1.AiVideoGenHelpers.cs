@@ -48,6 +48,7 @@ namespace tiktok_Omni
                 KlingPrompt = source.KlingPrompt ?? string.Empty,
                 ZoomHint = source.ZoomHint ?? string.Empty,
                 ShowcaseZoomStyleId = source.ShowcaseZoomStyleId ?? string.Empty,
+                ShowcaseZoomSpeedId = source.ShowcaseZoomSpeedId ?? string.Empty,
                 ShowcaseClipDurationSeconds = source.ShowcaseClipDurationSeconds,
                 ClipPath = source.ClipPath ?? string.Empty,
                 ShowcaseTheme = source.ShowcaseTheme ?? string.Empty,

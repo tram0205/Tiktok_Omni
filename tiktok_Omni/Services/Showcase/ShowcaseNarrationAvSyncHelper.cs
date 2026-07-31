@@ -17,7 +17,8 @@ namespace tiktok_Omni.Services.Showcase
             string workDirectory,
             int userSpeedPercent,
             Action<string> logAction,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool preserveAudioSource = false)
         {
             var videoIn = (stitchedVideoPath ?? string.Empty).Trim();
             var narrIn = (narrationPath ?? string.Empty).Trim();
@@ -39,6 +40,76 @@ namespace tiktok_Omni.Services.Showcase
             Directory.CreateDirectory(workDirectory ?? ".");
             var videoDuration = await ProbeSeconds(ffprobeExecutable, videoIn, cancellationToken).ConfigureAwait(false);
             var narrationDuration = await ProbeSeconds(ffprobeExecutable, narrIn, cancellationToken).ConfigureAwait(false);
+
+            if (preserveAudioSource)
+            {
+                const double syncThreshold = 1.03d;
+                var lockedVideoOut = videoIn;
+                var lockedAudioOut = narrIn;
+
+                logAction?.Invoke("[Showcase] So thời lượng clip ghép (~"
+                    + videoDuration.ToString("0.#", CultureInfo.InvariantCulture) + "s) vs audio thành phẩm (~"
+                    + narrationDuration.ToString("0.#", CultureInfo.InvariantCulture) + "s) — tua nhanh phía dài, không cắt.");
+
+                if (videoDuration > narrationDuration * syncThreshold && narrationDuration > 0.05d)
+                {
+                    var tempo = videoDuration / narrationDuration;
+                    lockedVideoOut = Path.Combine(workDirectory, "stitched_av_sync.mp4");
+                    logAction?.Invoke("[Showcase AV sync] Đang tua video x"
+                        + tempo.ToString("0.##", CultureInfo.InvariantCulture) + "…");
+                    await SpeedVideoAsync(
+                            ffmpegExecutable,
+                            ffprobeExecutable,
+                            videoIn,
+                            tempo,
+                            lockedVideoOut,
+                            logAction,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    logAction?.Invoke("[Showcase] Tua video x"
+                        + tempo.ToString("0.##", CultureInfo.InvariantCulture)
+                        + " (clip ghép dài hơn audio).");
+                }
+                else if (narrationDuration > videoDuration * syncThreshold && videoDuration > 0.05d)
+                {
+                    var tempo = narrationDuration / videoDuration;
+                    lockedAudioOut = Path.Combine(workDirectory, "full_mix_av_sync.mp3");
+                    logAction?.Invoke("[Showcase AV sync] Đang tua audio thành phẩm x"
+                        + tempo.ToString("0.##", CultureInfo.InvariantCulture) + "…");
+                    await SpeedMp3ByTempoAsync(
+                            ffmpegExecutable,
+                            ffprobeExecutable,
+                            narrIn,
+                            tempo,
+                            lockedAudioOut,
+                            logAction,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    logAction?.Invoke("[Showcase] Tua audio thành phẩm x"
+                        + tempo.ToString("0.##", CultureInfo.InvariantCulture)
+                        + " (audio dài hơn clip ghép).");
+                }
+                else
+                {
+                    logAction?.Invoke("[Showcase] Clip ghép và audio đã gần khớp — ghép trực tiếp.");
+                }
+
+                var finalVideoDuration = await ProbeSeconds(ffprobeExecutable, lockedVideoOut, cancellationToken)
+                    .ConfigureAwait(false);
+                var finalAudioDuration = await ProbeSeconds(ffprobeExecutable, lockedAudioOut, cancellationToken)
+                    .ConfigureAwait(false);
+                logAction?.Invoke("[Showcase] Sau khớp thời lượng: video ~"
+                    + finalVideoDuration.ToString("0.#", CultureInfo.InvariantCulture) + "s, audio ~"
+                    + finalAudioDuration.ToString("0.#", CultureInfo.InvariantCulture) + "s.");
+
+                return new ShowcaseAvSyncResult
+                {
+                    VideoPath = lockedVideoOut,
+                    NarrationPath = lockedAudioOut,
+                    TargetDurationSeconds = Math.Min(finalVideoDuration, finalAudioDuration)
+                };
+            }
+
             var plan = ShowcaseNarrationSpeedHelper.BuildRenderPlan(
                 narrationDuration,
                 videoDuration,
@@ -154,12 +225,12 @@ namespace tiktok_Omni.Services.Showcase
             {
                 var audioFilter = ShowcaseFfmpegAudioHelper.BuildAtempoChainPublic(tempo);
                 args = "-y -i \"" + inputPath + "\" -filter_complex \"[0:v]setpts=PTS/" + tempoText + "[v];[0:a]" +
-                       audioFilter + "[a]\" -map \"[v]\" -map \"[a]\" -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k \"" +
+                       audioFilter + "[a]\" -map \"[v]\" -map \"[a]\" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 192k \"" +
                        outputPath + "\"";
             }
             else
             {
-                args = "-y -i \"" + inputPath + "\" -vf \"setpts=PTS/" + tempoText + "\" -an -c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p \"" +
+                args = "-y -i \"" + inputPath + "\" -vf \"setpts=PTS/" + tempoText + "\" -an -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p \"" +
                        outputPath + "\"";
             }
 
@@ -190,32 +261,14 @@ namespace tiktok_Omni.Services.Showcase
             Action<string> logAction,
             CancellationToken cancellationToken)
         {
-            var ffmpeg = (ffmpegExecutable ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(ffmpeg) || !File.Exists(ffmpeg))
-            {
-                ffmpeg = FfmpegToolkitService.GetBundledFfmpegPath();
-            }
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = ffmpeg,
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using (var process = new Process { StartInfo = psi })
-            {
-                process.Start();
-                await ProcessCancellationHelper.WaitUntilExitAsync(process, cancellationToken, 300).ConfigureAwait(false);
-                if (process.ExitCode != 0)
-                {
-                    var err = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
-                    logAction?.Invoke("[Showcase AV sync] FFmpeg: " + err);
-                    throw new InvalidOperationException("FFmpeg AV sync failed (exit " + process.ExitCode + ").");
-                }
-            }
+            await FfmpegProcessRunner.RunAsync(
+                    ffmpegExecutable,
+                    args,
+                    logAction,
+                    cancellationToken,
+                    logPrefix: "[Showcase AV sync]",
+                    timeoutSeconds: FfmpegProcessRunner.DefaultTimeoutSeconds)
+                .ConfigureAwait(false);
         }
     }
 }

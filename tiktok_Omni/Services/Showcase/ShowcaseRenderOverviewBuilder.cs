@@ -175,7 +175,7 @@ namespace tiktok_Omni.Services.Showcase
                 var cta = ShowcaseSubtitleDisplayHelper.ResolveDisplayCta(video);
                 var sceneVoice = (scene.SceneVoiceover ?? string.Empty).Trim();
                 if (!string.IsNullOrWhiteSpace(cta)
-                    && sceneVoice.IndexOf(cta, StringComparison.OrdinalIgnoreCase) < 0)
+                    && !ShowcaseCtaDedupHelper.PassageContainsCta(sceneVoice, cta))
                 {
                     lines.Add(cta.Trim());
                 }

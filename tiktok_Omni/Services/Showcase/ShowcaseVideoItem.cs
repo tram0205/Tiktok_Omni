@@ -44,6 +44,9 @@ namespace tiktok_Omni.Services.Showcase
         /// <summary>Chế độ tạo clip do người dùng chọn (preset id) — gửi Gemini trước khi sinh kịch bản.</summary>
         public string ShowcaseClipModeId { get; set; } = ShowcaseClipModePresets.DefaultId;
 
+        /// <summary>Định dạng video (Quảng cáo SP / Kể chuyện / Tutorial / Không CTA) — gửi Gemini trước khi sinh kịch bản.</summary>
+        public string ShowcaseVideoFormatId { get; set; } = ShowcaseVideoFormatPresets.DefaultId;
+
         /// <summary>Khung video: 9x16 | 16x9 | 1x1 — cột lưới «Khung video».</summary>
         public string ShowcaseOutputAspectId { get; set; } = ShowcaseOutputAspectPresets.DefaultId;
 
@@ -178,6 +181,9 @@ namespace tiktok_Omni.Services.Showcase
         /// <summary>Id dải tuổi UI (ShowcaseVoicePresetDimensions.Age.*).</summary>
         public string ShowcaseVoiceAgeId { get; set; } = string.Empty;
 
+        /// <summary>Giới tính giọng hook (ShowcaseVoicePresetDimensions.Gender.*) — Edge TTS: Hoài My / Nam Minh.</summary>
+        public string ShowcaseVoiceGenderId { get; set; } = string.Empty;
+
         public string ShowcaseVoiceLanguageId { get; set; } = string.Empty;
 
         /// <summary>Giọng ElevenLabs cố định (ElevenVoicePersonaCatalog) cho hook — rỗng = mặc định theo preset/Cài đặt.</summary>
@@ -206,6 +212,9 @@ namespace tiktok_Omni.Services.Showcase
         public string ShowcaseBodyVoicePresetId { get; set; } = string.Empty;
 
         public string ShowcaseBodyVoiceAgeId { get; set; } = string.Empty;
+
+        /// <summary>Giới tính giọng thân (ShowcaseVoicePresetDimensions.Gender.*).</summary>
+        public string ShowcaseBodyVoiceGenderId { get; set; } = string.Empty;
 
         public string ShowcaseBodyVoiceLanguageId { get; set; } = string.Empty;
 
@@ -261,7 +270,23 @@ namespace tiktok_Omni.Services.Showcase
 
         public string ShowcaseTransitionLabel { get; set; } = string.Empty;
 
+        /// <summary>Chèn logo thương hiệu lên video thành phẩm (che watermark Flow).</summary>
+        public bool ShowcaseBrandLogoEnabled { get; set; }
 
+        /// <summary>Đường dẫn logo tùy chọn — rỗng = Assets\{profile}\logo.png.</summary>
+        public string ShowcaseBrandLogoFile { get; set; } = string.Empty;
+
+        public string ShowcaseBrandLogoPositionId { get; set; } = ShowcaseBrandLogoPositionCatalog.BottomRight;
+
+        public int ShowcaseBrandLogoScaleWidthPercent { get; set; } = ShowcaseBrandOverlayHelper.DefaultScaleWidthPercent;
+
+        public int ShowcaseBrandLogoMarginX { get; set; } = ShowcaseBrandOverlayHelper.DefaultMargin;
+
+        public int ShowcaseBrandLogoMarginY { get; set; } = ShowcaseBrandOverlayHelper.DefaultMargin;
+
+        public int ShowcaseBrandLogoOpacityPercent { get; set; } = ShowcaseBrandOverlayHelper.DefaultOpacityPercent;
+
+        public string ShowcaseBrandLogoLabel { get; set; } = string.Empty;
 
         public string PipelineStatus { get; set; } = "Chờ";
 
@@ -330,6 +355,8 @@ namespace tiktok_Omni.Services.Showcase
 
         {
 
+            ShowcaseVoiceoverHelper.SyncSilentFlagsFromVoiceover(Scenes);
+
             var count = SceneCount;
 
             if (count <= 0)
@@ -356,13 +383,15 @@ namespace tiktok_Omni.Services.Showcase
 
             ShowcaseMusicHelper.RefreshMusicLabel(this);
 
+            ShowcaseBrandOverlayHelper.RefreshLabel(this);
+
             ShowcaseContentDisplayHelper.RefreshContentLabels(this);
 
             ShowcaseImagesGridLabel = count + " ảnh";
 
             ShowcaseGeminiSetupGridLabel = ShowcaseContentDisplayHelper.FormatProductTypeThemeGridLabel(this);
 
-            ShowcaseOutputGridLabel = ShowcaseContentDisplayHelper.FormatPipelineGridLabel(this);
+            ShowcaseOutputGridLabel = ShowcaseContentDisplayHelper.FormatOutputGridLabel(this);
         }
 
 

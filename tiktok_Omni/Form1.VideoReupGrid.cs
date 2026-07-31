@@ -348,6 +348,15 @@ namespace tiktok_Omni
             LogVideoReup("Đang dừng render…");
         }
 
+        private void CancelRunningVideoReupWorkForEmergencyStop()
+        {
+            if (_videoReupBatchRunning)
+            {
+                TryCancel(_videoReupBatchCts);
+                LogVideoReup("[Emergency] Đang dừng batch render đang chạy…");
+            }
+        }
+
         private void ConfigureVideoReupInputGrid()
         {
             if (dgvVideoReupInput == null)

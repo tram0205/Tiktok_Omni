@@ -8,6 +8,9 @@ namespace tiktok_Omni.Services.Showcase
     {
         private const string OnModelPrefixToken = "ON-MODEL fashion lookbook — ";
 
+        private const string FlatlayFidelitySuffix =
+            "Garment color, silhouette and visible details stay exactly as shown. Camera and touch motion only, no restyling.";
+
         private static readonly (string Pattern, string Replacement)[] RiskyReplacements =
         {
             (@"\bON-wearer\b", "ON-MODEL"),
@@ -68,7 +71,11 @@ namespace tiktok_Omni.Services.Showcase
             @"no lip movement,?\s*",
             @"no celebrity likeness,?\s*",
             @"hair tips move[^.]*\.?\s*",
-            @"hair tips[^.]*breeze[^.]*\.?\s*",
+            @"hair tips[^.]*breeze[^.]*\.?\s*"
+        };
+
+        private static readonly string[] OnModelOnlyFlowTriggerStripPatterns =
+        {
             @"hand adjusts[^.]*\.?\s*",
             @"hand smooths[^.]*\.?\s*",
             @"hand lightly[^.]*\.?\s*",
@@ -131,14 +138,14 @@ namespace tiktok_Omni.Services.Showcase
 
         private static readonly string[] FlatlayCreativeBoosters =
         {
-            "A hand enters frame to gently lift and unfold the garment, revealing fabric texture.",
-            "Fingers trace along the fabric surface in a slow macro shot with shallow depth of field.",
-            "Styling props slide into frame as the camera parallax-reveals product details.",
-            "Soft breeze makes the fabric ripple while the camera slowly dollies in on stitching.",
-            "Rack focus shifts from background to a sharp close-up of collar and button detail.",
-            "Hands adjust the hem and sleeve without showing a face, emphasizing fit and drape.",
-            "Slow tilt reveals the garment standing upright to show silhouette and form.",
-            "Layered flatlay elements separate slightly with parallax to highlight product layers."
+            "Hands enter frame (no face visible) to gently trace the fabric edge without changing the fold layout.",
+            "Fingers lightly smooth the collar fold in a slow macro shot; garment layout unchanged.",
+            "Soft camera parallax across the flatlay; rack focus shifts to visible closure detail as shown.",
+            "Very slow dolly-in on fabric texture; colors and silhouette stay exactly as shown.",
+            "Rack focus shifts from background to sharp close-up of collar and visible closure as shown.",
+            "Hands hold the hem edge briefly (no face visible) without restyling or unfolding the garment.",
+            "Slow tilt across the flatlay composition; product shape and colors unchanged.",
+            "Gentle camera push-in on stitching and weave; no restyling, same lighting as shown."
         };
 
         private static readonly string[] FlowSafeOnModelBoosters =
@@ -179,10 +186,10 @@ namespace tiktok_Omni.Services.Showcase
             text = DuplicateOnModelPrefixRegex.Replace(text, OnModelPrefixToken);
             text = ProtectOnModelPrefix(text);
             text = ApplyRiskyReplacements(text);
-            text = StripFlowTriggerPhrases(text);
+            var onModel = LooksOnModel(text);
+            text = StripFlowTriggerPhrases(text, onModel);
             text = RestoreOnModelPrefix(text);
 
-            var onModel = LooksOnModel(text);
             if (onModel)
             {
                 text = NormalizeOnModelPrefix(text);
@@ -196,6 +203,8 @@ namespace tiktok_Omni.Services.Showcase
                     var booster = FlatlayCreativeBoosters[Math.Abs(sceneIndex) % FlatlayCreativeBoosters.Length];
                     text = text.TrimEnd('.', ' ') + ". " + booster;
                 }
+
+                text = EnhanceFlatlayFidelity(text);
             }
 
             text = Regex.Replace(text, @"\s{2,}", " ", RegexOptions.CultureInvariant).Trim();
@@ -224,18 +233,26 @@ namespace tiktok_Omni.Services.Showcase
             return text;
         }
 
-        private static string StripFlowTriggerPhrases(string text)
+        private static string StripFlowTriggerPhrases(string text, bool onModel)
         {
             foreach (var pattern in FlowTriggerStripPatterns)
             {
                 text = Regex.Replace(text, pattern, string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
             }
 
-            text = Regex.Replace(text, @"\bface\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            text = Regex.Replace(text, @"\bperson\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            text = Regex.Replace(text, @"\bwoman\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            text = Regex.Replace(text, @"\bman\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            text = Regex.Replace(text, @"\bsubject\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (onModel)
+            {
+                foreach (var pattern in OnModelOnlyFlowTriggerStripPatterns)
+                {
+                    text = Regex.Replace(text, pattern, string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                }
+
+                text = Regex.Replace(text, @"\bface\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                text = Regex.Replace(text, @"\bperson\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                text = Regex.Replace(text, @"\bwoman\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                text = Regex.Replace(text, @"\bman\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                text = Regex.Replace(text, @"\bsubject\b", string.Empty, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            }
 
             return text;
         }
@@ -331,6 +348,17 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             return text.TrimEnd('.', ' ') + ". " + safety;
+        }
+
+        private static string EnhanceFlatlayFidelity(string text)
+        {
+            if (text.IndexOf("stay exactly as shown", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("no restyling", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return text;
+            }
+
+            return text.TrimEnd('.', ' ') + ". " + FlatlayFidelitySuffix;
         }
 
         private static string EnsureEnding(string text)

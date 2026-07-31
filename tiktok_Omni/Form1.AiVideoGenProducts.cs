@@ -304,7 +304,14 @@ namespace tiktok_Omni
 
             e.Handled = true;
             e.SuppressKeyPress = true;
-            Log($"[Grid] Đã xóa {deletedCount} dòng.");
+            if (ReferenceEquals(dgv, dgvDeepDiveInput))
+            {
+                Log("[Grid] Đã xóa " + deletedCount + " dòng — đã chuyển vào thùng rác (giữ 24 giờ).");
+            }
+            else
+            {
+                Log("[Grid] Đã xóa " + deletedCount + " dòng.");
+            }
         }
 
         /// <summary>Xóa dòng đã chọn (hoặc dòng hiện tại) trên lưới Slideshow / Showcase — có hộp xác nhận.</summary>
@@ -371,6 +378,8 @@ namespace tiktok_Omni
                 {
                     return false;
                 }
+
+                MoveShowcaseVideosToTrash(videos);
 
                 var showcaseBuffer = GetShowcaseVideoBuffer();
                 foreach (var video in videos)
