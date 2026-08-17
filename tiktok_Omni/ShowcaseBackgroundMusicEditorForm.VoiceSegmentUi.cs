@@ -1548,6 +1548,11 @@ namespace tiktok_Omni
                 _btnListenHookNarration.Enabled = _canListenHookNarration?.Invoke() ?? false;
                 _btnListenHookNarration.Click += async (_, __) =>
                 {
+                    if (!ValidateAndSave())
+                    {
+                        return;
+                    }
+
                     _btnListenHookNarration.Enabled = false;
                     try
                     {
@@ -1600,6 +1605,11 @@ namespace tiktok_Omni
                 _btnListenBodyNarration.Enabled = _canListenBodyNarration?.Invoke() ?? false;
                 _btnListenBodyNarration.Click += async (_, __) =>
                 {
+                    if (!ValidateAndSave())
+                    {
+                        return;
+                    }
+
                     _btnListenBodyNarration.Enabled = false;
                     try
                     {

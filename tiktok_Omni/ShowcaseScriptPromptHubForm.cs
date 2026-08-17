@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -19,7 +20,7 @@ namespace tiktok_Omni
         private const int FormClientWidth = 2577;
         private const int FormMinWidth = 2178;
         private const int HubGridMinRowHeight = 72;
-        private const int HubGridCellPad = 18;
+        private const int HubGridCellPad = 24;
         private const int HubGridRightEdgeInset = 20;
         private const string HubGridLayoutLock = "HubGridLayoutLock";
 
@@ -46,6 +47,8 @@ namespace tiktok_Omni
         private DataGridView _dgvHub;
         private string _toolEditPrevious;
         private Button _btnRegenerateScript;
+        private Button _btnPolishScript;
+        private ShowcaseScriptHubPolishHelper.VideoPolishResult _lastPolishResult;
 
         private sealed class HubGridRowTag
         {
@@ -111,7 +114,14 @@ namespace tiktok_Omni
             shell.Controls.Add(root);
             Controls.Add(shell);
 
-            Shown += (_, __) => BeginInvoke(new Action(LayoutHubGrid));
+            Shown += (_, __) =>
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    LayoutHubGrid();
+                    RefreshHubReviewHighlights();
+                }));
+            };
         }
 
         private Control BuildThemePanel()
@@ -291,7 +301,11 @@ namespace tiktok_Omni
             grid.CellBeginEdit += HubGrid_CellBeginEdit;
             grid.CellEndEdit += HubGrid_CellEndEdit;
             grid.DataError += HubGrid_DataError;
-            grid.CellEndEdit += (_, __) => QueueHubGridRowResize();
+            grid.CellEndEdit += (_, __) =>
+            {
+                QueueHubGridRowResize();
+                RefreshHubReviewHighlights();
+            };
             grid.ColumnWidthChanged += (_, __) => QueueHubGridRowResize();
             grid.Resize += (_, __) =>
             {
@@ -311,6 +325,7 @@ namespace tiktok_Omni
 
             grid.Rows.Clear();
             scenes = scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
+            ShowcaseSceneNamingHelper.ApplyConventionSceneTitles(scenes);
 
             if (scenes.Count == 0)
             {
@@ -339,7 +354,7 @@ namespace tiktok_Omni
                 var isOpening = i == 0;
                 var isClosing = i == scenes.Count - 1;
                 var sceneLabel = FormatHubSceneLabel(scene, i, scenes.Count);
-                var imageName = ResolveSceneImageFileName(scene);
+                var imageName = FormatHubImageCellLabel(scene, i);
                 var voice = ResolveHubSceneVoice(scene, i, scenes.Count);
                 var prompt = FormatPromptForCell(ShowcaseClipToolHelper.ResolveScenePrompt(scene));
                 var toolLabel = ShowcaseClipToolHelper.GetToolDisplayLabel(tool);
@@ -366,6 +381,112 @@ namespace tiktok_Omni
             PopulateHubGridRows(_dgvHub, scenes);
             _speechBeforeEdit = ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot.Capture(_video);
             LayoutHubGrid();
+        }
+
+        private void RunPolishAndRefreshGrid()
+        {
+            _video.ShowcaseTheme = _txtTheme.Text?.Trim() ?? string.Empty;
+            SyncHubGridVoiceToVideoBeforePolish();
+            var speechBefore = _speechBeforeEdit;
+            _lastPolishResult = ShowcaseScriptHubPolishHelper.PolishVideo(_video);
+            ShowcaseSubtitleDisplayHelper.SyncDisplayTextFromSpeechEdits(_video, speechBefore);
+            ReloadHubGridFromVideo();
+            RefreshHubReviewHighlights();
+            ShowPolishSummary(_lastPolishResult);
+        }
+
+        private void SyncHubGridVoiceToVideoBeforePolish()
+        {
+            if (_dgvHub == null || _dgvHub.IsDisposed)
+            {
+                return;
+            }
+
+            foreach (DataGridViewRow row in _dgvHub.Rows)
+            {
+                if (row.IsNewRow || !(row.Tag is HubGridRowTag tag) || tag.Scene == null)
+                {
+                    continue;
+                }
+
+                var voice = (row.Cells[ColVoice].Value?.ToString() ?? string.Empty).Trim();
+                tag.Scene.SceneVoiceover = voice;
+                if (tag.IsOpeningHookScene)
+                {
+                    _video.ShowcaseHookText = voice;
+                }
+
+                if (tag.IsClosingCtaScene)
+                {
+                    _video.ShowcaseCtaText = voice;
+                }
+            }
+        }
+
+        private void RefreshHubReviewHighlights()
+        {
+            SyncHubGridVoiceToVideoBeforePolish();
+            _lastPolishResult = new ShowcaseScriptHubPolishHelper.VideoPolishResult
+            {
+                Notes = CollectAllReviewNotes()
+            };
+            _dgvHub?.Invalidate();
+        }
+
+        private List<ShowcaseScriptHubPolishHelper.SceneReviewNote> CollectAllReviewNotes()
+        {
+            var notes = new List<ShowcaseScriptHubPolishHelper.SceneReviewNote>();
+            var scenes = _video.Scenes?.Where(s => s != null).ToList() ?? new List<AiVideoGenInputItem>();
+            for (var i = 0; i < scenes.Count; i++)
+            {
+                notes.AddRange(ShowcaseScriptHubPolishHelper.ReviewScene(scenes[i], _video, i, scenes.Count));
+            }
+
+            return notes;
+        }
+
+        private IReadOnlyList<ShowcaseScriptHubPolishHelper.SceneReviewNote> GetReviewNotesForRow(int rowIndex)
+        {
+            if (_lastPolishResult?.Notes == null || _lastPolishResult.Notes.Count == 0)
+            {
+                return Array.Empty<ShowcaseScriptHubPolishHelper.SceneReviewNote>();
+            }
+
+            return _lastPolishResult.Notes.Where(n => n.SceneIndex == rowIndex).ToList();
+        }
+
+        private static void ShowPolishSummary(ShowcaseScriptHubPolishHelper.VideoPolishResult result)
+        {
+            if (result == null)
+            {
+                return;
+            }
+
+            var hard = result.Notes?.Count(n => n.IsHardIssue) ?? 0;
+            var soft = (result.Notes?.Count ?? 0) - hard;
+            var body = "Đã chỉnh "
+                       + result.ScenesPolished.ToString(CultureInfo.InvariantCulture)
+                       + " cảnh (thoại: "
+                       + result.VoiceAdjustedCount.ToString(CultureInfo.InvariantCulture)
+                       + ", công cụ: "
+                       + result.ToolAdjustedCount.ToString(CultureInfo.InvariantCulture)
+                       + ", prompt: "
+                       + result.PromptAdjustedCount.ToString(CultureInfo.InvariantCulture)
+                       + ").";
+            if (hard > 0 || soft > 0)
+            {
+                body += "\r\n\r\nCòn "
+                        + hard.ToString(CultureInfo.InvariantCulture)
+                        + " lỗi cứng, "
+                        + soft.ToString(CultureInfo.InvariantCulture)
+                        + " gợi ý — xem tooltip ô cam trên lưới.";
+            }
+
+            MessageBox.Show(
+                body,
+                "Chỉnh thoại & rà prompt",
+                MessageBoxButtons.OK,
+                hard > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
 
         private async Task TryRegenerateScriptAsync()
@@ -397,6 +518,7 @@ namespace tiktok_Omni
                 if (ok)
                 {
                     ReloadHubGridFromVideo();
+                    RefreshHubReviewHighlights();
                 }
             }
             finally
@@ -437,6 +559,10 @@ namespace tiktok_Omni
                 _btnRegenerateScript.Click += async (_, __) => await TryRegenerateScriptAsync().ConfigureAwait(true);
                 flpExcel.Controls.Add(_btnRegenerateScript);
             }
+
+            _btnPolishScript = MakeButton("Chỉnh thoại & rà prompt", ShowcasePastelTheme.ScriptHeader, 272);
+            _btnPolishScript.Click += (_, __) => RunPolishAndRefreshGrid();
+            flpExcel.Controls.Add(_btnPolishScript);
 
             if (_exportExcelAsync != null)
             {
@@ -524,7 +650,7 @@ namespace tiktok_Omni
 
         private static string FormatHubSceneLabel(AiVideoGenInputItem scene, int index, int sceneCount)
         {
-            var core = FormatSceneLabel(scene, index);
+            var core = ShowcaseSceneNamingHelper.FormatDisplayLabel(scene, index);
             var isOpening = index == 0;
             var isClosing = sceneCount > 0 && index == sceneCount - 1;
             if (isOpening && isClosing)
@@ -581,17 +707,24 @@ namespace tiktok_Omni
             return voice;
         }
 
-        private static string FormatSceneLabel(AiVideoGenInputItem scene, int index)
-        {
-            var role = string.IsNullOrWhiteSpace(scene?.SceneRole) ? string.Empty : scene.SceneRole.Trim();
-            var title = string.IsNullOrWhiteSpace(scene?.SceneTitle)
-                ? "Cảnh " + (index + 1)
-                : scene.SceneTitle.Trim();
-            return role.Length > 0 ? "[" + role + "] " + title : title;
-        }
-
         private static string FormatPromptForCell(string raw) =>
             ShowcasePromptTextHelper.StripDurationClauses(raw ?? string.Empty);
+
+        private static string FormatHubImageCellLabel(AiVideoGenInputItem scene, int sceneIndex)
+        {
+            var fileName = ResolveSceneImageFileName(scene);
+            var photoSlot = ShowcaseSceneNamingHelper.BuildPhotoSlotId(sceneIndex);
+            var kind = ShowcaseClipToolHelper.GetImageKindDisplayLabel(
+                ShowcaseClipToolHelper.NormalizeImageKind(scene?.ShowcaseImageKind, scene?.VeoPrompt));
+            if (fileName.Length == 0)
+            {
+                return kind.Length > 0 ? photoSlot + " · (" + kind + ")" : photoSlot;
+            }
+
+            return kind.Length > 0
+                ? photoSlot + " · " + fileName + " · " + kind
+                : photoSlot + " · " + fileName;
+        }
 
         private static string ResolveSceneImageFileName(AiVideoGenInputItem scene)
         {
@@ -736,21 +869,95 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (_dgvHub.Columns[e.ColumnIndex].Name != ColImage)
+            var colName = _dgvHub.Columns[e.ColumnIndex].Name;
+            var row = _dgvHub.Rows[e.RowIndex];
+            if (!(row.Tag is HubGridRowTag tag) || tag.Scene == null)
             {
-                if (_dgvHub.Columns[e.ColumnIndex].Name == ColTool)
+                return;
+            }
+
+            var notes = GetReviewNotesForRow(e.RowIndex);
+            var toolTip = notes.Count > 0
+                ? string.Join("\r\n", notes.Select(n => n.Message))
+                : string.Empty;
+
+            if (colName == ColTool)
+            {
+                e.CellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                if (ShowcaseScriptSceneValidationHelper.HasHardToolImageKindConflict(
+                        tag.Scene,
+                        _video.ShowcaseClipModeId))
                 {
-                    e.CellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+                    ApplyReviewCellStyle(e, row, e.ColumnIndex, hard: true, toolTip);
+                }
+                else if (notes.Any(n => n.Message.IndexOf("Kling", StringComparison.OrdinalIgnoreCase) >= 0
+                                         || n.Message.IndexOf("Veo", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    ApplyReviewCellStyle(e, row, e.ColumnIndex, hard: false, toolTip);
                 }
 
                 return;
             }
 
-            var row = _dgvHub.Rows[e.RowIndex];
-            if (row.Tag is HubGridRowTag tag && tag.Scene != null)
+            if (colName == ColVoice)
             {
-                var full = ResolveSceneImageFullPath(tag.Scene);
-                row.Cells[e.ColumnIndex].ToolTipText = full.Length > 0 ? full : "(chưa có ảnh)";
+                if (notes.Any(n => n.Message.IndexOf("Hook", StringComparison.OrdinalIgnoreCase) >= 0
+                                   || n.Message.IndexOf("Thoại", StringComparison.OrdinalIgnoreCase) >= 0
+                                   || n.Message.IndexOf("TTS", StringComparison.OrdinalIgnoreCase) >= 0
+                                   || n.Message.IndexOf("dấu", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    ApplyReviewCellStyle(e, row, e.ColumnIndex, hard: false, toolTip);
+                }
+
+                return;
+            }
+
+            if (colName == ColPrompt)
+            {
+                if (notes.Any(n => n.IsHardIssue
+                                   || n.Message.IndexOf("prompt", StringComparison.OrdinalIgnoreCase) >= 0
+                                   || n.Message.IndexOf("FLATLAY", StringComparison.OrdinalIgnoreCase) >= 0
+                                   || n.Message.IndexOf("as shown", StringComparison.OrdinalIgnoreCase) >= 0
+                                   || n.Message.IndexOf("màu", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    ApplyReviewCellStyle(e, row, e.ColumnIndex, notes.Any(n => n.IsHardIssue), toolTip);
+                }
+
+                return;
+            }
+
+            if (colName != ColImage)
+            {
+                return;
+            }
+
+            var full = ResolveSceneImageFullPath(tag.Scene);
+            var photoSlot = ShowcaseSceneNamingHelper.BuildPhotoSlotId(e.RowIndex);
+            var kind = ShowcaseClipToolHelper.GetImageKindDisplayLabel(
+                ShowcaseClipToolHelper.NormalizeImageKind(tag.Scene.ShowcaseImageKind, tag.Scene.VeoPrompt));
+            row.Cells[e.ColumnIndex].ToolTipText = photoSlot
+                                                   + (full.Length > 0 ? "\r\n" + full : "\r\n(chưa có ảnh)")
+                                                   + (kind.Length > 0 ? "\r\nLoại ảnh: " + kind : string.Empty)
+                                                   + "\r\nClip: "
+                                                   + ShowcaseSceneNamingHelper.BuildClipFileName(e.RowIndex);
+        }
+
+        private static void ApplyReviewCellStyle(
+            DataGridViewCellFormattingEventArgs e,
+            DataGridViewRow row,
+            int columnIndex,
+            bool hard,
+            string toolTip)
+        {
+            e.CellStyle.BackColor = hard
+                ? Color.FromArgb(110, 68, 42)
+                : Color.FromArgb(92, 78, 38);
+            e.CellStyle.ForeColor = hard
+                ? Color.FromArgb(255, 205, 150)
+                : Color.FromArgb(255, 232, 170);
+            if (!string.IsNullOrWhiteSpace(toolTip))
+            {
+                row.Cells[columnIndex].ToolTipText = toolTip;
             }
         }
 
@@ -978,6 +1185,16 @@ namespace tiktok_Omni
                         tool = ShowcaseClipToolHelper.ResolveDefaultTool(
                             _video.ShowcaseClipModeId,
                             tag.Scene.ShowcaseImageKind);
+                    }
+
+                    var correctedTool = ShowcaseClipToolHelper.ApplyMandatoryToolRules(
+                        _video.ShowcaseClipModeId,
+                        tag.Scene.ShowcaseImageKind,
+                        tool);
+                    if (!string.Equals(correctedTool, tool, StringComparison.Ordinal))
+                    {
+                        tool = correctedTool;
+                        row.Cells[ColTool].Value = ShowcaseClipToolHelper.GetToolDisplayLabel(tool);
                     }
 
                     tag.Scene.ShowcaseClipTool = tool;

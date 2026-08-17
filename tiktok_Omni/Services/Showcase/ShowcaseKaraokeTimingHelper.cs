@@ -9,34 +9,33 @@ namespace tiktok_Omni.Services.Showcase
 {
     internal static class ShowcaseKaraokeTimingHelper
     {
-        /// <summary>Ước lượng timestamp theo segment hook/thân, scale theo audio render (sau tua).</summary>
+        /// <summary>Ước lượng timestamp theo segment hook/thân — scale theo audio render thực tế (tốc độ thoại / AV sync).</summary>
         public static async Task<List<WordTimestamp>> EstimateWordTimestampsAsync(
             ShowcaseNarrationTimingManifest manifest,
             string renderAudioPath,
             string ffmpegExecutablePath,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            double appliedAudioTempo = 1d)
         {
             if (manifest == null)
             {
                 return new List<WordTimestamp>();
             }
 
-            var renderDurationMs = await SubtitleTimingHelper.GetAudioDurationMsAsync(
-                    ffmpegExecutablePath,
-                    renderAudioPath,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (renderDurationMs < 50d)
+            if (string.IsNullOrWhiteSpace(renderAudioPath))
             {
                 return new List<WordTimestamp>();
             }
 
-            var originalTotalMs = Math.Max(1d, manifest.TotalSpeechSeconds * 1000d);
-            var scale = renderDurationMs / originalTotalMs;
-            if (scale <= 0.01d)
-            {
-                scale = 1d;
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var scale = await ResolveManifestTimingScaleAsync(
+                    manifest,
+                    renderAudioPath,
+                    ffmpegExecutablePath,
+                    appliedAudioTempo,
+                    cancellationToken)
+                .ConfigureAwait(false);
 
             var speechStartMs = manifest.SpeechStartSeconds * 1000d * scale;
             var hookMs = Math.Max(0d, manifest.HookAudioSeconds * 1000d * scale);
@@ -46,6 +45,87 @@ namespace tiktok_Omni.Services.Showcase
             AppendSegment(result, manifest.HookText, speechStartMs, hookMs);
             AppendSegment(result, manifest.BodyText, speechStartMs + hookMs, bodyMs);
             return result;
+        }
+
+        /// <summary>Nén timestamp khi manifest gốc dài hơn audio render (tốc độ thoại / full_mix_preview).</summary>
+        public static async Task<List<WordTimestamp>> NormalizeTimestampsToRenderAudioAsync(
+            List<WordTimestamp> words,
+            string renderAudioPath,
+            string ffmpegExecutablePath,
+            ShowcaseNarrationTimingManifest manifest,
+            CancellationToken cancellationToken)
+        {
+            if (words == null || words.Count == 0)
+            {
+                return words ?? new List<WordTimestamp>();
+            }
+
+            var lastEnd = words[words.Count - 1].EndTimeMs;
+            if (lastEnd <= 1d)
+            {
+                return words;
+            }
+
+            var audioMs = await SubtitleTimingHelper.GetAudioDurationMsAsync(
+                    ffmpegExecutablePath,
+                    renderAudioPath,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (audioMs <= 50d)
+            {
+                return words;
+            }
+
+            var targetMs = lastEnd;
+            if (manifest != null && manifest.TotalSpeechSeconds > 0.05d)
+            {
+                var manifestMs = manifest.TotalSpeechSeconds * 1000d;
+                if (manifestMs > audioMs * 1.03d)
+                {
+                    targetMs = audioMs;
+                }
+            }
+
+            if (lastEnd <= targetMs * 1.03d)
+            {
+                return words;
+            }
+
+            var scale = targetMs / lastEnd;
+            foreach (var word in words)
+            {
+                word.StartTimeMs = Math.Round(word.StartTimeMs * scale, 2);
+                word.EndTimeMs = Math.Round(word.EndTimeMs * scale, 2);
+            }
+
+            return words;
+        }
+
+        private static async Task<double> ResolveManifestTimingScaleAsync(
+            ShowcaseNarrationTimingManifest manifest,
+            string renderAudioPath,
+            string ffmpegExecutablePath,
+            double appliedAudioTempo,
+            CancellationToken cancellationToken)
+        {
+            var manifestTotalMs = Math.Max(1d, manifest.TotalSpeechSeconds * 1000d);
+            var actualDurationMs = await SubtitleTimingHelper.GetAudioDurationMsAsync(
+                    ffmpegExecutablePath,
+                    renderAudioPath,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (actualDurationMs > 50d && manifestTotalMs > actualDurationMs * 1.03d)
+            {
+                return actualDurationMs / manifestTotalMs;
+            }
+
+            if (appliedAudioTempo > 1.03d)
+            {
+                return 1d / appliedAudioTempo;
+            }
+
+            return 1d;
         }
 
         private static void AppendSegment(

@@ -52,16 +52,26 @@ namespace tiktok_Omni.Services
 
         public const double ShowcaseBodyStyleExaggeration = 0.26;
 
+        /// <summary>Showcase CTA — nhấn vừa phải, giữa thân và hook.</summary>
+        public const double ShowcaseCtaStability = 0.43;
+
+        public const double ShowcaseCtaSimilarityBoost = 0.77;
+
+        public const double ShowcaseCtaStyleExaggeration = 0.29;
+
         public enum VoiceDeliveryMode
         {
             /// <summary>Video reup thuyết minh — stability cao, style thấp.</summary>
             Narration = 0,
 
-            /// <summary>Hook / CTA — nhấn mạnh, style cao.</summary>
+            /// <summary>Hook — nhấn mạnh, style cao.</summary>
             Hook = 1,
 
             /// <summary>Showcase cảnh thân — giữ accent clone, kể tự nhiên hơn hook.</summary>
-            ShowcaseBody = 2
+            ShowcaseBody = 2,
+
+            /// <summary>Showcase CTA — nhấn vừa phải, nhanh hơn thân nhưng không bằng hook.</summary>
+            ShowcaseCta = 3
         }
 
         public static string ResolveModelId(AppSettings settings)
@@ -193,16 +203,29 @@ namespace tiktok_Omni.Services
             };
         }
 
+        public static object CreateShowcaseCtaVoiceSettings()
+        {
+            return new
+            {
+                stability = ShowcaseCtaStability,
+                similarity_boost = ShowcaseCtaSimilarityBoost,
+                style = ShowcaseCtaStyleExaggeration
+            };
+        }
+
         private static object ResolveVoiceSettings(
             bool emphaticHook,
             bool showcaseExpressiveBody,
-            ShowcaseTtsRenderOptions segmentTts = null)
+            ShowcaseTtsRenderOptions segmentTts = null,
+            bool emphaticCta = false)
         {
             object baseSettings = emphaticHook
                 ? CreateVietnameseHookVoiceSettings()
-                : showcaseExpressiveBody
-                    ? CreateShowcaseBodyVoiceSettings()
-                    : CreateVietnameseNarrationVoiceSettings();
+                : emphaticCta
+                    ? CreateShowcaseCtaVoiceSettings()
+                    : showcaseExpressiveBody
+                        ? CreateShowcaseBodyVoiceSettings()
+                        : CreateVietnameseNarrationVoiceSettings();
 
             if (segmentTts == null)
             {
@@ -257,13 +280,14 @@ namespace tiktok_Omni.Services
             string voiceId = null,
             bool showcaseExpressiveBody = false,
             string languageCodeOverride = null,
-            ShowcaseTtsRenderOptions segmentTts = null)
+            ShowcaseTtsRenderOptions segmentTts = null,
+            bool emphaticCta = false)
         {
             var sanitized = VietnameseTtsTextNormalizer.SanitizeForElevenLabsRequest(text);
-            var cleanText = emphaticHook || showcaseExpressiveBody
+            var cleanText = emphaticHook || emphaticCta || showcaseExpressiveBody
                 ? sanitized
                 : ApplyDeepPauses(sanitized);
-            var voiceSettings = ResolveVoiceSettings(emphaticHook, showcaseExpressiveBody, segmentTts);
+            var voiceSettings = ResolveVoiceSettings(emphaticHook, showcaseExpressiveBody, segmentTts, emphaticCta);
             var lang = (languageCodeOverride ?? string.Empty).Trim().ToLowerInvariant();
             if (string.IsNullOrEmpty(lang))
             {
@@ -306,6 +330,8 @@ namespace tiktok_Omni.Services
                     return CreateVietnameseHookVoiceSettings();
                 case VoiceDeliveryMode.ShowcaseBody:
                     return CreateShowcaseBodyVoiceSettings();
+                case VoiceDeliveryMode.ShowcaseCta:
+                    return CreateShowcaseCtaVoiceSettings();
                 default:
                     return CreateVietnameseNarrationVoiceSettings();
             }

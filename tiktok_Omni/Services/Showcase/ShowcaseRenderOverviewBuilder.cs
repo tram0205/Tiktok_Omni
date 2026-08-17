@@ -32,7 +32,7 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             var renderSettings = ShowcasePerVideoRenderSettings.FromVideo(video, settings ?? new AppSettings());
-            var aspect = ShowcaseOutputAspectPresets.Resolve(video.ShowcaseOutputAspectId, settings?.ShowcaseOutputAspectDefault);
+            var aspect = ShowcaseOutputAspectPresets.ResolveForVideo(video, settings?.ShowcaseOutputAspectDefault);
             snapshot.Theme = TrimOrMissing(video.ShowcaseTheme);
             snapshot.AspectLabel = aspect.DisplayLabel + " (" + aspect.Width + "×" + aspect.Height + ")";
             snapshot.ClipsDir = session?.ClipsDir ?? string.Empty;
@@ -161,7 +161,8 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             if (bodyBurnIn && sceneIndexZeroBased > firstVoicedIndex
-                && !string.IsNullOrWhiteSpace(scene.SceneVoiceover))
+                && !string.IsNullOrWhiteSpace(scene.SceneVoiceover)
+                && !scene.ShowcaseSubtitleDisplayDisabled)
             {
                 var body = ShowcaseSubtitleDisplayHelper.ResolveDisplaySceneVoiceover(scene);
                 if (!string.IsNullOrWhiteSpace(body))
@@ -170,7 +171,8 @@ namespace tiktok_Omni.Services.Showcase
                 }
             }
 
-            if (bodyBurnIn && sceneCount > 0 && sceneIndexZeroBased == sceneCount - 1)
+            if (bodyBurnIn && sceneCount > 0 && sceneIndexZeroBased == sceneCount - 1
+                && !video.ShowcaseSubtitleDisplayCtaDisabled)
             {
                 var cta = ShowcaseSubtitleDisplayHelper.ResolveDisplayCta(video);
                 var sceneVoice = (scene.SceneVoiceover ?? string.Empty).Trim();

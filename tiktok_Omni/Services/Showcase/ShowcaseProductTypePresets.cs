@@ -42,8 +42,8 @@ namespace tiktok_Omni.Services.Showcase
             Auto,
             new ShowcaseProductTypePreset(
                 "ao-dai",
-                "Áo dài / truyền thống",
-                "Loại: áo dài / trang phục truyền thống Việt Nam. Voiceover có thể nhấn lụa, thêu, tà áo, xẻ tà, phom eo. Prompt clip (Veo/Kling): CHỈ mô tả chi tiết NHÌN THẤY trong từng ảnh — áo trơn → fabric as shown, KHÔNG embroidery/zipper nếu ảnh không có; có thêu rõ → mới nói embroidery; closure = tie cords/buttons/hooks as shown (KHÔNG đoán zipper). Veo flatlay: giữ mẫu + chuyển động camera hoặc tay nhẹ (no face); bắt buộc câu Garment color, silhouette and visible details stay exactly as shown. On-model Flow-safe: fabric panels/hem sway, mandarin collar. Kling: chuyển động vừa phải + khớp pose; preserve silhouette + visible fabric details from photo."),
+                "Áo dài",
+                "Loại: áo dài / trang phục truyền thống Việt Nam. Voiceover có thể nhấn lụa, thêu, tà áo, xẻ tà, phom eo. Prompt clip (Veo/Kling): CHỈ mô tả chi tiết NHÌN THẤY trong từng ảnh — áo trơn → fabric as shown, KHÔNG embroidery/zipper nếu ảnh không có; có thêu rõ → mới nói embroidery; closure = tie cords/buttons/hooks as shown (KHÔNG đoán zipper). Veo flatlay: giữ mẫu + chuyển động camera hoặc tay nhẹ (no face); bắt buộc câu Garment color, silhouette and visible details stay exactly as shown. On-model Flow-safe: fabric panels/hem sway, mandarin collar. Kling: chuyển động tự nhiên sống động (natural step, fabric follow-through, handheld camera drift) — TRÁNH very slow/static; preserve silhouette + visible fabric details from photo."),
             new ShowcaseProductTypePreset(
                 "fashion-top",
                 "Áo / top",
@@ -147,6 +147,38 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             return Normalize(promptHint);
+        }
+
+        /// <summary>Thư mục con trong Assets\CtaBRolls\ — mỗi loại SP một kho clip riêng.</summary>
+        public static string ResolveBrollLibraryId(string promptHint)
+        {
+            var normalized = Normalize(promptHint);
+            if (string.IsNullOrEmpty(normalized) || IsCustomPrompt(normalized))
+            {
+                return ShowcaseCtaBrollLibraryService.SharedLibraryId;
+            }
+
+            var preset = All.FirstOrDefault(p =>
+                string.Equals(Normalize(p.PromptHint), normalized, StringComparison.Ordinal));
+            if (preset == null || string.Equals(preset.Id, Auto.Id, StringComparison.Ordinal))
+            {
+                return ShowcaseCtaBrollLibraryService.SharedLibraryId;
+            }
+
+            return preset.Id;
+        }
+
+        public static string GetDisplayLabelForLibraryId(string libraryId)
+        {
+            var id = (libraryId ?? string.Empty).Trim();
+            if (id.Length == 0
+                || string.Equals(id, ShowcaseCtaBrollLibraryService.SharedLibraryId, StringComparison.OrdinalIgnoreCase))
+            {
+                return "Chung / tự động";
+            }
+
+            var preset = All.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+            return preset?.DisplayLabel ?? id;
         }
 
         private static string Normalize(string value) => (value ?? string.Empty).Trim();

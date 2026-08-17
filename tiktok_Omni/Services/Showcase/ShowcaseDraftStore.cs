@@ -38,6 +38,10 @@ namespace tiktok_Omni.Services
 
         public string ShowcaseOutputAspectId { get; set; } = ShowcaseOutputAspectPresets.DefaultId;
 
+        public int ShowcaseOutputAspectCustomWidth { get; set; } = ShowcaseOutputAspectPresets.DefaultCustomWidth;
+
+        public int ShowcaseOutputAspectCustomHeight { get; set; } = ShowcaseOutputAspectPresets.DefaultCustomHeight;
+
         public string ShowcaseHookText { get; set; } = string.Empty;
 
         public string ShowcaseSubtitleDisplayHook { get; set; } = string.Empty;
@@ -50,7 +54,13 @@ namespace tiktok_Omni.Services
 
         public string ShowcaseSubtitleDisplayCtaAnimation { get; set; } = string.Empty;
 
+        public bool ShowcaseSubtitleDisplayCtaDisabled { get; set; }
+
         public long ShowcaseVoiceoverClipFingerprint { get; set; }
+
+        public long ShowcaseVoiceoverClipPathFingerprint { get; set; }
+
+        public string ShowcaseVoiceoverClipDurationSignature { get; set; } = string.Empty;
 
         public bool ShowcaseMultiVoice { get; set; }
 
@@ -182,6 +192,10 @@ namespace tiktok_Omni.Services
 
         public string ShowcaseCtaSfxGeminiHint { get; set; } = string.Empty;
 
+        public string ShowcaseCtaBrollSubLibraryId { get; set; } = string.Empty;
+
+        public string ShowcaseCtaBrollLibraryId { get; set; } = string.Empty;
+
         public double ShowcaseTransitionSeconds { get; set; } = 0.6;
 
         public bool ShowcaseBrandLogoEnabled { get; set; }
@@ -235,13 +249,62 @@ namespace tiktok_Omni.Services
     public sealed class ShowcaseDraftStore
     {
         private const string FileName = "draft_showcase.json";
+        private const string BackupFileName = "draft_showcase.json.bak";
 
         public ShowcaseDraftDocument Load()
         {
-            var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy);
-            if (!File.Exists(path))
+            var primary = LoadFromPath(AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy));
+            var backup = LoadFromPath(AppDataPaths.PersistentFile(BackupFileName), allowMissing: true);
+
+            var doc = ChooseRicherDraft(primary, backup);
+            if (doc == null)
             {
                 return new ShowcaseDraftDocument();
+            }
+
+            if (migrateFromLegacy && doc.Videos.Count > 0)
+            {
+                Save(doc);
+            }
+
+            return doc;
+        }
+
+        /// <summary>Đọc bản sao lưu gần nhất — dùng khi file chính bị ghi đè rỗng / ít dòng hơn.</summary>
+        public ShowcaseDraftDocument LoadBackup()
+        {
+            return LoadFromPath(AppDataPaths.PersistentFile(BackupFileName), allowMissing: true)
+                ?? new ShowcaseDraftDocument();
+        }
+
+        /// <summary>Đọc file draft chính trên đĩa (không gộp .bak) — dùng trước khi ghi để tránh mất dòng.</summary>
+        public ShowcaseDraftDocument LoadPrimaryFile()
+        {
+            return LoadFromPath(AppDataPaths.PersistentFile(FileName), allowMissing: true)
+                ?? new ShowcaseDraftDocument();
+        }
+
+        private static ShowcaseDraftDocument ChooseRicherDraft(
+            ShowcaseDraftDocument primary,
+            ShowcaseDraftDocument backup)
+        {
+            primary = primary ?? new ShowcaseDraftDocument();
+            backup = backup ?? new ShowcaseDraftDocument();
+            var primaryCount = primary.Videos?.Count ?? 0;
+            var backupCount = backup.Videos?.Count ?? 0;
+            if (backupCount > primaryCount)
+            {
+                return backup;
+            }
+
+            return primary;
+        }
+
+        private static ShowcaseDraftDocument LoadFromPath(string path, bool allowMissing = false)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return allowMissing ? null : new ShowcaseDraftDocument();
             }
 
             try
@@ -250,24 +313,18 @@ namespace tiktok_Omni.Services
                 var doc = JsonConvert.DeserializeObject<ShowcaseDraftDocument>(json);
                 if (doc == null)
                 {
-                    return new ShowcaseDraftDocument();
+                    return allowMissing ? null : new ShowcaseDraftDocument();
                 }
 
                 doc.Videos = doc.Videos?
                     .Where(v => v != null)
                     .Select(NormalizeVideo)
                     .ToList() ?? new List<ShowcaseVideoDraftEntry>();
-
-                if (migrateFromLegacy && doc.Videos.Count > 0)
-                {
-                    Save(doc);
-                }
-
                 return doc;
             }
             catch
             {
-                return new ShowcaseDraftDocument();
+                return allowMissing ? null : new ShowcaseDraftDocument();
             }
         }
 
@@ -281,6 +338,20 @@ namespace tiktok_Omni.Services
 
             try
             {
+                var path = AppDataPaths.PersistentFile(FileName);
+                var backupPath = AppDataPaths.PersistentFile(BackupFileName);
+                if (File.Exists(path))
+                {
+                    try
+                    {
+                        File.Copy(path, backupPath, overwrite: true);
+                    }
+                    catch
+                    {
+                        // ignored — vẫn ghi file chính
+                    }
+                }
+
                 AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(doc, Formatting.Indented));
                 AppDataPaths.TryDeleteLegacyJson(FileName);
             }
@@ -311,13 +382,20 @@ namespace tiktok_Omni.Services
                 ShowcaseOutputAspectId = ShowcaseOutputAspectPresets.ResolveId(
                     video.ShowcaseOutputAspectId,
                     null),
+                ShowcaseOutputAspectCustomWidth = ShowcaseOutputAspectPresets.NormalizeCustomWidth(
+                    video.ShowcaseOutputAspectCustomWidth),
+                ShowcaseOutputAspectCustomHeight = ShowcaseOutputAspectPresets.NormalizeCustomHeight(
+                    video.ShowcaseOutputAspectCustomHeight),
                 ShowcaseHookText = video.ShowcaseHookText ?? string.Empty,
                 ShowcaseSubtitleDisplayHook = video.ShowcaseSubtitleDisplayHook ?? string.Empty,
                 ShowcaseSubtitleDisplayHookAnimation = video.ShowcaseSubtitleDisplayHookAnimation ?? string.Empty,
                 ShowcaseCtaText = video.ShowcaseCtaText ?? string.Empty,
                 ShowcaseSubtitleDisplayCta = video.ShowcaseSubtitleDisplayCta ?? string.Empty,
                 ShowcaseSubtitleDisplayCtaAnimation = video.ShowcaseSubtitleDisplayCtaAnimation ?? string.Empty,
+                ShowcaseSubtitleDisplayCtaDisabled = video.ShowcaseSubtitleDisplayCtaDisabled,
                 ShowcaseVoiceoverClipFingerprint = video.ShowcaseVoiceoverClipFingerprint,
+                ShowcaseVoiceoverClipPathFingerprint = video.ShowcaseVoiceoverClipPathFingerprint,
+                ShowcaseVoiceoverClipDurationSignature = video.ShowcaseVoiceoverClipDurationSignature ?? string.Empty,
                 ShowcaseMultiVoice = video.ShowcaseMultiVoice,
                 ShowcaseTextSize = video.ShowcaseTextSize,
                 ShowcaseSubtitleFontName = video.ShowcaseSubtitleFontName ?? string.Empty,
@@ -383,6 +461,8 @@ namespace tiktok_Omni.Services
                 ShowcaseCtaSfxOffsetSeconds = video.ShowcaseCtaSfxOffsetSeconds,
                 ShowcaseCtaSfxVolumePercent = video.ShowcaseCtaSfxVolumePercent,
                 ShowcaseCtaSfxGeminiHint = video.ShowcaseCtaSfxGeminiHint ?? string.Empty,
+                ShowcaseCtaBrollSubLibraryId = video.ShowcaseCtaBrollSubLibraryId ?? string.Empty,
+                ShowcaseCtaBrollLibraryId = video.ShowcaseCtaBrollLibraryId ?? string.Empty,
                 ShowcaseTransitionSeconds = video.ShowcaseTransitionSeconds,
                 ShowcaseBrandLogoEnabled = video.ShowcaseBrandLogoEnabled,
                 ShowcaseBrandLogoFile = video.ShowcaseBrandLogoFile ?? string.Empty,
@@ -422,13 +502,20 @@ namespace tiktok_Omni.Services
                 ShowcaseClipModeId = ShowcaseClipModePresets.ResolveIdForGemini(entry.ShowcaseClipModeId),
                 ShowcaseVideoFormatId = ShowcaseVideoFormatPresets.ResolveId(entry.ShowcaseVideoFormatId),
                 ShowcaseOutputAspectId = ShowcaseOutputAspectPresets.ResolveId(entry.ShowcaseOutputAspectId, null),
+                ShowcaseOutputAspectCustomWidth = ShowcaseOutputAspectPresets.NormalizeCustomWidth(
+                    entry.ShowcaseOutputAspectCustomWidth),
+                ShowcaseOutputAspectCustomHeight = ShowcaseOutputAspectPresets.NormalizeCustomHeight(
+                    entry.ShowcaseOutputAspectCustomHeight),
                 ShowcaseHookText = entry.ShowcaseHookText ?? string.Empty,
                 ShowcaseSubtitleDisplayHook = entry.ShowcaseSubtitleDisplayHook ?? string.Empty,
                 ShowcaseSubtitleDisplayHookAnimation = entry.ShowcaseSubtitleDisplayHookAnimation ?? string.Empty,
                 ShowcaseCtaText = entry.ShowcaseCtaText ?? string.Empty,
                 ShowcaseSubtitleDisplayCta = entry.ShowcaseSubtitleDisplayCta ?? string.Empty,
                 ShowcaseSubtitleDisplayCtaAnimation = entry.ShowcaseSubtitleDisplayCtaAnimation ?? string.Empty,
+                ShowcaseSubtitleDisplayCtaDisabled = entry.ShowcaseSubtitleDisplayCtaDisabled,
                 ShowcaseVoiceoverClipFingerprint = entry.ShowcaseVoiceoverClipFingerprint,
+                ShowcaseVoiceoverClipPathFingerprint = entry.ShowcaseVoiceoverClipPathFingerprint,
+                ShowcaseVoiceoverClipDurationSignature = entry.ShowcaseVoiceoverClipDurationSignature ?? string.Empty,
                 ShowcaseMultiVoice = entry.ShowcaseMultiVoice,
                 ShowcaseTextSize = entry.ShowcaseTextSize > 0 ? entry.ShowcaseTextSize : 72,
                 ShowcaseSubtitleFontName = entry.ShowcaseSubtitleFontName ?? string.Empty,
@@ -496,6 +583,8 @@ namespace tiktok_Omni.Services
                 ShowcaseCtaSfxOffsetSeconds = entry.ShowcaseCtaSfxOffsetSeconds,
                 ShowcaseCtaSfxVolumePercent = entry.ShowcaseCtaSfxVolumePercent,
                 ShowcaseCtaSfxGeminiHint = entry.ShowcaseCtaSfxGeminiHint ?? string.Empty,
+                ShowcaseCtaBrollSubLibraryId = entry.ShowcaseCtaBrollSubLibraryId ?? string.Empty,
+                ShowcaseCtaBrollLibraryId = entry.ShowcaseCtaBrollLibraryId ?? string.Empty,
                 ShowcaseTransitionSeconds = entry.ShowcaseTransitionSeconds > 0 ? entry.ShowcaseTransitionSeconds : 0.6,
                 ShowcaseBrandLogoEnabled = entry.ShowcaseBrandLogoEnabled,
                 ShowcaseBrandLogoFile = entry.ShowcaseBrandLogoFile ?? string.Empty,
@@ -594,6 +683,7 @@ namespace tiktok_Omni.Services
             scene.ProductName = (scene.ProductName ?? string.Empty).Trim();
             scene.ImageUrl = (scene.ImageUrl ?? string.Empty).Trim();
             scene.ClipPath = (scene.ClipPath ?? string.Empty).Trim();
+            scene.ShowcaseRealClipSourcePath = (scene.ShowcaseRealClipSourcePath ?? string.Empty).Trim();
             scene.SceneVoiceover = (scene.SceneVoiceover ?? string.Empty).Trim();
             scene.ShowcaseSubtitleDisplayVoiceover = (scene.ShowcaseSubtitleDisplayVoiceover ?? string.Empty).Trim();
             scene.ShowcaseSubtitleDisplayAnimation = (scene.ShowcaseSubtitleDisplayAnimation ?? string.Empty).Trim();

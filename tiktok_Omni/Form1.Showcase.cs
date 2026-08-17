@@ -111,6 +111,7 @@ namespace tiktok_Omni
             }
 
             var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            var speechBefore = ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot.Capture(video);
 
             try
             {
@@ -130,7 +131,9 @@ namespace tiktok_Omni
                     GetShowcaseOutputAspectIdForVideo(video),
                     settings,
                     ShowcaseTabCancellationToken,
-                    GetShowcaseVideoFormatForVideo(video)).ConfigureAwait(true);
+                    GetShowcaseVideoFormatForVideo(video),
+                    video.ShowcaseOutputAspectCustomWidth,
+                    video.ShowcaseOutputAspectCustomHeight).ConfigureAwait(true);
 
                 ApplyShowcaseSceneOrder(result.OrderedScenes);
                 session.Theme = result.Theme;
@@ -172,7 +175,7 @@ namespace tiktok_Omni
                     settings,
                     msg => LogShowcase("[Showcase] " + msg));
 
-                video.ShowcaseVoiceoverClipFingerprint = 0;
+                ShowcaseVoiceoverHelper.ClearClipVoiceoverBaseline(video);
                 foreach (var scene in result.OrderedScenes)
                 {
                     if (scene != null)
@@ -182,6 +185,24 @@ namespace tiktok_Omni
                 }
 
                 video.ApplySettingsToScenes();
+                ShowcaseScriptHubPolishHelper.PolishVideo(video, LogShowcase);
+                ShowcaseSubtitleDisplayHelper.SyncDisplayTextFromSpeechEdits(video, speechBefore);
+                if (session != null && !string.IsNullOrWhiteSpace(session.ClipsDir))
+                {
+                    var assignResult = ShowcaseSessionService.AssignPendingClipsToSceneSlots(
+                        session.ClipsDir,
+                        video.Scenes,
+                        LogShowcase);
+                    BindShowcaseSessionToVideo(session, video);
+                    ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, video.Scenes, LogShowcase);
+                    if (assignResult.AssignedCount > 0)
+                    {
+                        LogShowcase("[Showcase] Đã gán " + assignResult.AssignedCount
+                                    + " clip quay tay vào cảnh (giữ tên gốc) — mở «Công cụ Video» để xem.");
+                    }
+                }
+
+                ShowcaseSubtitleDisplayHelper.SyncDisplayTextFromSpeechEdits(video, speechBefore);
                 video.RefreshDisplayFields();
                 LogShowcase("[Showcase] Chủ đề: " + result.Theme);
                 LogShowcase("[Showcase] Hook: " + result.HookText);
@@ -201,7 +222,7 @@ namespace tiktok_Omni
                 }
 
                 LogShowcase("[Showcase] Đã sinh kịch bản cho " + result.OrderedScenes.Count + " cảnh — kéo thả storyboard hoặc bấm cột «Kịch bản» để sửa.");
-                LogShowcase("[Showcase] Thoại + Hook/CTA lúc này là bản nháp theo ảnh. Có clip trong veo_clips → «Tạo lời thoại» (không cần đủ tất cả cảnh).");
+                LogShowcase("[Showcase] Thoại + Hook/CTA lúc này là bản nháp theo ảnh. Bỏ clip vào clips_render (scene_XX hoặc quay tay tên gốc) rồi «Tạo lời thoại» — Gemini xem hết clip và sắp timeline.");
                 NotifyShowcaseDraftDirty();
                 return true;
             }
@@ -340,11 +361,34 @@ namespace tiktok_Omni
 
             if (videos.Count > 0)
             {
-                LogShowcase("[Showcase] Đặt tên clip theo cảnh: scene_01.mp4, scene_02.mp4, ... rồi bấm «Tạo lời thoại».");
+                LogShowcase("[Showcase] Bấm «Tạo lời thoại» khi đã có clip trong clips_render — Gemini xem hết clip (AI + quay tay) và sắp thứ tự timeline.");
                 ActivateShowcaseVideo(videos[videos.Count - 1]);
             }
 
             await Task.CompletedTask;
+        }
+
+        async Task IAiVideoGenControlsHost.ImportShowcaseClipsForVideoAsync(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            await AddShowcaseClipsForVideoAsync(video).ConfigureAwait(true);
+        }
+
+        async Task IAiVideoGenControlsHost.AddShowcaseLibraryClipsToRenderQueueAsync(
+            ShowcaseVideoItem video,
+            IList<string> clipPaths)
+        {
+            if (video == null || clipPaths == null || clipPaths.Count == 0)
+            {
+                return;
+            }
+
+            await CopyShowcaseClipsToVeoClipsAsync(video, clipPaths, dialogOwner: ShowcaseActiveDialogOwner)
+                .ConfigureAwait(true);
         }
 
         private async Task OpenShowcaseClipsFolderForVideoAsync(
@@ -558,15 +602,37 @@ namespace tiktok_Omni
 
         private async Task RefreshShowcaseClipStatusForVideoAsync(ShowcaseVideoItem video, AppSettings settings, string profile)
         {
+            var productName = (video?.ProductName ?? string.Empty).Trim();
+            EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+
+            if (_showcaseSession != null && video.Scenes.Count == 0)
+            {
+                ShowcaseSessionService.EnsureScenesFromRenderFolder(
+                    video,
+                    _showcaseSession.ClipsDir,
+                    profile,
+                    LogShowcase);
+            }
+
             var scenes = GetShowcaseVideoScenes(video);
             if (scenes.Count == 0)
             {
-                LogShowcase("[Showcase] «" + video.ProductName + "» chưa có cảnh nào để kiểm tra clip.");
+                var clipsDir = _showcaseSession?.ClipsDir ?? ShowcaseRenderClipsPaths.ResolveDirectory(
+                    video?.ShowcaseSessionBaseDir,
+                    createIfMissing: false,
+                    migrateLegacy: true);
+                var folderClips = string.IsNullOrWhiteSpace(clipsDir)
+                    ? 0
+                    : ShowcaseSessionService.CountClipFilesOnDisk(clipsDir);
+                LogShowcase(folderClips > 0
+                    ? "[Showcase] «" + productName + "» — có " + folderClips + " clip trong "
+                      + ShowcaseRenderClipsPaths.FolderName + " nhưng chưa gán storyboard. Bấm dòng video để khôi phục."
+                    : "[Showcase] «" + productName + "» chưa có cảnh hay clip.");
+                video?.RefreshDisplayFields();
                 return;
             }
 
-            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
-            EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+            productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
 
             var missing = ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, LogShowcase);
             video.RefreshDisplayFields();
@@ -581,7 +647,7 @@ namespace tiktok_Omni
         async Task IAiVideoGenControlsHost.GenerateShowcaseVoiceoverAsync()
         {
             if (!TryGetShowcaseSelectedVideosOrdered(out var videos,
-                    "Chọn ít nhất một dòng video trên lưới rồi bấm «Tạo lời thoại»."))
+                    "Chọn ít nhất một dòng video trên lưới (cột «Lời thoại»)."))
             {
                 return;
             }
@@ -597,38 +663,48 @@ namespace tiktok_Omni
             ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
             var profile = GetRunningProfileName();
 
-            if (btnShowcaseGenerateVoiceover != null)
+            for (var i = 0; i < videos.Count; i++)
             {
-                btnShowcaseGenerateVoiceover.Enabled = false;
-            }
-
-            try
-            {
-                for (var i = 0; i < videos.Count; i++)
+                ThrowIfShowcaseTabCancelled();
+                var video = videos[i];
+                ActivateShowcaseVideo(video, refreshStoryboard: false);
+                if (videos.Count > 1)
                 {
-                    ThrowIfShowcaseTabCancelled();
-                    var video = videos[i];
-                    ActivateShowcaseVideo(video, refreshStoryboard: false);
-                    if (videos.Count > 1)
-                    {
-                        LogShowcase("[Showcase] Tạo thoại (" + (i + 1) + "/" + videos.Count + ") — «" + video.ProductName + "»");
-                    }
-
-                    await GenerateShowcaseVoiceoverForVideoAsync(video, settings, profile).ConfigureAwait(true);
+                    LogShowcase("[Showcase] Tạo thoại (" + (i + 1) + "/" + videos.Count + ") — «" + video.ProductName + "»");
                 }
 
-                ActivateShowcaseVideo(videos[videos.Count - 1]);
-                SyncBuffersToGrids();
-                RefreshAiVideoGenModeReadinessLabels();
+                await GenerateShowcaseVoiceoverForVideoAsync(video, settings, profile).ConfigureAwait(true);
             }
-            finally
-            {
-                if (btnShowcaseGenerateVoiceover != null && !btnShowcaseGenerateVoiceover.IsDisposed)
-                {
-                    btnShowcaseGenerateVoiceover.Enabled = true;
-                }
-            }
+
+            ActivateShowcaseVideo(videos[videos.Count - 1]);
+            SyncBuffersToGrids();
+            RefreshAiVideoGenModeReadinessLabels();
         }
+
+        async Task IAiVideoGenControlsHost.GenerateShowcaseVoiceoverForVideoAsync(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            if (string.IsNullOrWhiteSpace(settings.AiApiKey))
+            {
+                MessageBox.Show(ShowcaseActiveDialogOwner, "Cần cấu hình AI API Key trong tab Cài đặt.", "Tạo lời thoại",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var profile = GetRunningProfileName();
+            ActivateShowcaseVideo(video, refreshStoryboard: false);
+            await GenerateShowcaseVoiceoverForVideoAsync(video, settings, profile).ConfigureAwait(true);
+            SyncBuffersToGrids();
+            RefreshAiVideoGenModeReadinessLabels();
+        }
+
+        void IAiVideoGenControlsHost.FlushShowcaseDraftToDisk() => FlushShowcaseDraftToDisk();
 
         async Task IAiVideoGenControlsHost.BuildShowcaseNarrationAsync()
         {
@@ -938,31 +1014,21 @@ namespace tiktok_Omni
             }
 
             if (requireClipAlignedVoiceover
-                && !ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(video, scenes))
+                && !ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes))
             {
-                if (ShowcaseVoiceoverHelper.TryResyncFingerprintForZoomOnlyClipRefresh(
-                        video,
-                        scenes,
-                        GetShowcaseClipModeForVideo(video)))
-                {
-                    LogShowcase("[Showcase] Chế độ Chỉ Zoom — clip đã đổi, giữ thoại hiện tại (đã đồng bộ fingerprint).");
-                    NotifyShowcaseDraftDirty();
-                }
-            }
-
-            if (requireClipAlignedVoiceover
-                && !ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(video, scenes))
-            {
-                var detail = ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes)
-                    && !ShowcaseVoiceoverHelper.IsVoiceoverSyncedToClips(video, scenes)
-                    ? "Thoại chưa khớp clip (hoặc clip đã đổi).\r\n\r\nBấm «Tạo lời thoại» lại."
-                    : "Bấm «Tạo lời thoại» trước (hoặc sửa kịch bản trong hub «Kịch bản · Prompt»).";
                 MessageBox.Show(ShowcaseActiveDialogOwner,
-                    "«" + productName + "» chưa có thoại khớp clip.\r\n\r\n" + detail,
+                    "«" + productName + "» chưa có lời thoại đủ cảnh.\r\n\r\nBấm «Tạo lời thoại» trước (hoặc sửa kịch bản trong hub «Kịch bản · Prompt»).",
                     "Tạo audio",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return false;
+            }
+
+            if (requireClipAlignedVoiceover
+                && ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes))
+            {
+                var durationSignature = BuildShowcaseClipDurationSignature(settings, scenes);
+                TryResyncShowcaseClipFingerprintForInPlaceRefresh(video, scenes, durationSignature);
             }
 
             EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
@@ -1032,7 +1098,16 @@ namespace tiktok_Omni
 
             try
             {
-                PlayShowcaseNarrationFile(ShowcaseNarrationCacheHelper.GetHookPreviewPath(sessionBase));
+                var previewPath = ShowcaseNarrationCacheHelper.GetHookPreviewPath(sessionBase);
+                previewPath = await PrepareShowcaseSpeedPreviewPathAsync(
+                        settings,
+                        previewPath,
+                        sessionBase,
+                        video?.ShowcaseHookNarrationSpeedPercent ?? 0,
+                        "hook_speed_preview.mp3",
+                        ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true);
+                PlayShowcaseNarrationFile(previewPath);
             }
             catch (Exception ex)
             {
@@ -1067,7 +1142,16 @@ namespace tiktok_Omni
 
             try
             {
-                PlayShowcaseNarrationFile(ShowcaseNarrationCacheHelper.GetBodyPreviewPath(sessionBase));
+                var previewPath = ShowcaseNarrationCacheHelper.GetBodyPreviewPath(sessionBase);
+                previewPath = await PrepareShowcaseSpeedPreviewPathAsync(
+                        settings,
+                        previewPath,
+                        sessionBase,
+                        video?.ShowcaseBodyNarrationSpeedPercent ?? 0,
+                        "body_speed_preview.mp3",
+                        ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true);
+                PlayShowcaseNarrationFile(previewPath);
             }
             catch (Exception ex)
             {
@@ -1171,12 +1255,16 @@ namespace tiktok_Omni
                 return false;
             }
 
-            string narrationPath = null;
-            if (ShowcaseNarrationCacheHelper.HasNarrationFile(sessionBase))
+            string narrationPath;
+            ShowcaseTtsHelper.EnsureVideoDefaults(video, settings);
+            var ttsOptions = ShowcaseTtsRenderOptions.FromVideo(video, settings);
+            var hookText = video.ShowcaseHookText ?? _showcaseSession?.HookText ?? string.Empty;
+            var ctaText = video.ShowcaseCtaText ?? _showcaseSession?.CtaText ?? string.Empty;
+            var audioDir = ShowcaseNarrationCacheHelper.GetAudioDirectory(sessionBase);
+            var fingerprint = ShowcaseNarrationCacheHelper.ComputeFingerprint(scenes, settings, ttsOptions);
+            if (ShowcaseNarrationCacheHelper.TryReuseCachedNarration(audioDir, fingerprint, out narrationPath))
             {
-                narrationPath = Path.Combine(
-                    ShowcaseNarrationCacheHelper.GetAudioDirectory(sessionBase),
-                    ShowcaseNarrationCacheHelper.NarrationFileName);
+                LogShowcase("[Showcase] Dùng lại narration.mp3 (lời thoại + giọng không đổi).");
             }
             else
             {
@@ -1185,14 +1273,12 @@ namespace tiktok_Omni
                     return false;
                 }
 
-                ShowcaseTtsHelper.EnsureVideoDefaults(video, settings);
-                var ttsOptions = ShowcaseTtsRenderOptions.FromVideo(video, settings);
-                var hookText = video.ShowcaseHookText ?? _showcaseSession?.HookText ?? string.Empty;
-                var ctaText = video.ShowcaseCtaText ?? _showcaseSession?.CtaText ?? string.Empty;
+                audioDir = ShowcaseNarrationCacheHelper.GetAudioDirectory(sessionBase);
+                fingerprint = ShowcaseNarrationCacheHelper.ComputeFingerprint(scenes, settings, ttsOptions);
 
                 try
                 {
-                    LogShowcase("[Showcase] Ghép hook + thân → narration.mp3 trước khi render thành phẩm…");
+                    LogShowcase("[Showcase] Lời thoại đổi — ghép lại narration.mp3 trước khi render thành phẩm…");
                     var build = await _videoProcessingService.EnsureShowcaseNarrationAsync(
                         scenes,
                         hookText,
@@ -1338,6 +1424,45 @@ namespace tiktok_Omni
             }
         }
 
+        private async Task<string> PrepareShowcaseSpeedPreviewPathAsync(
+            AppSettings settings,
+            string inputPath,
+            string sessionBase,
+            int speedPercent,
+            string outputFileName,
+            CancellationToken cancellationToken)
+        {
+            var input = (inputPath ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(input) || !File.Exists(input))
+            {
+                return input;
+            }
+
+            var tempo = ShowcaseNarrationSpeedHelper.ResolveEffectiveSpeedPercent(speedPercent) / 100d;
+            if (Math.Abs(tempo - 1d) <= 0.03d)
+            {
+                return input;
+            }
+
+            var ffmpeg = await FfmpegToolkitService.EnsureAvailableAsync(settings, LogShowcase, cancellationToken)
+                .ConfigureAwait(false);
+            FfmpegToolkitService.TryResolve(settings, out var toolkit, out _);
+            var ffprobe = toolkit?.FfprobeExe ?? FfmpegToolkitService.GetBundledFfprobePath();
+            var workDir = Path.Combine(
+                ShowcaseNarrationCacheHelper.GetAudioDirectory(sessionBase),
+                "speed_preview_work");
+            return await ShowcaseNarrationAvSyncHelper.PrepareSpeedAdjustedMp3Async(
+                    ffmpeg,
+                    ffprobe,
+                    input,
+                    workDir,
+                    speedPercent,
+                    outputFileName,
+                    LogShowcase,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         private Task RunShowcaseHookNarrationPreviewForVideoAsync(ShowcaseVideoItem video)
         {
             return RunShowcaseTabScopedWorkAsync(async () =>
@@ -1373,34 +1498,39 @@ namespace tiktok_Omni
             AppSettings settings,
             string profile)
         {
-            var scenes = GetShowcaseVideoScenes(video);
-            if (scenes.Count < ShowcaseWorkflowConstants.MinScenes)
-            {
-                MessageBox.Show(ShowcaseActiveDialogOwner,
-                    "«" + (video.ProductName ?? string.Empty).Trim() + "» cần ít nhất 1 cảnh trên storyboard.",
-                    "Tạo lời thoại",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            var productName = (video.ProductName ?? scenes[0]?.ProductName ?? string.Empty).Trim();
+            var productName = (video?.ProductName ?? string.Empty).Trim();
             EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video, allowRecentSessionFallback: false);
+            BindShowcaseSessionToVideo(_showcaseSession, video);
             if (_showcaseSession == null)
             {
                 MessageBox.Show(ShowcaseActiveDialogOwner,
-                    "«" + productName + "» chưa có phiên Showcase — hãy thêm ảnh và «Tạo kịch bản» trước.",
+                    "«" + productName + "» chưa có phiên Showcase — hãy thêm ảnh hoặc clip vào "
+                    + ShowcaseRenderClipsPaths.FolderName + " trước.",
                     "Tạo lời thoại",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return;
             }
 
-            var missingClips = ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, LogShowcase);
-            video.RefreshDisplayFields();
-            if (ShowcaseClipStatusHelper.CountScenesWithClip(scenes) == 0)
+            var clipsDir = ShowcaseRenderClipsPaths.ResolveDirectory(
+                _showcaseSession.BaseDir,
+                createIfMissing: true,
+                migrateLegacy: true);
+            _showcaseSession.ClipsDir = clipsDir;
+            video.ShowcaseClipsDir = clipsDir;
+            video.ShowcaseSessionBaseDir = _showcaseSession.BaseDir;
+
+            var manifest = ShowcaseRenderClipsTimelineHelper.BuildManifest(clipsDir);
+            if (manifest.Count == 0)
             {
-                LogShowcase("[Showcase] «" + productName + "» — chưa có clip trong veo_clips, không gọi Gemini «Tạo lời thoại».");
+                ShowcaseSessionService.EnsureScenesFromRenderFolder(video, clipsDir, profile, LogShowcase);
+                manifest = ShowcaseRenderClipsTimelineHelper.BuildManifest(clipsDir);
+            }
+
+            if (manifest.Count == 0)
+            {
+                LogShowcase("[Showcase] «" + productName + "» — chưa có clip trong "
+                            + ShowcaseRenderClipsPaths.FolderName + ", không gọi Gemini «Tạo lời thoại».");
                 MessageBox.Show(ShowcaseActiveDialogOwner,
                     ShowcaseClipStatusHelper.BuildNoClipsForVoiceoverMessage(productName, GetShowcaseClipModeForVideo(video)),
                     "Chưa có clip",
@@ -1409,24 +1539,23 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (missingClips.Count > 0)
-            {
-                LogShowcase("[Showcase] Thiếu clip cảnh " + string.Join(", ", missingClips) + " — vẫn tạo thoại cho "
-                            + ShowcaseClipStatusHelper.CountScenesWithClip(scenes) + "/" + scenes.Count + " cảnh có clip.");
-            }
-
             try
             {
                 var themeForGemini = GetShowcaseThemeForVideo(video);
+                var productType = GetShowcaseProductTypeForVideo(video);
                 var voiceoverService = new ShowcaseGeminiVoiceoverService();
-                var result = await voiceoverService.GenerateAsync(
-                    scenes,
+                var result = await voiceoverService.GenerateFromRenderFolderAsync(
+                    video,
+                    clipsDir,
                     themeForGemini,
+                    productType,
+                    profile,
                     settings,
                     LogShowcase,
                     ShowcaseTabCancellationToken,
                     GetShowcaseVideoFormatForVideo(video)).ConfigureAwait(true);
 
+                var scenes = GetShowcaseVideoScenes(video);
                 _showcaseSession.Theme = result.Theme;
                 _showcaseSession.HookText = result.HookText;
                 _showcaseSession.CtaText = result.CtaText;
@@ -1442,11 +1571,30 @@ namespace tiktok_Omni
                 }
 
                 video.ApplySettingsToScenes();
+                ShowcaseVoiceoverHelper.PersistHookCtaIntoSceneVoiceovers(video, scenes);
+                ShowcaseVoiceoverHelper.SyncSilentFlagsFromVoiceover(scenes);
+                ShowcaseSubtitleDisplayHelper.ClearDisplayTextOverrides(video);
                 video.RefreshDisplayFields();
-                video.ShowcaseVoiceoverClipFingerprint = ShowcaseVoiceoverHelper.ComputeClipFingerprint(scenes);
+                var ffprobe = FfmpegToolkitService.TryResolve(settings, out var voiceTk, out _)
+                    ? voiceTk?.FfprobeExe
+                    : null;
+                if (string.IsNullOrWhiteSpace(ffprobe))
+                {
+                    ffprobe = FfmpegToolkitService.GetBundledFfprobePath();
+                }
+
+                await ShowcaseVoiceoverHelper.StampClipVoiceoverBaselineAsync(
+                        video,
+                        scenes,
+                        ffprobe,
+                        ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true);
                 ShowcaseNarrationCacheHelper.ClearAllCachedAudio(_showcaseSession.BaseDir);
                 NotifyShowcaseDraftDirty();
+                FlushShowcaseDraftToDisk();
+                RefreshAffiliateDeepStoryboard(skipSourceImagePrune: true);
 
+                LogShowcase("[Showcase] Phụ đề burn-in đã lấy lại theo lời thoại mới — mở tab «Phụ đề» để rút gọn nếu cần.");
                 LogShowcase("[Showcase] Chủ đề: " + result.Theme);
                 LogShowcase("[Showcase] Hook: " + result.HookText);
                 LogShowcase("[Showcase] CTA: " + result.CtaText);
@@ -1462,7 +1610,7 @@ namespace tiktok_Omni
                 }
                 else
                 {
-                    LogShowcase("[Showcase] Đổi/replace clip (scene_XX.mp4) → bấm «Tạo lời thoại» lại rồi «Tạo audio».");
+                    LogShowcase("[Showcase] Đổi clip cùng thời lượng → vẫn render; đổi thời lượng → «Tạo lời thoại» lại rồi «Tạo audio».");
                 }
                 UpdateShowcaseNarrationButtonState();
             }
@@ -1665,7 +1813,7 @@ namespace tiktok_Omni
 
             using (var dlg = new OpenFileDialog
             {
-                Title = "Chọn clip cảnh (scene_01.mp4, scene_02.mp4, … — có thể chọn nhiều file)",
+                Title = "Chọn clip vào bảng chờ render (giữ tên gốc — có thể chọn nhiều file)",
                 Filter = "Video (*.mp4;*.mov;*.webm;*.mkv)|*.mp4;*.mov;*.webm;*.mkv|Tất cả file|*.*",
                 Multiselect = true
             })
@@ -1675,111 +1823,140 @@ namespace tiktok_Omni
                     return;
                 }
 
-                var productName = (video.ProductName ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(productName) || productName.StartsWith("Video ", StringComparison.OrdinalIgnoreCase))
-                {
-                    var prompted = PromptForShowcaseProductName();
-                    if (string.IsNullOrWhiteSpace(prompted))
-                    {
-                        LogShowcase("[Showcase] Đã hủy — cần đặt tên sản phẩm trước khi thêm clip.");
-                        return;
-                    }
+                await CopyShowcaseClipsToVeoClipsAsync(video, dlg.FileNames, dialogOwner: this)
+                    .ConfigureAwait(true);
+            }
+        }
 
-                    productName = prompted;
-                    video.ProductName = productName;
-                }
+        private async Task CopyShowcaseClipsToVeoClipsAsync(
+            ShowcaseVideoItem video,
+            IList<string> filePaths,
+            IWin32Window dialogOwner)
+        {
+            if (video == null || filePaths == null || filePaths.Count == 0)
+            {
+                return;
+            }
 
-                var profile = GetRunningProfileName();
-                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-                ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
-                var session = EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
-                if (session == null || string.IsNullOrWhiteSpace(session.ClipsDir))
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(productName) || productName.StartsWith("Video ", StringComparison.OrdinalIgnoreCase))
+            {
+                var prompted = PromptForShowcaseProductName();
+                if (string.IsNullOrWhiteSpace(prompted))
                 {
-                    MessageBox.Show(ShowcaseActiveDialogOwner,
-                        "Không tạo được thư mục phiên Showcase — kiểm tra «Storage root» trong Cài đặt.",
-                        "Thêm clip",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
+                    LogShowcase("[Showcase] Đã hủy — cần đặt tên sản phẩm trước khi thêm clip.");
                     return;
                 }
 
-                var scenes = GetShowcaseVideoScenes(video);
-                var nextIndex = 1;
-                var addedCount = 0;
-                var skippedCount = 0;
+                productName = prompted;
+                video.ProductName = productName;
+            }
 
-                for (var i = 0; i < dlg.FileNames.Length; i++)
+            var profile = GetRunningProfileName();
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ProfileScopedPaths.SetConfiguredStorageRoot(settings.StorageRootPath);
+            var session = EnsureShowcaseSession(profile, productName, settings.StorageRootPath, video);
+            if (session == null || string.IsNullOrWhiteSpace(session.ClipsDir))
+            {
+                MessageBox.Show(dialogOwner ?? ShowcaseActiveDialogOwner,
+                    "Không tạo được thư mục phiên Showcase — kiểm tra «Storage root» trong Cài đặt.",
+                    "Thêm clip",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            var scenes = GetShowcaseVideoScenes(video);
+            var addedCount = 0;
+            var skippedCount = 0;
+
+            for (var i = 0; i < filePaths.Count; i++)
+            {
+                var file = filePaths[i];
+                if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
                 {
-                    var file = dlg.FileNames[i];
-                    if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
+                    skippedCount++;
+                    continue;
+                }
+
+                var destName = Path.GetFileName(file);
+                var destPath = Path.Combine(session.ClipsDir, destName);
+                var overwrite = false;
+
+                if (File.Exists(destPath)
+                    && !string.Equals(
+                        Path.GetFullPath(file),
+                        Path.GetFullPath(destPath),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var choice = PromptShowcaseDuplicateClipSlotFile(
+                        destName,
+                        destName,
+                        dialogOwner ?? ShowcaseActiveDialogOwner);
+                    if (choice == ShowcaseDuplicateImageChoice.Skip)
                     {
                         skippedCount++;
                         continue;
                     }
 
-                    while (true)
+                    if (choice == ShowcaseDuplicateImageChoice.Cancel)
                     {
-                        var existingAtSlot = ShowcaseSessionService.DetectClipForOrder(session.ClipsDir, nextIndex);
-                        if (!string.IsNullOrWhiteSpace(existingAtSlot))
-                        {
-                            var choice = PromptShowcaseDuplicateSlotFile(
-                                Path.GetFileName(existingAtSlot),
-                                Path.GetFileName(file));
-                            if (choice == ShowcaseDuplicateImageChoice.Skip)
-                            {
-                                skippedCount++;
-                                break;
-                            }
-
-                            if (choice == ShowcaseDuplicateImageChoice.Cancel)
-                            {
-                                i = dlg.FileNames.Length;
-                                break;
-                            }
-
-                            var overwritePath = ShowcaseSessionService.CopyLocalSceneClip(
-                                session,
-                                nextIndex,
-                                file,
-                                overwriteExisting: true);
-                            if (string.IsNullOrWhiteSpace(overwritePath))
-                            {
-                                skippedCount++;
-                                break;
-                            }
-
-                            nextIndex++;
-                            addedCount++;
-                            break;
-                        }
-
-                        var copiedPath = ShowcaseSessionService.CopyLocalSceneClip(session, nextIndex, file, overwriteExisting: true);
-                        if (string.IsNullOrWhiteSpace(copiedPath))
-                        {
-                            skippedCount++;
-                            break;
-                        }
-
-                        nextIndex++;
-                        addedCount++;
                         break;
                     }
+
+                    overwrite = true;
                 }
 
-                var missing = ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, scenes, LogShowcase);
-                video.RefreshDisplayFields();
-                SyncBuffersToGrids();
-                RefreshAiVideoGenModeReadinessLabels();
-                NotifyShowcaseDraftDirty();
-                LogShowcase("[Showcase] Đã thêm " + addedCount + " clip cho «" + productName + "» → "
-                            + session.ClipsDir
-                            + (skippedCount > 0 ? " (bỏ qua " + skippedCount + ")." : ".")
-                            + (missing.Count == 0 && scenes.Count > 0
-                                ? " ✓ đủ clip cho " + scenes.Count + " cảnh."
-                                : missing.Count > 0
-                                    ? " Còn thiếu cảnh " + string.Join(", ", missing) + "."
-                                    : string.Empty));
+                var copiedPath = ShowcaseSessionService.CopyLocalClipPreserveName(session, file, overwrite);
+                if (string.IsNullOrWhiteSpace(copiedPath))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                addedCount++;
             }
+
+            if (scenes.Count > 0)
+            {
+                var assignResult = ShowcaseSessionService.AssignPendingClipsToSceneSlots(
+                    session.ClipsDir,
+                    scenes,
+                    LogShowcase);
+                if (assignResult.AssignedCount > 0)
+                {
+                    LogShowcase("[Showcase] Đã gán " + assignResult.AssignedCount
+                                + " clip quay tay vào cảnh (giữ tên gốc).");
+                }
+
+                var appended = ShowcaseSessionService.AppendUnassignedPendingClipsAsScenes(
+                    session.ClipsDir,
+                    scenes,
+                    productName,
+                    profile,
+                    LogShowcase);
+                if (appended.AppendedCount > 0)
+                {
+                    ShowcaseSceneNamingHelper.ApplyConventionSceneTitles(scenes);
+                    video.ApplySettingsToScenes();
+                    RefreshAffiliateDeepStoryboard();
+                }
+            }
+
+            var missing = ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, scenes, LogShowcase);
+            video.RefreshDisplayFields();
+            SyncBuffersToGrids();
+            RefreshAiVideoGenModeReadinessLabels();
+            NotifyShowcaseDraftDirty();
+            LogShowcase("[Showcase] Đã thêm " + addedCount + " clip cho «" + productName + "» → "
+                        + session.ClipsDir
+                        + " (giữ tên gốc)."
+                        + (skippedCount > 0 ? " Bỏ qua " + skippedCount + "." : string.Empty)
+                        + (missing.Count == 0 && scenes.Count > 0
+                            ? " ✓ đủ clip cho " + scenes.Count + " cảnh."
+                            : missing.Count > 0
+                                ? " Chưa gán cảnh: thiếu cảnh " + string.Join(", ", missing) + "."
+                                : string.Empty));
 
             await Task.CompletedTask;
         }
@@ -1811,7 +1988,10 @@ namespace tiktok_Omni
             return ShowShowcaseDuplicateImageChoiceDialog(message, "Trùng ảnh gốc");
         }
 
-        private ShowcaseDuplicateImageChoice PromptShowcaseDuplicateSlotFile(string existingFileName, string newFileName)
+        private ShowcaseDuplicateImageChoice PromptShowcaseDuplicateSlotFile(
+            string existingFileName,
+            string newFileName,
+            IWin32Window owner = null)
         {
             var message =
                 "Trong thư mục source_images đã có file:\r\n  «" + existingFileName + "»\r\n\r\n"
@@ -1820,13 +2000,31 @@ namespace tiktok_Omni
                 + "• Không — bỏ qua, không thêm ảnh này\r\n"
                 + "• Hủy — dừng thêm các ảnh còn lại";
 
-            return ShowShowcaseDuplicateImageChoiceDialog(message, "Trùng tên file trong thư mục");
+            return ShowShowcaseDuplicateImageChoiceDialog(message, "Trùng tên file trong thư mục", owner);
         }
 
-        private ShowcaseDuplicateImageChoice ShowShowcaseDuplicateImageChoiceDialog(string message, string title)
+        private ShowcaseDuplicateImageChoice PromptShowcaseDuplicateClipSlotFile(
+            string existingFileName,
+            string newFileName,
+            IWin32Window owner = null)
+        {
+            var message =
+                "Trong thư mục clips_render đã có file:\r\n  «" + existingFileName + "»\r\n\r\n"
+                + "Clip bạn chọn: «" + newFileName + "»\r\n\r\n"
+                + "• Có — đè lên file cũ\r\n"
+                + "• Không — bỏ qua, không thêm clip này\r\n"
+                + "• Hủy — dừng thêm các clip còn lại";
+
+            return ShowShowcaseDuplicateImageChoiceDialog(message, "Trùng tên trong clips_render", owner);
+        }
+
+        private ShowcaseDuplicateImageChoice ShowShowcaseDuplicateImageChoiceDialog(
+            string message,
+            string title,
+            IWin32Window owner = null)
         {
             var result = MessageBox.Show(
-                this,
+                owner ?? this,
                 message,
                 title,
                 MessageBoxButtons.YesNoCancel,
@@ -2114,7 +2312,7 @@ namespace tiktok_Omni
 
             if (session == null)
             {
-                return ("«" + (video.ProductName ?? "?") + "» — «Tải excel prompt» (bảng Prompt) rồi bỏ file Veo/Kling vào veo_clips (cột «Cảnh»).", false);
+                return ("«" + (video.ProductName ?? "?") + "» — «Tải excel prompt» (bảng Prompt) rồi bỏ file Veo/Kling vào clips_render (cột «Cảnh»).", false);
             }
 
             var clipsDir = !string.IsNullOrWhiteSpace(video.ShowcaseClipsDir)
@@ -2134,22 +2332,19 @@ namespace tiktok_Omni
                 var hint = zoomPending > 0
                     ? " (có " + zoomPending + " cảnh Zoom — «Tạo clip Zoom»)"
                     : string.Empty;
-                return ("«" + (video.ProductName ?? "?") + "» — bỏ ít nhất 1 clip vào veo_clips (cột «Cảnh»)" + hint + ".", false);
+                return ("«" + (video.ProductName ?? "?") + "» — bỏ ít nhất 1 clip vào clips_render (cột «Cảnh»)" + hint + ".", false);
             }
 
-            if (!ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(video, scenes))
+            if (!ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes))
             {
-                if (ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes)
-                    && !ShowcaseVoiceoverHelper.IsVoiceoverSyncedToClips(video, scenes))
-                {
-                    return ("«" + (video.ProductName ?? "?") + "» — clip đã đổi hoặc thoại chỉ từ «Tạo kịch bản». Bấm «Tạo lời thoại» lại.", false);
-                }
-
                 var partial = missing > 0
                     ? " (đã có " + withClip + "/" + scenes.Count + " clip — cảnh thiếu giữ thoại nháp)"
                     : string.Empty;
                 return ("«" + (video.ProductName ?? "?") + "» — bấm «Tạo lời thoại»" + partial + ".", false);
             }
+
+            var durationSignature = BuildShowcaseClipDurationSignature(LoadShowcaseSettingsSnapshot(), scenes);
+            TryResyncShowcaseClipFingerprintForInPlaceRefresh(video, scenes, durationSignature);
 
             if (missing > 0)
             {
@@ -2353,8 +2548,20 @@ namespace tiktok_Omni
                 return;
             }
 
+            var realScenes = scenes
+                .Select((scene, index) => new { scene, index })
+                .Where(x => x.scene != null &&
+                            string.Equals(x.scene.ShowcaseClipTool, ShowcaseClipToolHelper.ToolReal, StringComparison.Ordinal))
+                .ToList();
+
             var clipModeId = GetShowcaseClipModeForVideo(video);
-            if (!ShowcaseClipModePresets.ModeAllowsInAppZoom(clipModeId))
+            var zoomScenes = scenes
+                .Select((scene, index) => new { scene, index })
+                .Where(x => x.scene != null &&
+                            string.Equals(x.scene.ShowcaseClipTool, ShowcaseClipToolHelper.ToolZoom, StringComparison.Ordinal))
+                .ToList();
+
+            if (zoomScenes.Count > 0 && !ShowcaseClipModePresets.ModeAllowsInAppZoom(clipModeId))
             {
                 var modeLabel = ShowcaseClipModePresets.GetDisplayLabel(clipModeId);
                 MessageBox.Show(ShowcaseActiveDialogOwner,
@@ -2367,15 +2574,10 @@ namespace tiktok_Omni
                 return;
             }
 
-            var zoomScenes = scenes
-                .Select((scene, index) => new { scene, index })
-                .Where(x => x.scene != null &&
-                            string.Equals(x.scene.ShowcaseClipTool, ShowcaseClipToolHelper.ToolZoom, StringComparison.Ordinal))
-                .ToList();
-            if (zoomScenes.Count == 0)
+            if (zoomScenes.Count == 0 && realScenes.Count == 0)
             {
                 MessageBox.Show(ShowcaseActiveDialogOwner,
-                    "«" + (video.ProductName ?? string.Empty).Trim() + "» không có cảnh gán công cụ Zoom.\r\n\r\n"
+                    "«" + (video.ProductName ?? string.Empty).Trim() + "» không có cảnh gán công cụ Zoom hoặc clip quay tay.\r\n\r\n"
                     + "Chạy «Tạo kịch bản» (hoặc sửa từng cảnh trong cột Prompt) để có cảnh clip_tool = Zoom, rồi thử lại.",
                     "Tạo clip Zoom",
                     MessageBoxButtons.OK,
@@ -2388,7 +2590,7 @@ namespace tiktok_Omni
             if (session == null || string.IsNullOrWhiteSpace(session.ClipsDir))
             {
                 MessageBox.Show(ShowcaseActiveDialogOwner,
-                    "Không tạo được thư mục phiên Showcase (veo_clips) — kiểm tra «Storage root» trong Cài đặt.",
+                    "Không tạo được thư mục phiên Showcase (clips_render) — kiểm tra «Storage root» trong Cài đặt.",
                     "Tạo clip Zoom",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
@@ -2506,7 +2708,7 @@ namespace tiktok_Omni
                             overwriteExisting: true);
                         if (string.IsNullOrWhiteSpace(destPath))
                         {
-                            LogShowcase("[Showcase] Không ghi được clip Zoom cảnh " + sceneOrder + " vào veo_clips.");
+                            LogShowcase("[Showcase] Không ghi được clip Zoom cảnh " + sceneOrder + " vào clips_render.");
                             continue;
                         }
 
@@ -2532,20 +2734,89 @@ namespace tiktok_Omni
                     }
                 }
 
+                var realCreated = 0;
+                if (realScenes.Count > 0)
+                {
+                    for (var i = 0; i < realScenes.Count; i++)
+                    {
+                        ThrowIfShowcaseTabCancelled();
+                        var entry = realScenes[i];
+                        var scene = entry.scene;
+                        var sceneOrder = entry.index + 1;
+                        var sourcePath = (scene.ShowcaseRealClipSourcePath ?? scene.ClipPath ?? string.Empty).Trim();
+                        if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+                        {
+                            LogShowcase("[Showcase] Bỏ qua cảnh " + sceneOrder + " — không tìm thấy clip quay tay gốc.");
+                            continue;
+                        }
+
+                        var originalFileName = Path.GetFileName(sourcePath);
+                        var tempOutput = Path.Combine(
+                            Path.GetTempPath(),
+                            "showcase_real_" + session.ProfileName + "_s" + sceneOrder.ToString("D2") + "_" + Guid.NewGuid().ToString("N") + ".mp4");
+                        try
+                        {
+                            await ShowcaseCtaBrollAppendHelper.NormalizeRealClipAsync(
+                                    sourcePath,
+                                    tempOutput,
+                                    outputCanvas,
+                                    ffmpegExecutable,
+                                    LogShowcase,
+                                    ShowcaseTabCancellationToken)
+                                .ConfigureAwait(true);
+
+                            var destPath = ShowcaseSessionService.CopyLocalClipWithBaseName(
+                                session,
+                                tempOutput,
+                                originalFileName,
+                                overwriteExisting: true);
+                            if (string.IsNullOrWhiteSpace(destPath))
+                            {
+                                LogShowcase("[Showcase] Không ghi được clip quay tay cảnh " + sceneOrder + " vào clips_render.");
+                                continue;
+                            }
+
+                            scene.ClipPath = destPath;
+                            scene.ShowcaseRealClipSourcePath = destPath;
+                            realCreated++;
+                            LogShowcase("[Showcase] Clip quay tay cảnh " + sceneOrder + " → " + Path.GetFileName(destPath) + " (giữ tên gốc).");
+                        }
+                        catch (Exception ex)
+                        {
+                            LogShowcase("[Showcase] Lỗi chuẩn hoá clip quay tay cảnh " + sceneOrder + ": " + ex.Message);
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                if (File.Exists(tempOutput))
+                                {
+                                    File.Delete(tempOutput);
+                                }
+                            }
+                            catch
+                            {
+                                // ignore temp cleanup
+                            }
+                        }
+                    }
+
+                    LogShowcase("[Showcase] Đã tạo " + realCreated + " clip quay tay trong clips_render: " + session.ClipsDir);
+                }
+
                 ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, scenes, LogShowcase);
                 video.RefreshDisplayFields();
                 RefreshAffiliateDeepStoryboard();
                 SyncBuffersToGrids();
                 NotifyShowcaseDraftDirty();
-                LogShowcase("[Showcase] Đã tạo " + created + " clip Zoom trong veo_clips: " + session.ClipsDir);
-                if (created > 0
-                    && ShowcaseVoiceoverHelper.TryResyncFingerprintForZoomOnlyClipRefresh(
-                        video,
-                        scenes,
-                        clipModeId))
+                LogShowcase("[Showcase] Đã tạo " + created + " clip Zoom trong clips_render: " + session.ClipsDir);
+                if (created > 0)
                 {
-                    LogShowcase("[Showcase] Clip Zoom mới — giữ thoại hiện tại (Chỉ Zoom, không cần «Tạo lời thoại» lại).");
-                    NotifyShowcaseDraftDirty();
+                    var durationSignature = BuildShowcaseClipDurationSignature(settings, scenes);
+                    if (TryResyncShowcaseClipFingerprintForInPlaceRefresh(video, scenes, durationSignature))
+                    {
+                        LogShowcase("[Showcase] Clip Zoom mới — giữ thoại nếu cùng thời lượng.");
+                    }
                 }
             }
             catch (Exception ex)
@@ -2751,6 +3022,7 @@ namespace tiktok_Omni
 
             video.Scenes.Clear();
             video.Scenes.AddRange(orderedScenes);
+            ShowcaseSceneNamingHelper.ApplyConventionSceneTitles(video.Scenes);
             video.ApplySettingsToScenes();
             video.RefreshDisplayFields();
             NotifyShowcaseDraftDirty();
@@ -2980,24 +3252,19 @@ namespace tiktok_Omni
                 var missingClips = ShowcaseSessionService.RefreshClipStatus(_showcaseSession.ClipsDir, scenes, null);
                 if (missingClips.Count > 0)
                 {
-                    blockers.Add("«" + firstName + "» thiếu clip cảnh: " + string.Join(", ", missingClips) + " (thư mục veo_clips).");
+                    blockers.Add("«" + firstName + "» thiếu clip cảnh: " + string.Join(", ", missingClips) + " (thư mục clips_render).");
                 }
             }
 
-            if (!ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(video, scenes))
+            if (!ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes))
             {
-                if (ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes)
-                    && !ShowcaseVoiceoverHelper.IsVoiceoverSyncedToClips(video, scenes))
-                {
-                    blockers.Add("«" + firstName + "» — clip đã đổi hoặc thoại cũ: bấm «Tạo lời thoại» lại.");
-                }
-                else
-                {
-                    blockers.Add("«" + firstName + "» chưa có lời thoại khớp clip — bấm «Tạo lời thoại».");
-                }
+                blockers.Add("«" + firstName + "» chưa có lời thoại — bấm «Tạo lời thoại».");
             }
             else
             {
+                var durationSignature = BuildShowcaseClipDurationSignature(settings, scenes);
+                TryResyncShowcaseClipFingerprintForInPlaceRefresh(video, scenes, durationSignature);
+
                 var sessionBase = _showcaseSession?.BaseDir;
                 if (string.IsNullOrWhiteSpace(sessionBase))
                 {
@@ -3012,6 +3279,87 @@ namespace tiktok_Omni
             }
 
             return blockers;
+        }
+
+        private string BuildShowcaseClipDurationSignature(AppSettings settings, IList<AiVideoGenInputItem> scenes)
+        {
+            if (scenes == null || scenes.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            FfmpegToolkitService.TryResolve(settings, out var toolkit, out _);
+            var ffprobe = toolkit?.FfprobeExe ?? FfmpegToolkitService.GetBundledFfprobePath();
+            try
+            {
+                return ShowcaseClipDurationHelper.BuildSignatureAsync(
+                        scenes,
+                        ffprobe,
+                        ShowcaseTabCancellationToken)
+                    .ConfigureAwait(true)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private bool TryResyncShowcaseClipFingerprintForInPlaceRefresh(
+            ShowcaseVideoItem video,
+            IList<AiVideoGenInputItem> scenes,
+            string currentDurationSignature)
+        {
+            if (video == null || scenes == null)
+            {
+                return false;
+            }
+
+            if (!ShowcaseVoiceoverHelper.TryResyncFingerprintForClipFileRefresh(
+                    video,
+                    scenes,
+                    currentDurationSignature))
+            {
+                return false;
+            }
+
+            LogShowcase("[Showcase] Clip đổi — giữ thoại/audio, render bình thường.");
+            NotifyShowcaseDraftDirty();
+            return true;
+        }
+
+        private void WarnShowcaseClipDurationDriftBeforeRender(
+            ShowcaseVideoItem video,
+            IList<AiVideoGenInputItem> scenes,
+            AppSettings settings)
+        {
+            if (video == null || scenes == null || scenes.Count == 0 || settings == null)
+            {
+                return;
+            }
+
+            if (!ShowcaseVoiceoverHelper.HasCompleteVoiceover(video, scenes))
+            {
+                return;
+            }
+
+            var durationSignature = BuildShowcaseClipDurationSignature(settings, scenes);
+            var drift = ShowcaseVoiceoverHelper.BuildClipDurationDriftSummary(video, durationSignature);
+            if (string.IsNullOrWhiteSpace(drift))
+            {
+                return;
+            }
+
+            var productName = (video.ProductName ?? "?").Trim();
+            LogShowcase("[Showcase] «" + productName + "» — cảnh báo lệch thời lượng clip trước render:\r\n" + drift);
+            MessageBox.Show(
+                ShowcaseActiveDialogOwner,
+                "«" + productName + "» — thời lượng clip lệch so với lúc «Tạo lời thoại»:\r\n\r\n"
+                + drift + "\r\n\r\nVẫn render với thoại/audio hiện có.",
+                "Cảnh báo thời lượng clip",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
 
         private void ShowShowcaseRenderBlockersMessage(IList<string> blockers)
@@ -3073,6 +3421,11 @@ namespace tiktok_Omni
             {
                 btnShowcasePushToAutoPost.Enabled = idleEnabled;
             }
+
+            if (btnDeepGenerateScript != null && !btnDeepGenerateScript.IsDisposed)
+            {
+                btnDeepGenerateScript.Enabled = idleEnabled;
+            }
         }
 
         private IWin32Window ShowcaseActiveDialogOwner => (IWin32Window)_showcaseAudioDialogOwner ?? this;
@@ -3093,6 +3446,22 @@ namespace tiktok_Omni
         {
             _showcaseAudioDialogOwner = null;
             _showcaseAudioLogMirror = null;
+        }
+
+        /// <summary>
+        /// Gắn một dialog Showcase bất kỳ (vd. ShowcaseClipModeEditorForm) làm chủ sở hữu MessageBox +
+        /// nơi hiển thị log trong lúc dialog đó đang mở modal — tái dùng chung cơ chế với
+        /// <see cref="BindShowcaseAudioDialog"/> để log/MessageBox không bị khuất phía sau dialog.
+        /// </summary>
+        internal void BindShowcaseWorkDialog(Form dialog, Action<string> statusMirror)
+        {
+            if (dialog == null || dialog.IsDisposed)
+            {
+                return;
+            }
+
+            _showcaseAudioDialogOwner = dialog;
+            _showcaseAudioLogMirror = statusMirror;
         }
 
         private void TryMirrorShowcaseLogToAudioDialog(string message)

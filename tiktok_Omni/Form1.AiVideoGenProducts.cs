@@ -46,6 +46,7 @@ namespace tiktok_Omni
 
         private void SyncBuffersToGrids()
         {
+            var selectedShowcaseVideoIds = CaptureShowcaseGridSelectedVideoIds();
             SaveAllProductGridState();
 
             if (dgvAiVideoGenInput != null)
@@ -58,14 +59,22 @@ namespace tiktok_Omni
 
             if (dgvDeepDiveInput != null)
             {
+                if (IsDeepDiveModeTab())
+                {
+                    WireShowcaseProductGridLayout();
+                    ApplyDeepDiveGridColumnVisibility(showcaseMode: true);
+                }
+
                 RefreshShowcaseVideoDisplayFields();
                 dgvDeepDiveInput.DataSource = null;
-                dgvDeepDiveInput.DataSource = GetShowcaseVideoBuffer()
+                var showcaseRows = GetShowcaseVideoBuffer()
                     .Where(ShouldShowShowcaseVideo)
                     .ToList();
+                dgvDeepDiveInput.DataSource = showcaseRows;
                 if (IsDeepDiveModeTab())
                 {
                     ApplyShowcaseDeepDiveRowHeights();
+                    RestoreShowcaseGridSelection(selectedShowcaseVideoIds);
                 }
             }
         }
@@ -90,7 +99,6 @@ namespace tiktok_Omni
             }
 
             SyncAllShowcaseVideoSettingsToScenes();
-            NotifyShowcaseDraftDirty();
         }
 
         /// <summary>Lưu cả hai lưới sản phẩm trước rebind / render / đổi tab.</summary>
@@ -260,6 +268,7 @@ namespace tiktok_Omni
                 MultiSelect = true,
                 BackgroundColor = Color.FromArgb(20, 22, 28),
                 BorderStyle = BorderStyle.FixedSingle,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
                 GridColor = Color.FromArgb(60, 64, 77),
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
             };
@@ -394,6 +403,7 @@ namespace tiktok_Omni
                 }
 
                 deletedCount = videos.Count;
+                AllowShowcaseDraftShrinkOnNextSave();
                 NotifyShowcaseDraftDirty();
                 RefreshAffiliateDeepStoryboard();
             }

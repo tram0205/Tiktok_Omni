@@ -7890,6 +7890,8 @@ namespace tiktok_Omni
                 EndUiLayoutBatch();
             }
 
+            EnsureShowcaseGridHydratedAfterStartup();
+
             _ = RefreshVideoReupMusicComboAsync();
             await RefreshResumeStateAsync();
             await LoadWarmupQueueAsync();

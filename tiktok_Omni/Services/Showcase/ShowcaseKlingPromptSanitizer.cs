@@ -3,10 +3,10 @@ using System.Text.RegularExpressions;
 
 namespace tiktok_Omni.Services.Showcase
 {
-    /// <summary>Chuẩn hoá prompt Kling I2V — chuyển động vừa phải (sống động nhưng không phá áo dài/vải).</summary>
+    /// <summary>Chuẩn hoá prompt Kling I2V — chuyển động tự nhiên, sống động như quay thật (không quá chậm/giả AI).</summary>
     public static class ShowcaseKlingPromptSanitizer
     {
-        private const string PromptEndingSuffix = "smooth cinematic motion, no text overlay";
+        private const string PromptEndingSuffix = "fluid natural motion, no text overlay";
 
         private static readonly string[] FlowStylePrefixes =
         {
@@ -36,24 +36,47 @@ namespace tiktok_Omni.Services.Showcase
             (@"\bproduct-focused\b", string.Empty)
         };
 
+        /// <summary>Chỉ làm mềm chuyển động nguy hiểm — không ép mọi thứ thành «slow step».</summary>
         private static readonly (string Pattern, string Replacement)[] AggressiveMotionSofteners =
         {
-            (@"\bstrong\s+(?:breeze|wind|gust)\b", "soft breeze"),
-            (@"\bheavy\s+(?:breeze|wind)\b", "gentle breeze"),
-            (@"\bdramatic(?:ally)?\b", "gentle"),
-            (@"\b(?:walks?|walking)\s+(?:slowly\s+)?(?:forward\s+)?through\b", "takes one slow step forward in"),
-            (@"\b(?:twirl|spin|runway\s+walk)\b", "gentle fabric sway"),
-            (@"\bhair\s+(?:flowing|blowing|flying)\b", "subtle hair movement"),
-            (@"\b(?:fast|quick|rushing)\s+(?:walk|step)\b", "slow step"),
-            (@"\bthree\s+slow\s+steps\b", "one slow step"),
-            (@"\btwo\s+slow\s+steps\b", "one slow step with gentle fabric sway")
+            (@"\bstrong\s+(?:breeze|wind|gust)\b", "light breeze"),
+            (@"\bheavy\s+(?:breeze|wind)\b", "light breeze"),
+            (@"\bdramatic(?:ally)?\b", "natural"),
+            (@"\b(?:twirl|spin|runway\s+walk)\b", "natural fabric sway with relaxed body turn"),
+            (@"\bhair\s+(?:flowing|blowing|flying)\b", "natural hair movement"),
+            (@"\brunway\b", "natural walk"),
+            (@"\b(?:sprint|running|jogging)\b", "natural brisk step")
+        };
+
+        private static readonly (string Pattern, string Replacement)[] SluggishMotionUpgraders =
+        {
+            (@"\bvery\s+slow\s+cinematic\s+push-in\b", "smooth natural push-in with handheld-style camera drift"),
+            (@"\bvery\s+slow\s+cinematic\b", "smooth natural cinematic"),
+            (@"\bvery\s+slow\s+push-in\b", "smooth natural push-in"),
+            (@"\bvery\s+slow\b", "smooth natural"),
+            (@"\bone\s+slow\s+step\s+forward\b", "a natural relaxed step forward"),
+            (@"\bone\s+slow\s+step\b", "a natural step"),
+            (@"\btwo\s+slow\s+steps\b", "two natural steps"),
+            (@"\bthree\s+slow\s+steps\b", "two natural steps"),
+            (@"\bslow\s+step\s+forward\b", "natural step forward"),
+            (@"\bslow\s+steps?\b", "natural steps"),
+            (@"\bsubtle\s+weight\s+shift\s+forward\b", "natural weight shift with relaxed body motion and fabric follow-through"),
+            (@"\bsubtle\s+weight\s+shift\b", "natural weight shift with soft body rhythm"),
+            (@"\bminimal\s+motion\b", "natural lifelike motion"),
+            (@"\bhardly\s+moving\b", "moving naturally in place"),
+            (@"\b barely\b", " naturally"),
+            (@"\bstatic\b", "natural"),
+            (@"\bgentle\s+cinematic\s+motion\b", "fluid natural motion"),
+            (@"\bsmooth\s+cinematic\s+motion\b", "fluid natural motion")
         };
 
         private static readonly string[] BalancedMotionBoosters =
         {
-            "One slow step forward, dress panels and hem sway gently in soft breeze, very slow cinematic push-in",
-            "Subtle weight shift with gentle fabric drape movement, soft natural body motion, slow push-in on outfit detail",
-            "Slight shoulder turn, fabric panels ripple lightly, natural in-place rhythm, gentle cinematic motion"
+            "Natural step forward with relaxed posture, dress panels sway in light breeze, smooth handheld-style camera drift and gentle push-in",
+            "Soft shoulder turn and weight shift, fabric drapes with natural follow-through, fluid tracking on outfit detail",
+            "Relaxed in-place rhythm — hip shift and hem ripple naturally, smooth camera drift like real TikTok footage",
+            "Model moves with natural body momentum, panels sway in light breeze, cinematic but lifelike push-in",
+            "Light breeze moves fabric while model shifts weight naturally, subtle head turn, fluid handheld camera motion"
         };
 
         public static string Sanitize(string rawPrompt, int sceneIndex)
@@ -82,6 +105,11 @@ namespace tiktok_Omni.Services.Showcase
                 text = Regex.Replace(text, pattern, replacement, RegexOptions.IgnoreCase);
             }
 
+            foreach (var (pattern, replacement) in SluggishMotionUpgraders)
+            {
+                text = Regex.Replace(text, pattern, replacement, RegexOptions.IgnoreCase);
+            }
+
             text = NormalizeGarmentDetailClaims(text);
 
             text = Regex.Replace(text, @"\s{2,}", " ").Trim();
@@ -103,6 +131,10 @@ namespace tiktok_Omni.Services.Showcase
             {
                 var booster = BalancedMotionBoosters[Math.Abs(sceneIndex) % BalancedMotionBoosters.Length];
                 text += ". " + booster;
+            }
+            else if (IsMotionTooSluggish(text))
+            {
+                text += ". Natural body rhythm, fabric follow-through, smooth handheld-style camera drift";
             }
 
             if (IsAoDaiLike(text) && !ContainsPreserveGarmentHint(text))
@@ -151,8 +183,28 @@ namespace tiktok_Omni.Services.Showcase
         {
             return Regex.IsMatch(
                 text,
-                @"\b(?:sway|swaying|step|steps|shift|turn|turns|breeze|walk|walking|movement|push-in|dolly|ripple|drape|panels?\s+(?:sway|ripple)|fabric\s+motion|body\s+motion|weight\s+shift)\b",
+                @"\b(?:sway|swaying|step|steps|shift|turn|turns|breeze|walk|walking|movement|push-in|dolly|ripple|drape|drift|handheld|momentum|follow-through|fluid|natural|panels?\s+(?:sway|ripple)|fabric\s+motion|body\s+motion|weight\s+shift|tracking|rhythm)\b",
                 RegexOptions.IgnoreCase);
+        }
+
+        private static bool IsMotionTooSluggish(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            var sluggishHits = Regex.Matches(
+                text,
+                @"\b(?:very\s+slow|one\s+slow|subtle\s+only|minimal\s+motion|hardly\s+moving|barely\s+moving|almost\s+still|slight(?:ly)?\s+weight\s+shift\s+forward(?!\s+with\s+relaxed))\b",
+                RegexOptions.IgnoreCase).Count;
+
+            var livelyHits = Regex.Matches(
+                text,
+                @"\b(?:natural|relaxed|fluid|drift|handheld|momentum|follow-through|lively|rhythm|step\s+forward|shoulder\s+turn|hip\s+shift|tracking|ripple|sway)\b",
+                RegexOptions.IgnoreCase).Count;
+
+            return sluggishHits >= 1 && livelyHits <= 2;
         }
 
         private static bool IsAoDaiLike(string text)
@@ -193,7 +245,7 @@ namespace tiktok_Omni.Services.Showcase
             result = Regex.Replace(
                 result,
                 @"\bcollar and embroidery detail\b",
-                "mandarin collar and smooth plain silk fabric",
+                "mandarin collar and visible fabric details as shown",
                 RegexOptions.IgnoreCase);
             result = Regex.Replace(
                 result,
@@ -217,7 +269,7 @@ namespace tiktok_Omni.Services.Showcase
         {
             return Regex.IsMatch(
                 text,
-                @"\b(?:gold embroidery|silver embroidery|embroidered panels|floral embroidery|embroidery on (?:the )?collar|visible embroidery|with (?:gold |silver )?embroidery|intricate embroidery)\b",
+                @"\b(?:gold embroidery|silver embroidery|embroidered panels|floral embroidery|embroidery on (?:the )?collar|visible embroidery|with (?:gold |silver )?embroidery|intricate embroidery|embroidery as shown|embroidery from the photo|embroidery visible)\b",
                 RegexOptions.IgnoreCase);
         }
     }

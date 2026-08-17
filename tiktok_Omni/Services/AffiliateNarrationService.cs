@@ -376,14 +376,15 @@ namespace tiktok_Omni.Services
                                         + " (" + (bodyEngine == TtsEngineKind.EdgeTts ? "Edge" : "ElevenLabs") + ")…");
                             await GenerateVoiceSegmentAsync(
                                     prepared,
-                                    emphaticHook: isCtaPart,
+                                    emphaticHook: false,
                                     settings,
                                     scenePath,
                                     log,
                                     cancellationToken,
                                     showcaseTts,
                                     bodyEngine,
-                                    showcaseExpressiveBody: !isCtaPart)
+                                    showcaseExpressiveBody: !isCtaPart,
+                                    emphaticCta: isCtaPart)
                                 .ConfigureAwait(false);
                             bodySceneFiles.Add(scenePath);
                         }
@@ -575,6 +576,7 @@ namespace tiktok_Omni.Services
             var tempFiles = new List<string>();
             var bodySceneFiles = new List<string>();
             var bodyEngine = showcaseTts.BodyEngine;
+            var previewComplete = false;
 
             try
             {
@@ -604,19 +606,34 @@ namespace tiktok_Omni.Services
                         workDirectory,
                         "body_preview_" + (bi + 1).ToString("D2", CultureInfo.InvariantCulture) + ".mp3");
                     tempFiles.Add(scenePath);
-                    log?.Invoke("[TTS] Showcase thân preview " + (bi + 1) + "/" + bodyParts.Count + "…");
-                    await GenerateVoiceSegmentAsync(
-                            prepared,
-                            emphaticHook: isCtaPart,
-                            settings,
-                            scenePath,
-                            log,
-                            cancellationToken,
-                            showcaseTts,
-                            bodyEngine,
-                            showcaseExpressiveBody: !isCtaPart)
-                        .ConfigureAwait(false);
-                    bodySceneFiles.Add(scenePath);
+
+                    if (TryReuseExistingAudioPart(scenePath))
+                    {
+                        log?.Invoke("[TTS] Showcase thân preview " + (bi + 1) + "/" + bodyParts.Count + " — dùng file đã tạo.");
+                        bodySceneFiles.Add(scenePath);
+                    }
+                    else
+                    {
+                        log?.Invoke("[TTS] Showcase thân preview " + (bi + 1) + "/" + bodyParts.Count + "…");
+                        await GenerateVoiceSegmentAsync(
+                                prepared,
+                                emphaticHook: false,
+                                settings,
+                                scenePath,
+                                log,
+                                cancellationToken,
+                                showcaseTts,
+                                bodyEngine,
+                                showcaseExpressiveBody: !isCtaPart,
+                                emphaticCta: isCtaPart)
+                            .ConfigureAwait(false);
+                        bodySceneFiles.Add(scenePath);
+                    }
+
+                    if (bi < bodyParts.Count - 1)
+                    {
+                        await Task.Delay(650, cancellationToken).ConfigureAwait(false);
+                    }
                 }
 
                 if (bodySceneFiles.Count == 0)
@@ -634,11 +651,33 @@ namespace tiktok_Omni.Services
                     await ConcatAudioPartsAsync(bodySceneFiles, bodyPreviewOutputPath, ffmpeg, log, cancellationToken)
                         .ConfigureAwait(false);
                 }
+
+                previewComplete = true;
             }
             finally
             {
-                CleanupTempFiles(tempFiles.Where(p =>
-                    !string.Equals(p, bodyPreviewOutputPath, StringComparison.OrdinalIgnoreCase)));
+                if (previewComplete)
+                {
+                    CleanupTempFiles(tempFiles.Where(p =>
+                        !string.Equals(p, bodyPreviewOutputPath, StringComparison.OrdinalIgnoreCase)));
+                }
+            }
+        }
+
+        private static bool TryReuseExistingAudioPart(string path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    return false;
+                }
+
+                return new FileInfo(path).Length > 256;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -919,7 +958,8 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             ShowcaseTtsRenderOptions showcaseTts,
             TtsEngineKind engine,
-            bool showcaseExpressiveBody = false)
+            bool showcaseExpressiveBody = false,
+            bool emphaticCta = false)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -932,14 +972,18 @@ namespace tiktok_Omni.Services
             var mode = engine == TtsEngineKind.EdgeTts
                 ? emphaticHook
                     ? "Edge nhấn · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey)
-                    : showcaseExpressiveBody
-                        ? "Edge thân êm · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey)
-                        : "Edge · " + showcaseTts.Preset.Label
+                    : emphaticCta
+                        ? "Edge CTA · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey)
+                        : showcaseExpressiveBody
+                            ? "Edge thân êm · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey)
+                            : "Edge · " + showcaseTts.Preset.Label
                 : emphaticHook
                     ? "ElevenLabs nhấn · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey) + "»"
-                    : showcaseExpressiveBody
-                        ? "ElevenLabs thân · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.BodyStyleKey) + "»"
-                        : "ElevenLabs kể chuyện";
+                    : emphaticCta
+                        ? "ElevenLabs CTA · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey) + "»"
+                        : showcaseExpressiveBody
+                            ? "ElevenLabs thân · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.BodyStyleKey) + "»"
+                            : "ElevenLabs kể chuyện";
             log?.Invoke("[TTS] Sinh giọng — " + mode + "…");
             var audioRef = await _videoService.GenerateAudioAsync(
                 text,
@@ -949,7 +993,8 @@ namespace tiktok_Omni.Services
                 showcaseTts,
                 emphaticHook: emphaticHook,
                 showcaseExpressiveBody: showcaseExpressiveBody,
-                logAction: log).ConfigureAwait(false);
+                logAction: log,
+                emphaticCta: emphaticCta).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(audioRef))
             {
                 throw new InvalidOperationException("TTS returned empty audio.");
@@ -966,7 +1011,8 @@ namespace tiktok_Omni.Services
             Action<string> log,
             CancellationToken cancellationToken,
             ShowcaseTtsRenderOptions showcaseTts,
-            bool showcaseExpressiveBody = false)
+            bool showcaseExpressiveBody = false,
+            bool emphaticCta = false)
         {
             var engine = emphaticHook ? showcaseTts.HookEngine : showcaseTts.BodyEngine;
             await GenerateVoiceSegmentAsync(
@@ -978,7 +1024,8 @@ namespace tiktok_Omni.Services
                 cancellationToken,
                 showcaseTts,
                 engine,
-                showcaseExpressiveBody).ConfigureAwait(false);
+                showcaseExpressiveBody,
+                emphaticCta).ConfigureAwait(false);
         }
 
         private async Task GenerateVoiceSegmentAsync(

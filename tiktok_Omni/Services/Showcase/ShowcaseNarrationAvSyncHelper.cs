@@ -33,7 +33,9 @@ namespace tiktok_Omni.Services.Showcase
                 {
                     VideoPath = videoIn,
                     NarrationPath = narrIn,
-                    TargetDurationSeconds = await ProbeSeconds(ffprobeExecutable, videoIn, cancellationToken).ConfigureAwait(false)
+                    TargetDurationSeconds = await ProbeSeconds(ffprobeExecutable, videoIn, cancellationToken).ConfigureAwait(false),
+                    AppliedAudioTempo = 1d,
+                    AppliedVideoTempo = 1d
                 };
             }
 
@@ -46,6 +48,8 @@ namespace tiktok_Omni.Services.Showcase
                 const double syncThreshold = 1.03d;
                 var lockedVideoOut = videoIn;
                 var lockedAudioOut = narrIn;
+                var appliedAudioTempo = 1d;
+                var appliedVideoTempo = 1d;
 
                 logAction?.Invoke("[Showcase] So thời lượng clip ghép (~"
                     + videoDuration.ToString("0.#", CultureInfo.InvariantCulture) + "s) vs audio thành phẩm (~"
@@ -54,6 +58,7 @@ namespace tiktok_Omni.Services.Showcase
                 if (videoDuration > narrationDuration * syncThreshold && narrationDuration > 0.05d)
                 {
                     var tempo = videoDuration / narrationDuration;
+                    appliedVideoTempo = tempo;
                     lockedVideoOut = Path.Combine(workDirectory, "stitched_av_sync.mp4");
                     logAction?.Invoke("[Showcase AV sync] Đang tua video x"
                         + tempo.ToString("0.##", CultureInfo.InvariantCulture) + "…");
@@ -73,6 +78,7 @@ namespace tiktok_Omni.Services.Showcase
                 else if (narrationDuration > videoDuration * syncThreshold && videoDuration > 0.05d)
                 {
                     var tempo = narrationDuration / videoDuration;
+                    appliedAudioTempo = tempo;
                     lockedAudioOut = Path.Combine(workDirectory, "full_mix_av_sync.mp3");
                     logAction?.Invoke("[Showcase AV sync] Đang tua audio thành phẩm x"
                         + tempo.ToString("0.##", CultureInfo.InvariantCulture) + "…");
@@ -98,7 +104,7 @@ namespace tiktok_Omni.Services.Showcase
                     .ConfigureAwait(false);
                 var finalAudioDuration = await ProbeSeconds(ffprobeExecutable, lockedAudioOut, cancellationToken)
                     .ConfigureAwait(false);
-                logAction?.Invoke("[Showcase] Sau khớp thời lượng: video ~"
+                logAction?.Invoke("[Showcase] Sau khớp: video ~"
                     + finalVideoDuration.ToString("0.#", CultureInfo.InvariantCulture) + "s, audio ~"
                     + finalAudioDuration.ToString("0.#", CultureInfo.InvariantCulture) + "s.");
 
@@ -106,10 +112,11 @@ namespace tiktok_Omni.Services.Showcase
                 {
                     VideoPath = lockedVideoOut,
                     NarrationPath = lockedAudioOut,
-                    TargetDurationSeconds = Math.Min(finalVideoDuration, finalAudioDuration)
+                    TargetDurationSeconds = finalAudioDuration,
+                    AppliedAudioTempo = appliedAudioTempo,
+                    AppliedVideoTempo = appliedVideoTempo
                 };
             }
-
             var plan = ShowcaseNarrationSpeedHelper.BuildRenderPlan(
                 narrationDuration,
                 videoDuration,
@@ -179,8 +186,48 @@ namespace tiktok_Omni.Services.Showcase
             {
                 VideoPath = videoOut,
                 NarrationPath = finalNarration,
-                TargetDurationSeconds = targetDuration
+                TargetDurationSeconds = targetDuration,
+                AppliedAudioTempo = plan.AudioTempo,
+                AppliedVideoTempo = plan.VideoTempo
             };
+        }
+
+        public static async Task<string> PrepareSpeedAdjustedMp3Async(
+            string ffmpegExecutable,
+            string ffprobeExecutable,
+            string inputPath,
+            string workDirectory,
+            int userSpeedPercent,
+            string outputFileName,
+            Action<string> logAction,
+            CancellationToken cancellationToken)
+        {
+            var input = (inputPath ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(input) || !File.Exists(input))
+            {
+                return input;
+            }
+
+            var tempo = ShowcaseNarrationSpeedHelper.ResolveEffectiveSpeedPercent(userSpeedPercent) / 100d;
+            if (Math.Abs(tempo - 1d) <= 0.03d)
+            {
+                return input;
+            }
+
+            Directory.CreateDirectory(workDirectory ?? ".");
+            var output = Path.Combine(workDirectory, string.IsNullOrWhiteSpace(outputFileName)
+                ? "speed_preview.mp3"
+                : outputFileName.Trim());
+            await SpeedMp3ByTempoAsync(
+                    ffmpegExecutable,
+                    ffprobeExecutable,
+                    input,
+                    tempo,
+                    output,
+                    logAction,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return output;
         }
 
         private static async Task SpeedMp3ByTempoAsync(
@@ -194,7 +241,7 @@ namespace tiktok_Omni.Services.Showcase
         {
             var input = (inputPath ?? string.Empty).Trim();
             var output = (outputPath ?? string.Empty).Trim();
-            if (tempo <= 1.03d)
+            if (Math.Abs(tempo - 1d) <= 0.03d)
             {
                 if (!string.Equals(input, output, StringComparison.OrdinalIgnoreCase))
                 {

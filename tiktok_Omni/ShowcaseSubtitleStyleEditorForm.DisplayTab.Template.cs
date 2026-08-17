@@ -287,7 +287,7 @@ namespace tiktok_Omni
 
         private void WriteBodyStyleCellsFromTemplate(DataGridViewRow row)
         {
-            row.Cells["colStyleEnabled"].Value = _video.ShowcaseSubtitleEnabled;
+            row.Cells["colStyleEnabled"].Value = true;
             row.Cells["colStyleLook"].Value = _tplLook.SelectedItem ?? _tplLook.Items[0];
             row.Cells["colStyleHighlight"].Value = _tplHighlight.SelectedItem ?? ShowcaseSubtitleHighlightColourCatalog.FollowLookLabel;
             row.Cells["colStyleFontSize"].Value = _tplFontSize.Value.ToString();
@@ -328,6 +328,11 @@ namespace tiktok_Omni
             if (tag.Role == DisplayGridRowRole.Scene && tag.Scene != null)
             {
                 LoadSceneRowStyleFromSceneOrTemplate(row, tag.Scene);
+                if (tag.IsFinalCtaScene)
+                {
+                    row.Cells["colStyleEnabled"].Value = !_video.ShowcaseSubtitleDisplayCtaDisabled;
+                }
+
                 return;
             }
         }
@@ -346,10 +351,11 @@ namespace tiktok_Omni
             if (!hasOverride)
             {
                 WriteBodyStyleCellsFromTemplate(row);
+                row.Cells["colStyleEnabled"].Value = !scene.ShowcaseSubtitleDisplayDisabled;
                 return;
             }
 
-            row.Cells["colStyleEnabled"].Value = _video.ShowcaseSubtitleEnabled;
+            row.Cells["colStyleEnabled"].Value = !scene.ShowcaseSubtitleDisplayDisabled;
             ConfigureLookCell(row.Cells["colStyleLook"] as DataGridViewComboBoxCell, ShowcaseDisplayLineEffectKind.Body);
             var look = ShowcaseSubtitleLookPresetCatalog.ResolveSceneStorageFromLegacy(scene);
             if (string.IsNullOrWhiteSpace(look))
@@ -389,22 +395,28 @@ namespace tiktok_Omni
             }
         }
 
-        private void SaveSceneRowStyleOverrides(DataGridViewRow row, AiVideoGenInputItem scene)
+        private void SaveSceneRowStyleOverrides(DataGridViewRow row, AiVideoGenInputItem scene, bool saveBurnInDisabled = true)
         {
-            if (scene == null || RowBodyStyleMatchesTemplate(row))
+            if (scene == null)
             {
-                if (scene != null)
-                {
-                    scene.ShowcaseSubtitleDisplayLookPreset = string.Empty;
-                    scene.ShowcaseSubtitleDisplayHighlightColourAss = string.Empty;
-                    scene.ShowcaseSubtitleDisplayFontName = string.Empty;
-                    scene.ShowcaseSubtitleDisplayFontSize = 0;
-                    scene.ShowcaseSubtitleDisplayFontFace = string.Empty;
-                    scene.ShowcaseSubtitleDisplayPosition = string.Empty;
-                    scene.ShowcaseSubtitleDisplayPrimaryColourAss = string.Empty;
-                    scene.ShowcaseSubtitleDisplayDecorPreset = string.Empty;
-                }
+                return;
+            }
 
+            if (saveBurnInDisabled)
+            {
+                scene.ShowcaseSubtitleDisplayDisabled = !ReadBoolCell(row.Cells["colStyleEnabled"]);
+            }
+
+            if (RowBodyStyleMatchesTemplate(row))
+            {
+                scene.ShowcaseSubtitleDisplayLookPreset = string.Empty;
+                scene.ShowcaseSubtitleDisplayHighlightColourAss = string.Empty;
+                scene.ShowcaseSubtitleDisplayFontName = string.Empty;
+                scene.ShowcaseSubtitleDisplayFontSize = 0;
+                scene.ShowcaseSubtitleDisplayFontFace = string.Empty;
+                scene.ShowcaseSubtitleDisplayPosition = string.Empty;
+                scene.ShowcaseSubtitleDisplayPrimaryColourAss = string.Empty;
+                scene.ShowcaseSubtitleDisplayDecorPreset = string.Empty;
                 return;
             }
 
@@ -429,7 +441,7 @@ namespace tiktok_Omni
                 return true;
             }
 
-            if (ReadBoolCell(row.Cells["colStyleEnabled"]) != _video.ShowcaseSubtitleEnabled)
+            if (ReadBoolCell(row.Cells["colStyleEnabled"]) != true)
             {
                 return false;
             }

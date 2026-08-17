@@ -761,10 +761,25 @@ namespace tiktok_Omni
                 return false;
             }
 
+            var preRenderScenes = GetShowcaseVideoScenes(video);
+            WarnShowcaseClipDurationDriftBeforeRender(video, preRenderScenes, settings);
+
             var plan = await TryBuildShowcaseRenderPlanAsync(video, settings, profile).ConfigureAwait(true);
             if (plan == null)
             {
                 ShowShowcaseRenderBlockersMessage(new List<string> { "Không chuẩn bị được dữ liệu render — kiểm tra storyboard và thử lại." });
+                return false;
+            }
+
+            var canvas = plan.RenderSettings?.ResolveOutputCanvas(settings)
+                           ?? ShowcaseOutputAspectPresets.ResolveForVideo(video, settings?.ShowcaseOutputAspectDefault);
+            if (!await TryPromptShowcaseClipAspectFitAsync(
+                    video,
+                    plan.Scenes,
+                    canvas,
+                    settings,
+                    ShowcaseTabCancellationToken).ConfigureAwait(true))
+            {
                 return false;
             }
 
@@ -833,6 +848,62 @@ namespace tiktok_Omni
             _globalJobQueue.Enqueue(job);
             RefreshShowcaseStopButtonState();
             LogShowcase("[JobQueue] Showcase render «" + firstName + "» đã vào hàng đợi.");
+            return true;
+        }
+
+        private async Task<bool> TryPromptShowcaseClipAspectFitAsync(
+            ShowcaseVideoItem video,
+            IList<AiVideoGenInputItem> scenes,
+            ShowcaseOutputAspectPreset canvas,
+            AppSettings settings,
+            CancellationToken cancellationToken)
+        {
+            if (scenes == null || scenes.Count == 0)
+            {
+                return true;
+            }
+
+            FfmpegToolkitService.TryResolve(settings, out var toolkit, out _);
+            var ffprobe = toolkit?.FfprobeExe ?? FfmpegToolkitService.GetBundledFfprobePath();
+            var ffmpeg = toolkit?.FfmpegExe ?? FfmpegToolkitService.GetBundledFfmpegPath();
+            var sessionBase = (video?.ShowcaseSessionBaseDir ?? string.Empty).Trim();
+            var thumbDir = string.IsNullOrWhiteSpace(sessionBase)
+                ? Path.Combine(Path.GetTempPath(), "tiktok_Omni_aspect_thumbs")
+                : Path.Combine(sessionBase, "aspect_fit_thumbs");
+
+            var mismatches = await ShowcaseClipAspectFitProbeHelper.FindMismatchesAsync(
+                    scenes,
+                    canvas,
+                    ffprobe,
+                    ffmpeg,
+                    thumbDir,
+                    cancellationToken)
+                .ConfigureAwait(true);
+
+            if (mismatches.Count == 0)
+            {
+                return true;
+            }
+
+            LogShowcase("[Showcase] " + mismatches.Count + " clip lệch khung "
+                        + canvas.DisplayLabel + " — chọn cắt hoặc blur nền trước Render.");
+
+            DialogResult result;
+            using (var dlg = new ShowcaseClipAspectFitDialog(video?.ProductName, canvas, mismatches))
+            {
+                result = dlg.ShowDialog(ShowcaseActiveDialogOwner);
+            }
+
+            if (result != DialogResult.OK)
+            {
+                LogShowcase("[Showcase] Hủy Render — chưa chọn cách lấp khung clip lệch tỉ lệ.");
+                return false;
+            }
+
+            NotifyShowcaseDraftDirty();
+            var cropCount = scenes.Count(s => s != null && s.ShowcaseClipAspectFitMode == ShowcaseZoomAspectFitMode.Crop);
+            var blurCount = scenes.Count(s => s != null && s.ShowcaseClipAspectFitMode == ShowcaseZoomAspectFitMode.BlurPad);
+            LogShowcase("[Showcase] Lấp khung: " + cropCount + " cắt · " + blurCount + " blur nền.");
             return true;
         }
 

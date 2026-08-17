@@ -2088,7 +2088,7 @@ namespace tiktok_Omni
                 Name = "pnlAffiliateDeepHeaderHost",
                 Dock = DockStyle.Fill,
                 AutoSize = false,
-                MinimumSize = new Size(0, AppJellyButtonHeight + 10),
+                MinimumSize = new Size(0, AppJellyButtonHeight * 2 + 18),
                 Padding = new Padding(4, 2, 8, 2),
                 BackColor = Color.FromArgb(31, 34, 42)
             };
@@ -2185,7 +2185,7 @@ namespace tiktok_Omni
             tblAffiliateDeepRoot.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             tblAffiliateDeepRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 68F));
             tblAffiliateDeepRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 0F));
-            tblAffiliateDeepRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, AppJellyButtonHeight + 10F));
+            tblAffiliateDeepRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, AppJellyButtonHeight * 2 + 18F));
             tblAffiliateDeepRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             tblAffiliateDeepRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             tblAffiliateDeepRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 280F));
@@ -2431,6 +2431,7 @@ namespace tiktok_Omni
             WireShowcaseProductGridLayout();
             MountAiVideoGenControl(pnlAffiliateDeepStoryboardHost, pnlAffiliateDeepStoryboardSlot);
             ApplyDeepDiveGridColumnVisibility(showcaseMode: true);
+            SyncBuffersToGrids();
 
             if (lblAffiliateDeepReadiness != null && pnlAffiliateDeepReadinessHost != null
                 && lblAffiliateDeepReadiness.Parent != pnlAffiliateDeepReadinessHost)

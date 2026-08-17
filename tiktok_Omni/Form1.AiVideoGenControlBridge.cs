@@ -59,8 +59,6 @@ namespace tiktok_Omni
 
         private Button btnShowcaseRefreshClips => _aiVideoGenControls?.ShowcaseRefreshClipsButton;
 
-        private Button btnShowcaseGenerateVoiceover => _aiVideoGenControls?.ShowcaseGenerateVoiceoverButton;
-
         private Button btnShowcasePreviewNarration => _aiVideoGenControls?.ShowcasePreviewNarrationButton;
 
         private Button btnShowcaseListenNarration => _aiVideoGenControls?.ShowcaseListenNarrationButton;

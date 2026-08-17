@@ -148,16 +148,28 @@ namespace tiktok_Omni.Services.Showcase
             "Gentle camera push-in on stitching and weave; no restyling, same lighting as shown."
         };
 
-        private static readonly string[] FlowSafeOnModelBoosters =
+        private static readonly string[] FlowSafeOnModelBoostersPlain =
         {
             "Fabric panels and hem sway gently in a soft breeze; slow cinematic camera push-in.",
-            "Dress panels ripple lightly in soft air; rack focus shifts to collar embroidery detail.",
-            "Outfit hem sways in a gentle breeze; slow dolly toward stitching and fabric texture.",
-            "Silk fabric panels move softly in breeze; slow push-in on mandarin collar detail.",
+            "Dress panels ripple lightly in soft air; rack focus shifts to mandarin collar detail as shown.",
+            "Outfit hem sways in a gentle breeze; slow dolly toward stitching and fabric texture as shown.",
+            "Fabric panels move softly in breeze; slow push-in on mandarin collar detail as shown.",
             "Fabric drapes and ripples in soft wind; elegant slow tracking shot at mid-torso height.",
-            "Hem and side panels sway beautifully in soft breeze; shallow depth of field on outfit detail.",
-            "Soft breeze moves dress fabric panels; slow cinematic push-in on weave and embroidery.",
+            "Hem and side panels sway gently in soft breeze; shallow depth of field on outfit detail.",
+            "Soft breeze moves dress fabric panels; slow cinematic push-in on visible weave as shown.",
             "Outfit fabric sways naturally; rack focus from background to sharp product detail."
+        };
+
+        private static readonly string[] FlowSafeOnModelBoostersEmbroidery =
+        {
+            "Embroidered dress panels sway gently in a soft breeze; slow push-in on visible collar embroidery from the photo.",
+            "Dress panels ripple lightly; rack focus shifts to embroidery detail shown in the photo.",
+            "Embroidered hem sways in a gentle breeze; slow dolly toward visible stitching from the photo.",
+            "Fabric panels with visible embroidery move softly; slow push-in on mandarin collar embroidery as shown.",
+            "Embroidered outfit drapes in soft wind; slow tracking on floral pattern visible in the photo.",
+            "Hem and embroidered side panels sway gently; shallow depth of field on collar embroidery as shown.",
+            "Soft breeze moves embroidered fabric panels; slow push-in on weave and embroidery from the photo.",
+            "Embroidered outfit fabric sways naturally; rack focus to sharp embroidery detail as shown."
         };
 
         private static readonly Regex GenericCameraOnlyRegex = new Regex(
@@ -186,6 +198,7 @@ namespace tiktok_Omni.Services.Showcase
             text = DuplicateOnModelPrefixRegex.Replace(text, OnModelPrefixToken);
             text = ProtectOnModelPrefix(text);
             text = ApplyRiskyReplacements(text);
+            text = NormalizeGarmentDetailClaims(text);
             var onModel = LooksOnModel(text);
             text = StripFlowTriggerPhrases(text, onModel);
             text = RestoreOnModelPrefix(text);
@@ -336,7 +349,10 @@ namespace tiktok_Omni.Services.Showcase
         {
             if (!HasFlowSafeMotion(text))
             {
-                var booster = FlowSafeOnModelBoosters[Math.Abs(sceneIndex) % FlowSafeOnModelBoosters.Length];
+                var boosters = HasExplicitEmbroideryInPhoto(text)
+                    ? FlowSafeOnModelBoostersEmbroidery
+                    : FlowSafeOnModelBoostersPlain;
+                var booster = boosters[Math.Abs(sceneIndex) % boosters.Length];
                 text = text.TrimEnd('.', ' ') + ". " + booster;
             }
 
@@ -348,6 +364,71 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             return text.TrimEnd('.', ' ') + ". " + safety;
+        }
+
+        /// <summary>Gỡ embroidery/màu vải generic khi prompt không mô tả thêu rõ — tránh Flow bịa hoa văn.</summary>
+        private static string NormalizeGarmentDetailClaims(string text)
+        {
+            if (HasExplicitEmbroideryInPhoto(text))
+            {
+                return text;
+            }
+
+            var result = text;
+            result = Regex.Replace(
+                result,
+                @"\bpreserve ao dai shape,?\s*collar and embroidery detail\b",
+                "preserve ao dai silhouette, mandarin collar and visible fabric details from the photo",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(
+                result,
+                @"\bpreserve ao dai shape,?\s*mandarin collar and embroidery detail\b",
+                "preserve ao dai silhouette, mandarin collar and visible fabric details from the photo",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(
+                result,
+                @"\bcollar and embroidery detail\b",
+                "mandarin collar and visible fabric details as shown",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(
+                result,
+                @"\bpush-in on embroidery\b",
+                "push-in on mandarin collar detail as shown",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(
+                result,
+                @"\brack focus shifts to collar embroidery detail\b",
+                "rack focus shifts to mandarin collar detail as shown",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(
+                result,
+                @"\bslow cinematic push-in on weave and embroidery\b",
+                "slow cinematic push-in on visible weave as shown",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(
+                result,
+                @"\bembroidery detail\b",
+                "visible fabric details from the photo",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(
+                result,
+                @"\b(?:white|black|red|blue|green|pink|beige|navy|cream|ivory)\s+silk\b",
+                "fabric as shown",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            result = Regex.Replace(
+                result,
+                @"\bsmooth plain white silk panels\b",
+                "smooth plain fabric panels as shown",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            return result;
+        }
+
+        private static bool HasExplicitEmbroideryInPhoto(string text)
+        {
+            return Regex.IsMatch(
+                text,
+                @"\b(?:gold embroidery|silver embroidery|embroidered panels|floral embroidery|embroidery on (?:the )?collar|visible embroidery|with (?:gold |silver )?embroidery|intricate embroidery|embroidery as shown|embroidery from the photo|embroidery visible)\b",
+                RegexOptions.IgnoreCase);
         }
 
         private static string EnhanceFlatlayFidelity(string text)

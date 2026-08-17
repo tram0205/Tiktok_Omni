@@ -129,6 +129,15 @@ namespace tiktok_Omni.Services
             return dir + Environment.NewLine + hint;
         }
 
+        /// <summary>Copy file logo vào Assets\Logos — giữ nguyên tên (bỏ qua nếu trùng).</summary>
+        public static OmniAudioLibrary.CopyAudioFilesResult CopyLogoFilesPreserveName(
+            AppSettings settings,
+            IEnumerable<string> sourceFiles) =>
+            OmniAudioLibrary.CopyFilesPreserveName(
+                EnsureSharedLogosDirectory(settings),
+                sourceFiles,
+                LogoPatterns.Select(p => p.TrimStart('*')).ToList());
+
         private static List<string> ListLogoFiles(string directory)
         {
             var files = new List<string>();

@@ -42,6 +42,7 @@ namespace tiktok_Omni
                 SceneVoiceover = source.SceneVoiceover ?? string.Empty,
                 ShowcaseSubtitleDisplayVoiceover = source.ShowcaseSubtitleDisplayVoiceover ?? string.Empty,
                 ShowcaseSubtitleDisplayAnimation = source.ShowcaseSubtitleDisplayAnimation ?? string.Empty,
+                ShowcaseSubtitleDisplayDisabled = source.ShowcaseSubtitleDisplayDisabled,
                 VeoPrompt = source.VeoPrompt ?? string.Empty,
                 ShowcaseImageKind = source.ShowcaseImageKind ?? string.Empty,
                 ShowcaseClipTool = source.ShowcaseClipTool ?? string.Empty,
@@ -51,6 +52,7 @@ namespace tiktok_Omni
                 ShowcaseZoomSpeedId = source.ShowcaseZoomSpeedId ?? string.Empty,
                 ShowcaseClipDurationSeconds = source.ShowcaseClipDurationSeconds,
                 ClipPath = source.ClipPath ?? string.Empty,
+                ShowcaseRealClipSourcePath = source.ShowcaseRealClipSourcePath ?? string.Empty,
                 ShowcaseTheme = source.ShowcaseTheme ?? string.Empty,
                 ShowcaseMultiVoice = source.ShowcaseMultiVoice,
                 ShowcaseTextSize = source.ShowcaseTextSize > 0 ? source.ShowcaseTextSize : 50,
@@ -266,7 +268,6 @@ namespace tiktok_Omni
             return string.Equals(columnName, "colAiShowcaseTheme", StringComparison.Ordinal)
                    || string.Equals(columnName, "colAiShowcaseProductType", StringComparison.Ordinal)
                    || string.Equals(columnName, "colAiShowcaseClipMode", StringComparison.Ordinal)
-                   || string.Equals(columnName, "colAiShowcaseOutputAspect", StringComparison.Ordinal)
                    || string.Equals(columnName, "colAiProduct", StringComparison.Ordinal);
         }
 

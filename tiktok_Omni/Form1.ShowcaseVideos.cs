@@ -101,19 +101,8 @@ namespace tiktok_Omni
 
         private bool ShouldShowShowcaseVideo(ShowcaseVideoItem video)
         {
-            if (video == null)
-            {
-                return false;
-            }
-
-            if (chkAiVideoGenCurrentProfileOnly == null || !chkAiVideoGenCurrentProfileOnly.Checked)
-            {
-                return true;
-            }
-
-            var current = ProfileScopedPaths.ResolveProfileName(GetRunningProfileName());
-            var itemProfile = ProfileScopedPaths.ResolveProfileName(video.ProfileName);
-            return string.Equals(current, itemProfile, StringComparison.OrdinalIgnoreCase);
+            // Showcase không dùng checkbox «Chỉ hiện sản phẩm của Profile hiện tại» (ẩn ở tab này).
+            return video != null;
         }
 
         private void RefreshShowcaseVideoDisplayFields()
@@ -121,6 +110,46 @@ namespace tiktok_Omni
             foreach (var video in GetShowcaseVideoBuffer())
             {
                 video?.RefreshDisplayFields();
+            }
+        }
+
+        private void TryRestoreShowcaseVideoAfterProductRename(ShowcaseVideoItem video)
+        {
+            if (video == null || !ShowcaseSessionRestoreHelper.NeedsDiskRestore(video))
+            {
+                return;
+            }
+
+            var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var other in GetShowcaseVideoBuffer())
+            {
+                if (other == null || other.VideoId == video.VideoId)
+                {
+                    continue;
+                }
+
+                var dir = (other.ShowcaseSessionBaseDir ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(dir) && other.SceneCount > 0)
+                {
+                    reserved.Add(dir);
+                }
+            }
+
+            if (!ShowcaseSessionRestoreHelper.TryRestoreSingleVideo(
+                    GetRunningProfileName(),
+                    video,
+                    LogShowcase,
+                    reserved))
+            {
+                return;
+            }
+
+            NotifyShowcaseDraftDirty();
+            SyncBuffersToGrids();
+            if (_activeShowcaseVideoId == video.VideoId)
+            {
+                RefreshAffiliateDeepStoryboard();
+                RefreshAiVideoGenModeReadinessLabels();
             }
         }
 
@@ -157,6 +186,89 @@ namespace tiktok_Omni
             RefreshAiVideoGenModeReadinessLabels();
             LogShowcase("[Showcase] Đã thêm dòng video «" + video.ProductName + "» — dùng cột «Ảnh» (➕ Thêm ảnh) để thêm cảnh.");
             NotifyShowcaseDraftDirty();
+        }
+
+        void IAiVideoGenControlsHost.RestoreShowcaseVideosFromDisk()
+        {
+            EnsureShowcaseVideoBufferMigrated();
+            var buffer = GetShowcaseVideoBuffer().Where(ShouldShowShowcaseVideo).ToList();
+            if (buffer.Count == 0)
+            {
+                MessageBox.Show(this,
+                    "Chưa có dòng video trên lưới.\r\nThêm dòng và đặt tên SP trước (vd. «Zoom AD trắng», «Áo dài…»).",
+                    "Gắn phiên Showcase",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var profile = GetRunningProfileName();
+            var summary = ShowcaseSessionRestoreHelper.RestoreOrRepairVideosFromDisk(profile, buffer, LogShowcase);
+
+            SyncBuffersToGrids();
+            var first = buffer.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v.ShowcaseSessionBaseDir));
+            if (first != null)
+            {
+                ActivateShowcaseVideo(first, refreshStoryboard: true);
+            }
+            else
+            {
+                RefreshAffiliateDeepStoryboard();
+                RefreshAiVideoGenModeReadinessLabels();
+            }
+
+            if (summary.NewlyLinked > 0 || summary.ClipPathsRepaired > 0)
+            {
+                NotifyShowcaseDraftDirty();
+            }
+
+            if (summary.NewlyLinked > 0)
+            {
+                MessageBox.Show(this,
+                    "Đã gắn " + summary.NewlyLinked + " dòng với phiên Showcase trên đĩa (ảnh, clip, kịch bản Excel nếu có)."
+                    + (summary.ClipPathsRepaired > 0
+                        ? "\r\nĐã sửa đường dẫn clip cho " + summary.ClipPathsRepaired + " dòng."
+                        : string.Empty)
+                    + "\r\nKiểm tra cột «Kịch bản» và storyboard bên phải.",
+                    "Gắn phiên Showcase",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            if (summary.ClipPathsRepaired > 0)
+            {
+                MessageBox.Show(this,
+                    "Các dòng đã gắn phiên trước đó.\r\n"
+                    + "Đã sửa đường dẫn clip cho " + summary.ClipPathsRepaired + " dòng (file scene_XX trên clips_render).",
+                    "Gắn phiên Showcase",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            if (summary.StillNeedLink <= 0 && summary.AlreadyLinked > 0)
+            {
+                MessageBox.Show(this,
+                    "Tất cả " + summary.AlreadyLinked + " dòng đã gắn phiên Showcase rồi.\r\n"
+                    + "Chọn từng dòng để xem storyboard bên phải.",
+                    "Gắn phiên Showcase",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var pending = summary.UnmatchedProductNames.Count > 0
+                ? "\r\n\r\nDòng chưa gắn được:\r\n• " + string.Join("\r\n• ", summary.UnmatchedProductNames.Take(6))
+                : string.Empty;
+            MessageBox.Show(this,
+                "Không gắn được phiên nào." + pending + "\r\n\r\n"
+                + "• Đặt tên SP gần giống lúc trước (vd. «Zoom AD trắng», «Áo dài trắng học sinh…»)\r\n"
+                + "• Phiên cũ nằm trong MediaStorage\\…\\Processed\\Showcase\\\r\n"
+                + "• Xem log bên dưới để biết slug từng thư mục",
+                "Gắn phiên Showcase",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
 
         void IAiVideoGenControlsHost.CopyShowcaseVideoRow()
@@ -274,6 +386,8 @@ namespace tiktok_Omni
             clone.ShowcaseSessionBaseDir = string.Empty;
             clone.ShowcaseClipsDir = string.Empty;
             clone.ShowcaseVoiceoverClipFingerprint = 0;
+            clone.ShowcaseVoiceoverClipPathFingerprint = 0;
+            clone.ShowcaseVoiceoverClipDurationSignature = string.Empty;
             clone.ApplySettingsToScenes();
             clone.RefreshDisplayFields();
             return clone;
@@ -281,21 +395,81 @@ namespace tiktok_Omni
 
         private void SelectShowcaseVideoGridRow(ShowcaseVideoItem video)
         {
-            if (video == null || dgvDeepDiveInput == null || dgvDeepDiveInput.IsDisposed)
+            if (video == null)
             {
                 return;
             }
 
-            foreach (DataGridViewRow row in dgvDeepDiveInput.Rows)
+            RestoreShowcaseGridSelection(new[] { video.VideoId });
+        }
+
+        private List<Guid> CaptureShowcaseGridSelectedVideoIds()
+        {
+            var ids = new List<Guid>();
+            if (!IsDeepDiveModeTab() || dgvDeepDiveInput == null || dgvDeepDiveInput.IsDisposed)
             {
-                if (row.DataBoundItem is ShowcaseVideoItem bound && bound.VideoId == video.VideoId)
+                return ids;
+            }
+
+            var seen = new HashSet<Guid>();
+            foreach (DataGridViewRow row in dgvDeepDiveInput.SelectedRows)
+            {
+                if (row?.DataBoundItem is ShowcaseVideoItem video && seen.Add(video.VideoId))
+                {
+                    ids.Add(video.VideoId);
+                }
+            }
+
+            if (ids.Count == 0 && _activeShowcaseVideoId.HasValue && _activeShowcaseVideoId.Value != Guid.Empty)
+            {
+                ids.Add(_activeShowcaseVideoId.Value);
+            }
+
+            return ids;
+        }
+
+        private void RestoreShowcaseGridSelection(IReadOnlyList<Guid> videoIds)
+        {
+            if (videoIds == null || videoIds.Count == 0 || dgvDeepDiveInput == null || dgvDeepDiveInput.IsDisposed)
+            {
+                return;
+            }
+
+            var idSet = new HashSet<Guid>(videoIds);
+            dgvDeepDiveInput.ClearSelection();
+            DataGridViewRow anchorRow = null;
+
+            for (var i = 0; i < dgvDeepDiveInput.Rows.Count; i++)
+            {
+                var row = dgvDeepDiveInput.Rows[i];
+                if (row?.DataBoundItem is ShowcaseVideoItem video && idSet.Contains(video.VideoId))
                 {
                     row.Selected = true;
-                    dgvDeepDiveInput.CurrentCell = row.Cells.Cast<DataGridViewCell>().FirstOrDefault(c => c.Visible && !c.ReadOnly)
-                        ?? row.Cells.Cast<DataGridViewCell>().FirstOrDefault(c => c.Visible)
-                        ?? row.Cells[0];
-                    break;
+                    if (anchorRow == null)
+                    {
+                        anchorRow = row;
+                    }
                 }
+            }
+
+            if (anchorRow == null)
+            {
+                return;
+            }
+
+            var cell = anchorRow.Cells.Cast<DataGridViewCell>()
+                .FirstOrDefault(c => c.Visible && !c.ReadOnly)
+                ?? anchorRow.Cells.Cast<DataGridViewCell>().FirstOrDefault(c => c.Visible)
+                ?? anchorRow.Cells[0];
+            dgvDeepDiveInput.CurrentCell = cell;
+
+            try
+            {
+                dgvDeepDiveInput.FirstDisplayedScrollingRowIndex = Math.Max(0, anchorRow.Index);
+            }
+            catch
+            {
+                // non-critical scroll
             }
         }
 
@@ -373,6 +547,16 @@ namespace tiktok_Omni
             if (dgvDeepDiveInput.CurrentRow?.DataBoundItem is ShowcaseVideoItem current)
             {
                 result.Add(current);
+                return result;
+            }
+
+            if (_activeShowcaseVideoId.HasValue)
+            {
+                var active = FindShowcaseVideoById(_activeShowcaseVideoId.Value);
+                if (active != null)
+                {
+                    result.Add(active);
+                }
             }
 
             return result;
@@ -413,12 +597,58 @@ namespace tiktok_Omni
             var productName = (video.ProductName ?? string.Empty).Trim();
             if (!string.IsNullOrWhiteSpace(productName))
             {
-                var session = EnsureShowcaseSession(GetRunningProfileName(), productName, null, video);
-                var scenes = GetShowcaseVideoScenes(video);
-                if (session != null && scenes.Count > 0)
+                if (ShowcaseSessionRestoreHelper.NeedsDiskRestore(video))
                 {
-                    SyncShowcaseSourceImagesForVideo(video, refreshUi: false);
-                    ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, video.Scenes, LogShowcase);
+                    var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var other in GetShowcaseVideoBuffer())
+                    {
+                        if (other == null || other.VideoId == video.VideoId)
+                        {
+                            continue;
+                        }
+
+                        var dir = (other.ShowcaseSessionBaseDir ?? string.Empty).Trim();
+                        if (!string.IsNullOrWhiteSpace(dir) && other.SceneCount > 0)
+                        {
+                            reserved.Add(dir);
+                        }
+                    }
+
+                    if (ShowcaseSessionRestoreHelper.TryRestoreSingleVideo(
+                            GetRunningProfileName(),
+                            video,
+                            LogShowcase,
+                            reserved))
+                    {
+                        NotifyShowcaseDraftDirty();
+                        SyncBuffersToGrids();
+                    }
+                }
+
+                var session = EnsureShowcaseSession(GetRunningProfileName(), productName, null, video);
+                if (session != null)
+                {
+                    var profile = GetRunningProfileName();
+                    if (video.Scenes.Count == 0)
+                    {
+                        var restored = ShowcaseSessionService.EnsureScenesFromRenderFolder(
+                            video,
+                            session.ClipsDir,
+                            profile,
+                            LogShowcase);
+                        if (restored > 0)
+                        {
+                            NotifyShowcaseDraftDirty();
+                        }
+                    }
+
+                    var scenes = GetShowcaseVideoScenes(video);
+                    if (scenes.Count > 0)
+                    {
+                        SyncShowcaseSourceImagesForVideo(video, refreshUi: false);
+                        ShowcaseSessionService.RefreshClipStatus(session.ClipsDir, video.Scenes, LogShowcase);
+                    }
+
                     video.RefreshDisplayFields();
                 }
             }
@@ -538,8 +768,8 @@ namespace tiktok_Omni
 
         private ShowcaseOutputAspectPreset GetShowcaseOutputCanvasForVideo(ShowcaseVideoItem video, AppSettings settings)
         {
-            return ShowcaseOutputAspectPresets.Resolve(
-                video?.ShowcaseOutputAspectId,
+            return ShowcaseOutputAspectPresets.ResolveForVideo(
+                video,
                 settings?.ShowcaseOutputAspectDefault);
         }
 

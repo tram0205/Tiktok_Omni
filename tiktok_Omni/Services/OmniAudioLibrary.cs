@@ -218,5 +218,99 @@ namespace tiktok_Omni.Services
             s = Regex.Replace(s, @"_+", "_").Trim('_');
             return s;
         }
+
+        public sealed class CopyAudioFilesResult
+        {
+            public int Copied { get; set; }
+
+            public int Skipped { get; set; }
+
+            public List<string> Messages { get; } = new List<string>();
+        }
+
+        /// <summary>Copy file vào thư mục nhạc/SFX — giữ nguyên tên (bỏ qua nếu trùng).</summary>
+        public static CopyAudioFilesResult CopyFilesPreserveName(
+            string targetDirectory,
+            IEnumerable<string> sourceFiles,
+            IReadOnlyList<string> allowedExtensions)
+        {
+            var result = new CopyAudioFilesResult();
+            if (string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                return result;
+            }
+
+            Directory.CreateDirectory(targetDirectory);
+            var extensions = allowedExtensions ?? Array.Empty<string>();
+
+            foreach (var sourceFile in sourceFiles ?? Array.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(sourceFile) || !File.Exists(sourceFile))
+                {
+                    result.Skipped++;
+                    continue;
+                }
+
+                var ext = Path.GetExtension(sourceFile);
+                if (extensions.Count > 0
+                    && !extensions.Any(s => string.Equals(s, ext, StringComparison.OrdinalIgnoreCase)))
+                {
+                    result.Skipped++;
+                    result.Messages.Add("Bỏ qua «" + Path.GetFileName(sourceFile) + "» — đuôi file không hỗ trợ.");
+                    continue;
+                }
+
+                var fileName = Path.GetFileName(sourceFile);
+                var dest = Path.Combine(targetDirectory, fileName);
+                if (File.Exists(dest))
+                {
+                    if (FilesLikelyIdentical(sourceFile, dest))
+                    {
+                        result.Skipped++;
+                        result.Messages.Add("«" + fileName + "» đã có trong thư viện (cùng kích thước).");
+                    }
+                    else
+                    {
+                        result.Skipped++;
+                        result.Messages.Add("«" + fileName + "» đã tồn tại — giữ file cũ, không ghi đè.");
+                    }
+
+                    continue;
+                }
+
+                try
+                {
+                    File.Copy(sourceFile, dest, overwrite: false);
+                    result.Copied++;
+                }
+                catch (Exception ex)
+                {
+                    result.Skipped++;
+                    result.Messages.Add("Lỗi copy «" + fileName + "»: " + ex.Message);
+                }
+            }
+
+            return result;
+        }
+
+        public static CopyAudioFilesResult CopyMusicFilesPreserveName(AppSettings settings, IEnumerable<string> sourceFiles) =>
+            CopyFilesPreserveName(GetSharedMusicDirectory(settings), sourceFiles, MusicPatterns.Select(p => p.TrimStart('*')).ToList());
+
+        public static CopyAudioFilesResult CopySfxFilesPreserveName(AppSettings settings, IEnumerable<string> sourceFiles) =>
+            CopyFilesPreserveName(GetSharedSfxDirectory(settings), sourceFiles, SfxPatterns.Select(p => p.TrimStart('*')).ToList());
+
+        private static bool FilesLikelyIdentical(string a, string b)
+        {
+            try
+            {
+                var fa = new FileInfo(a);
+                var fb = new FileInfo(b);
+                return fa.Exists && fb.Exists && fa.Length == fb.Length;
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 }

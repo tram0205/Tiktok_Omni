@@ -45,7 +45,11 @@ namespace tiktok_Omni.Services.Showcase
 
             CancellationToken cancellationToken,
 
-            string userVideoFormatId = null)
+            string userVideoFormatId = null,
+
+            int customAspectWidth = 0,
+
+            int customAspectHeight = 0)
 
         {
 
@@ -91,6 +95,8 @@ namespace tiktok_Omni.Services.Showcase
 
             var outputAspectId = ShowcaseOutputAspectPresets.ResolveId(userOutputAspectId, settings?.ShowcaseOutputAspectDefault);
 
+            var realClipHints = BuildRealClipHints(scenesWithLocalImages);
+
             var prompt = ShowcaseScriptPromptBuilder.Build(
 
                 productName,
@@ -107,7 +113,13 @@ namespace tiktok_Omni.Services.Showcase
 
                 settings,
 
-                userVideoFormatId);
+                userVideoFormatId,
+
+                realClipHints,
+
+                customAspectWidth,
+
+                customAspectHeight);
 
 
 
@@ -142,6 +154,36 @@ namespace tiktok_Omni.Services.Showcase
 
 
             return MapToResult(dto, scenesWithLocalImages, clipModeId, settings);
+
+        }
+
+
+
+        /// <summary>Cảnh nào là clip quay tay thật (gán tay, không nhờ Gemini generate) — báo Gemini biết thời lượng cố định.</summary>
+
+        private static List<ShowcaseScriptPromptBuilder.RealClipHint> BuildRealClipHints(IList<AiVideoGenInputItem> scenes)
+
+        {
+
+            var hints = new List<ShowcaseScriptPromptBuilder.RealClipHint>();
+
+            for (var i = 0; i < scenes.Count; i++)
+
+            {
+
+                var scene = scenes[i];
+
+                if (scene != null && string.Equals(scene.ShowcaseClipTool, ShowcaseClipToolHelper.ToolReal, StringComparison.Ordinal))
+
+                {
+
+                    hints.Add(new ShowcaseScriptPromptBuilder.RealClipHint(i + 1, scene.ShowcaseClipDurationSeconds));
+
+                }
+
+            }
+
+            return hints;
 
         }
 
@@ -185,6 +227,8 @@ namespace tiktok_Omni.Services.Showcase
 
                 var item = source[idx];
 
+                var isRealClip = string.Equals(item.ShowcaseClipTool, ShowcaseClipToolHelper.ToolReal, StringComparison.Ordinal);
+
                 item.SceneRole = (scene.role ?? string.Empty).Trim();
 
                 item.SceneTitle = (scene.scene_title ?? string.Empty).Trim();
@@ -193,13 +237,18 @@ namespace tiktok_Omni.Services.Showcase
 
                 item.ShowcaseSceneSilent = scene.silent;
 
-                item.ShowcaseClipDurationSeconds = scene.clip_duration_seconds > 0
-                    ? ShowcaseSceneDurationHelper.Clamp(scene.clip_duration_seconds)
-                    : ShowcaseSceneDurationHelper.EstimateFromVoiceover(item.SceneVoiceover, scene.silent);
+                if (!isRealClip)
+                {
+                    item.ShowcaseClipDurationSeconds = scene.clip_duration_seconds > 0
+                        ? ShowcaseSceneDurationHelper.Clamp(scene.clip_duration_seconds)
+                        : ShowcaseSceneDurationHelper.EstimateFromVoiceover(item.SceneVoiceover, scene.silent);
+                }
 
                 var imageKind = ShowcaseClipToolHelper.NormalizeImageKind(scene.image_kind, scene.veo_prompt);
 
-                var clipTool = ShowcaseClipToolHelper.EnforceToolForMode(clipModeId, imageKind, scene.clip_tool);
+                var clipTool = isRealClip
+                    ? ShowcaseClipToolHelper.ToolReal
+                    : ShowcaseClipToolHelper.EnforceToolForMode(clipModeId, imageKind, scene.clip_tool);
 
                 mappedScenes.Add(new ShowcaseClipToolAlternationHelper.MappedScene
                 {
@@ -224,7 +273,19 @@ namespace tiktok_Omni.Services.Showcase
                 item.ShowcaseImageKind = imageKind;
                 item.ShowcaseClipTool = clipTool;
 
-                ApplyGeminiClipPrompts(item, scene, imageKind, clipTool, mapped.StoryIndex);
+                if (string.Equals(clipTool, ShowcaseClipToolHelper.ToolReal, StringComparison.Ordinal))
+                {
+                    item.VeoPrompt = string.Empty;
+                    item.KlingPrompt = string.Empty;
+                    item.ZoomHint = string.Empty;
+                    item.ShowcaseZoomStyleId = string.Empty;
+                    item.ShowcaseZoomSpeedId = string.Empty;
+                }
+                else
+                {
+                    ApplyGeminiClipPrompts(item, scene, imageKind, clipTool, mapped.StoryIndex);
+                }
+
                 ApplyGeminiSfxToScene(item, scene, settings);
                 ordered.Add(item);
             }
@@ -366,8 +427,6 @@ namespace tiktok_Omni.Services.Showcase
 
             return OmniAudioLibrary.ResolveMusicIdToFileName(settings, musicId);
         }
-
-
 
         private static string InferDefaultZoomHint(string imageKind, string veoPrompt)
 

@@ -9,6 +9,16 @@ using tiktok_Omni.Services;
 
 namespace tiktok_Omni.Services.Showcase
 {
+    [Flags]
+    public enum ShowcaseSpeechAudioInvalidationScope
+    {
+        None = 0,
+        Hook = 1,
+        Body = 2,
+        Cta = 4,
+        All = Hook | Body | Cta
+    }
+
     /// <summary>Cache narration.mp3 trong phiên Showcase — tái render không gọi ElevenLabs nếu kịch bản/voice không đổi.</summary>
     public static class ShowcaseNarrationCacheHelper
     {
@@ -18,7 +28,7 @@ namespace tiktok_Omni.Services.Showcase
         public const string BodyPreviewFileName = "body_preview.mp3";
         public const string FullMixPreviewFileName = "full_mix_preview.mp3";
 
-        /// <summary>Lấy thư mục phiên (cha của veo_clips) từ đường dẫn clip scene_XX.</summary>
+        /// <summary>Lấy thư mục phiên (cha của clips_render) từ đường dẫn clip scene_XX.</summary>
         public static string TryResolveSessionBaseFromClips(IList<AiVideoGenInputItem> orderedScenes)
         {
             var clipPath = orderedScenes?
@@ -35,7 +45,7 @@ namespace tiktok_Omni.Services.Showcase
                 return null;
             }
 
-            if (string.Equals(Path.GetFileName(clipsDir), "veo_clips", StringComparison.OrdinalIgnoreCase))
+            if (ShowcaseRenderClipsPaths.IsRenderClipsDirectory(clipsDir))
             {
                 return Directory.GetParent(clipsDir)?.FullName;
             }
@@ -137,6 +147,7 @@ namespace tiktok_Omni.Services.Showcase
             {
                 var edgeHook = ShowcaseEdgeTtsVoiceResolver.Resolve(ttsOptions.ForSegment(true), emphaticHook: true, showcaseExpressiveBody: false);
                 var edgeBody = ShowcaseEdgeTtsVoiceResolver.Resolve(ttsOptions.ForSegment(false), emphaticHook: false, showcaseExpressiveBody: true);
+                var edgeCta = ShowcaseEdgeTtsVoiceResolver.Resolve(ttsOptions.ForSegment(false), emphaticHook: false, showcaseExpressiveBody: false, emphaticCta: true);
                 sb.AppendLine("edgeVoice:" + (edgeBody.VoiceShortName ?? string.Empty));
                 sb.AppendLine("edgeHookRate:" + (edgeHook.Rate ?? string.Empty));
                 sb.AppendLine("edgeHookPitch:" + (edgeHook.Pitch ?? string.Empty));
@@ -144,6 +155,9 @@ namespace tiktok_Omni.Services.Showcase
                 sb.AppendLine("edgeBodyRate:" + (edgeBody.Rate ?? string.Empty));
                 sb.AppendLine("edgeBodyPitch:" + (edgeBody.Pitch ?? string.Empty));
                 sb.AppendLine("edgeBodyVol:" + (edgeBody.Volume ?? string.Empty));
+                sb.AppendLine("edgeCtaRate:" + (edgeCta.Rate ?? string.Empty));
+                sb.AppendLine("edgeCtaPitch:" + (edgeCta.Pitch ?? string.Empty));
+                sb.AppendLine("edgeCtaVol:" + (edgeCta.Volume ?? string.Empty));
             }
 
             sb.AppendLine("hookVoiceLen:" + hookPreset.PiperLengthScale.ToString(CultureInfo.InvariantCulture));
@@ -166,6 +180,8 @@ namespace tiktok_Omni.Services.Showcase
             sb.AppendLine("hook:" + ElevenLabsTtsHelper.HookStability.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("body:" + ElevenLabsTtsHelper.ShowcaseBodyStability.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("bodyStyle:" + ElevenLabsTtsHelper.ShowcaseBodyStyleExaggeration.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("cta:" + ElevenLabsTtsHelper.ShowcaseCtaStability.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("ctaStyle:" + ElevenLabsTtsHelper.ShowcaseCtaStyleExaggeration.ToString(CultureInfo.InvariantCulture));
             foreach (var scene in scenes ?? Enumerable.Empty<AiVideoGenInputItem>())
             {
                 sb.AppendLine((scene?.SceneVoiceover ?? string.Empty).Trim());
@@ -385,7 +401,38 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             TryDelete(GetBodyPreviewPath(sessionBaseDir));
+            ClearBodyPreviewParts(sessionBaseDir);
             ClearCachedNarration(sessionBaseDir);
+        }
+
+        /// <summary>Xóa các đoạn thân tạm body_preview_01.mp3… trong thư mục audio.</summary>
+        public static void ClearBodyPreviewParts(string sessionBaseDir)
+        {
+            if (string.IsNullOrWhiteSpace(sessionBaseDir))
+            {
+                return;
+            }
+
+            var audioDir = GetAudioDirectory(sessionBaseDir);
+            if (string.IsNullOrWhiteSpace(audioDir) || !Directory.Exists(audioDir))
+            {
+                return;
+            }
+
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(audioDir, "body_preview_*.mp3");
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (var file in files)
+            {
+                TryDelete(file);
+            }
         }
 
         /// <summary>Xóa narration cache sau khi đổi thoại — render sẽ gọi TTS lại.</summary>
@@ -415,8 +462,44 @@ namespace tiktok_Omni.Services.Showcase
             TryDelete(GetHookPreviewPath(sessionBaseDir));
             TryDelete(GetBodyPreviewPath(sessionBaseDir));
             TryDelete(GetFullMixPreviewPath(sessionBaseDir));
+            ClearBodyPreviewParts(sessionBaseDir);
             TryDelete(Path.Combine(audioDir, FingerprintFileName));
             TryDelete(ShowcaseNarrationTimingManifest.GetPath(audioDir));
+        }
+
+        /// <summary>Chỉ xóa phần cần tạo lại sau khi sửa lời thoại — giữ hook_preview nếu hook không đổi.</summary>
+        public static void ApplySpeechEditInvalidation(
+            string sessionBaseDir,
+            ShowcaseSpeechAudioInvalidationScope scope)
+        {
+            if (string.IsNullOrWhiteSpace(sessionBaseDir) || scope == ShowcaseSpeechAudioInvalidationScope.None)
+            {
+                return;
+            }
+
+            if (scope == ShowcaseSpeechAudioInvalidationScope.All
+                || (scope & ShowcaseSpeechAudioInvalidationScope.Hook) != 0)
+            {
+                ClearAllCachedAudio(sessionBaseDir);
+                return;
+            }
+
+            if ((scope & ShowcaseSpeechAudioInvalidationScope.Body) != 0
+                || (scope & ShowcaseSpeechAudioInvalidationScope.Cta) != 0)
+            {
+                ClearBodyPreview(sessionBaseDir);
+                ClearFullMixPreview(sessionBaseDir);
+            }
+        }
+
+        public static void ClearFullMixPreview(string sessionBaseDir)
+        {
+            if (string.IsNullOrWhiteSpace(sessionBaseDir))
+            {
+                return;
+            }
+
+            TryDelete(GetFullMixPreviewPath(sessionBaseDir));
         }
 
         private static void TryDelete(string path)

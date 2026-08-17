@@ -273,10 +273,17 @@ namespace tiktok_Omni.Services.Showcase
 
             var targetWidth = Math.Max(32, plan.CanvasWidth * ClampScaleWidthPercent(plan.ScaleWidthPercent) / 100);
             var alpha = ClampOpacityPercent(plan.OpacityPercent) / 100d;
-            var alphaText = alpha.ToString("0.##", CultureInfo.InvariantCulture);
             var overlay = ShowcaseBrandLogoPositionCatalog.BuildOverlayExpression(plan.PositionId, plan.MarginX, plan.MarginY);
-            parts.Add("[" + logoInputIndex + ":v]scale=w=" + targetWidth + ":-1:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=" + alphaText + "[logo]");
-            parts.Add(current + "[logo]overlay=" + overlay + ":format=auto[vout]");
+            var logoChain = "[" + logoInputIndex + ":v]scale=w=" + targetWidth + ":h=-1";
+            if (alpha < 0.995d)
+            {
+                var alphaText = alpha.ToString("0.##", CultureInfo.InvariantCulture);
+                logoChain += ",format=rgba,colorchannelmixer=aa=" + alphaText;
+            }
+
+            logoChain += "[logo]";
+            parts.Add(logoChain);
+            parts.Add(current + "[logo]overlay=" + overlay + "[vout]");
             return string.Join(";", parts);
         }
 
@@ -308,17 +315,35 @@ namespace tiktok_Omni.Services.Showcase
                 : variantGrade;
             var qualityArgs = "-c:v libx264 -preset veryfast -crf 20 -profile:v high -level 4.2 -pix_fmt yuv420p -movflags +faststart -an";
 
+            // Phụ đề ASS + logo trong một filter_complex dễ lỗi escape đường dẫn Windows — tách 2 bước.
+            var videoInputPath = stitchedPath;
+            if (needsLogo && needsSubs)
+            {
+                var withSubs = Path.Combine(renderDir, "video_with_subs.mp4");
+                var mergedVf = MergeCaptionAndGrade(captionVideoFilter, grade);
+                var subsArgs = "-y -i \"" + stitchedPath + "\" -vf \"" + mergedVf + "\" " + qualityArgs + " \"" + withSubs + "\"";
+                await runFfmpegAsync(subsArgs, cancellationToken).ConfigureAwait(false);
+                if (!File.Exists(withSubs))
+                {
+                    return stitchedPath;
+                }
+
+                videoInputPath = withSubs;
+                captionVideoFilter = string.Empty;
+                grade = string.Empty;
+            }
+
             string args;
             if (needsLogo)
             {
                 var filterComplex = BuildLogoFilterComplex(0, 1, captionVideoFilter, grade, logoPlan);
-                args = "-y -i \"" + stitchedPath + "\" -i \"" + logoPlan.LogoPath + "\" -filter_complex \""
+                args = "-y -i \"" + videoInputPath + "\" -i \"" + logoPlan.LogoPath + "\" -filter_complex \""
                     + filterComplex + "\" -map \"[vout]\" " + qualityArgs + " \"" + output + "\"";
             }
             else
             {
                 var mergedVf = MergeCaptionAndGrade(captionVideoFilter, grade);
-                args = "-y -i \"" + stitchedPath + "\" -vf \"" + mergedVf + "\" " + qualityArgs + " \"" + output + "\"";
+                args = "-y -i \"" + videoInputPath + "\" -vf \"" + mergedVf + "\" " + qualityArgs + " \"" + output + "\"";
             }
 
             await runFfmpegAsync(args, cancellationToken).ConfigureAwait(false);

@@ -299,7 +299,15 @@ namespace tiktok_Omni.Services
                 }
                 else
                 {
-                    AppendDialogueLines(sb, bodyWords, plan.BodyOptions ?? new AssSubtitleGeneratorOptions(), BodyStyleName);
+                    var bodyBurnIn = ShowcaseSubtitleDisplayHelper.SelectBodyWordsForBurnIn(
+                        bodyWords,
+                        orderedScenes,
+                        ctaText,
+                        displayPlan);
+                    if (bodyBurnIn.Count > 0)
+                    {
+                        AppendDialogueLines(sb, bodyBurnIn, plan.BodyOptions ?? new AssSubtitleGeneratorOptions(), BodyStyleName);
+                    }
                 }
             }
 
@@ -347,7 +355,9 @@ namespace tiktok_Omni.Services
                 (opt.Bold ? "1" : "0") + "," + (opt.Italic ? "1" : "0") + ",0,0,100,100,0,0,1," +
                 outline.ToString(CultureInfo.InvariantCulture) + "," +
                 shadow.ToString(CultureInfo.InvariantCulture) + "," +
-                opt.Alignment.ToString(CultureInfo.InvariantCulture) + ",60,60," +
+                opt.Alignment.ToString(CultureInfo.InvariantCulture) + "," +
+                (opt.MarginL > 0 ? opt.MarginL : 96).ToString(CultureInfo.InvariantCulture) + "," +
+                (opt.MarginR > 0 ? opt.MarginR : 96).ToString(CultureInfo.InvariantCulture) + "," +
                 opt.MarginV.ToString(CultureInfo.InvariantCulture) + ",1");
         }
 
@@ -396,29 +406,150 @@ namespace tiktok_Omni.Services
                 return Array.Empty<List<WordTimestamp>>();
             }
 
-            var maxWords = wordsPerLineOverride ?? Math.Max(4, Math.Min(12, opt.WordsPerLine));
+            var maxWords = ResolveEffectiveMaxWordsPerLine(opt, wordsPerLineOverride);
+            IReadOnlyList<List<WordTimestamp>> grouped;
             if (opt.RhythmicLineBreaks)
             {
-                return GroupIntoRhythmicLines(wordTimestamps, maxWords, Math.Max(1, opt.MinWordsPerLine));
+                grouped = GroupIntoRhythmicLines(wordTimestamps, maxWords, Math.Max(1, opt.MinWordsPerLine));
             }
-
-            var lines = new List<List<WordTimestamp>>();
-            for (var chunkStart = 0; chunkStart < wordTimestamps.Count; chunkStart += maxWords)
+            else
             {
-                var chunkCount = Math.Min(maxWords, wordTimestamps.Count - chunkStart);
-                var chunk = new List<WordTimestamp>(chunkCount);
-                for (var i = 0; i < chunkCount; i++)
+                var lines = new List<List<WordTimestamp>>();
+                for (var chunkStart = 0; chunkStart < wordTimestamps.Count; chunkStart += maxWords)
                 {
-                    chunk.Add(wordTimestamps[chunkStart + i]);
+                    var chunkCount = Math.Min(maxWords, wordTimestamps.Count - chunkStart);
+                    var chunk = new List<WordTimestamp>(chunkCount);
+                    for (var i = 0; i < chunkCount; i++)
+                    {
+                        chunk.Add(wordTimestamps[chunkStart + i]);
+                    }
+
+                    if (chunk.Count > 0)
+                    {
+                        lines.Add(chunk);
+                    }
                 }
 
-                if (chunk.Count > 0)
-                {
-                    lines.Add(chunk);
-                }
+                grouped = lines;
             }
 
-            return lines;
+            return SplitLinesByMaxWidth(grouped, opt);
+        }
+
+        private static int ResolveEffectiveMaxWordsPerLine(AssSubtitleGeneratorOptions opt, int? wordsPerLineOverride)
+        {
+            var requested = wordsPerLineOverride ?? Math.Max(4, Math.Min(12, opt.WordsPerLine));
+            var maxWidth = GetMaxLineWidthPx(opt);
+            var sampleWordWidth = EstimateTextWidthPx("word", opt) + EstimateSpaceWidthPx(opt);
+            if (sampleWordWidth <= 0)
+            {
+                return requested;
+            }
+
+            var widthCap = Math.Max(3, maxWidth / sampleWordWidth);
+            return Math.Max(2, Math.Min(requested, widthCap));
+        }
+
+        private static IReadOnlyList<List<WordTimestamp>> SplitLinesByMaxWidth(
+            IReadOnlyList<List<WordTimestamp>> lines,
+            AssSubtitleGeneratorOptions opt)
+        {
+            if (lines == null || lines.Count == 0)
+            {
+                return Array.Empty<List<WordTimestamp>>();
+            }
+
+            var maxWidth = GetMaxLineWidthPx(opt);
+            var result = new List<List<WordTimestamp>>();
+            foreach (var line in lines)
+            {
+                if (line == null || line.Count == 0)
+                {
+                    continue;
+                }
+
+                SplitWordListByMaxWidth(line, maxWidth, opt, result);
+            }
+
+            return result;
+        }
+
+        private static void SplitWordListByMaxWidth(
+            IReadOnlyList<WordTimestamp> words,
+            int maxWidthPx,
+            AssSubtitleGeneratorOptions opt,
+            IList<List<WordTimestamp>> output)
+        {
+            var current = new List<WordTimestamp>();
+            var currentWidth = 0;
+            foreach (var word in words)
+            {
+                var text = GetWordText(word);
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                var wordWidth = EstimateTextWidthPx(text, opt);
+                var spaceWidth = current.Count > 0 ? EstimateSpaceWidthPx(opt) : 0;
+                if (current.Count > 0 && currentWidth + spaceWidth + wordWidth > maxWidthPx)
+                {
+                    output.Add(current);
+                    current = new List<WordTimestamp>();
+                    currentWidth = 0;
+                    spaceWidth = 0;
+                }
+
+                current.Add(word);
+                currentWidth += spaceWidth + wordWidth;
+            }
+
+            if (current.Count > 0)
+            {
+                output.Add(current);
+            }
+        }
+
+        private static int GetMaxLineWidthPx(AssSubtitleGeneratorOptions opt)
+        {
+            var marginL = opt.MarginL > 0 ? opt.MarginL : 96;
+            var marginR = opt.MarginR > 0 ? opt.MarginR : 96;
+            var usable = Math.Max(240, opt.PlayResX - marginL - marginR);
+            return (int)Math.Floor(usable / GetPopScaleFactor(opt));
+        }
+
+        private static double GetPopScaleFactor(AssSubtitleGeneratorOptions opt)
+        {
+            if (opt == null || opt.Animation == ReupKaraokeAnimationMode.Plain)
+            {
+                return 1d;
+            }
+
+            var pct = opt.PopScalePercent > 0 ? opt.PopScalePercent : 150;
+            return Math.Max(1d, pct / 100d);
+        }
+
+        private static int EstimateTextWidthPx(string text, AssSubtitleGeneratorOptions opt)
+        {
+            if (string.IsNullOrEmpty(text) || opt == null)
+            {
+                return 0;
+            }
+
+            var effectiveFont = opt.FontSize + (opt.OutlineWidth > 0 ? opt.OutlineWidth : 10);
+            var factor = opt.Bold ? 0.58d : 0.52d;
+            return (int)Math.Ceiling(text.Length * effectiveFont * factor);
+        }
+
+        private static int EstimateSpaceWidthPx(AssSubtitleGeneratorOptions opt)
+        {
+            if (opt == null)
+            {
+                return 0;
+            }
+
+            var effectiveFont = opt.FontSize + (opt.OutlineWidth > 0 ? opt.OutlineWidth : 10);
+            return (int)Math.Ceiling(effectiveFont * 0.28d);
         }
 
         private const double RhythmPauseGapMs = 350d;
@@ -510,7 +641,9 @@ namespace tiktok_Omni.Services
                 "Style: " + PopStyleName + "," + opt.FontName + "," + opt.FontSize.ToString(CultureInfo.InvariantCulture) +
                 "," + primary + "," + secondary + ",&H00000000,&H80000000," +
                 (opt.Bold ? "1" : "0") + "," + (opt.Italic ? "1" : "0") + ",0,0,100,100,0,0,1,10,2," +
-                opt.Alignment.ToString(CultureInfo.InvariantCulture) + ",60,60," +
+                opt.Alignment.ToString(CultureInfo.InvariantCulture) + "," +
+                (opt.MarginL > 0 ? opt.MarginL : 96).ToString(CultureInfo.InvariantCulture) + "," +
+                (opt.MarginR > 0 ? opt.MarginR : 96).ToString(CultureInfo.InvariantCulture) + "," +
                 opt.MarginV.ToString(CultureInfo.InvariantCulture) + ",1");
             sb.AppendLine();
             sb.AppendLine("[Events]");
@@ -789,6 +922,11 @@ namespace tiktok_Omni.Services
         public int FontSize { get; set; } = 72;
 
         public int MarginV { get; set; } = 120;
+
+        /// <summary>Lề trái/phải ASS — tránh chữ tràn khỏi khung dọc 9:16.</summary>
+        public int MarginL { get; set; } = 96;
+
+        public int MarginR { get; set; } = 96;
 
         /// <summary>ASS alignment (2=dưới giữa, 5=giữa màn, 8=trên giữa).</summary>
         public int Alignment { get; set; } = 2;

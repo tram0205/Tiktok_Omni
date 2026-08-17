@@ -225,7 +225,8 @@ namespace tiktok_Omni.Services
             ShowcaseTtsRenderOptions showcaseTts,
             bool emphaticHook = false,
             bool showcaseExpressiveBody = false,
-            Action<string> logAction = null)
+            Action<string> logAction = null,
+            bool emphaticCta = false)
         {
             var segmentTts = showcaseTts?.ForSegment(emphaticHook) ?? new ShowcaseTtsRenderOptions();
             var preset = segmentTts.Preset;
@@ -239,7 +240,8 @@ namespace tiktok_Omni.Services
                 var edgeOpts = ShowcaseEdgeTtsVoiceResolver.Resolve(
                     segmentTts,
                     emphaticHook,
-                    showcaseExpressiveBody);
+                    showcaseExpressiveBody,
+                    emphaticCta);
                 return await _edgeTtsService.SynthesizeToTempMp3Async(
                     text,
                     edgeOpts,
@@ -257,7 +259,8 @@ namespace tiktok_Omni.Services
                 bodyFlag,
                 logAction,
                 lang,
-                segmentTts).ConfigureAwait(false);
+                segmentTts,
+                emphaticCta).ConfigureAwait(false);
         }
 
         public async Task<string> GenerateAudioAsync(
@@ -270,7 +273,8 @@ namespace tiktok_Omni.Services
             bool showcaseExpressiveBody = false,
             Action<string> logAction = null,
             string elevenLabsLanguageCode = null,
-            ShowcaseTtsRenderOptions segmentTts = null)
+            ShowcaseTtsRenderOptions segmentTts = null,
+            bool emphaticCta = false)
         {
             if (settings == null)
             {
@@ -297,7 +301,8 @@ namespace tiktok_Omni.Services
                 voiceIdOverride,
                 showcaseExpressiveBody,
                 elevenLabsLanguageCode,
-                segmentTts).ConfigureAwait(false);
+                segmentTts,
+                emphaticCta).ConfigureAwait(false);
         }
 
         public async Task<string> GenerateAudioAsync(
@@ -329,7 +334,8 @@ namespace tiktok_Omni.Services
             string voiceIdOverride,
             bool showcaseExpressiveBody = false,
             string elevenLabsLanguageCode = null,
-            ShowcaseTtsRenderOptions segmentTts = null)
+            ShowcaseTtsRenderOptions segmentTts = null,
+            bool emphaticCta = false)
         {
             // 1. NHẬN DIỆN NẾU URL LÀ CỦA ELEVENLABS
             if (IsElevenLabsEndpoint(endpoint))
@@ -350,7 +356,8 @@ namespace tiktok_Omni.Services
                         voiceId,
                         showcaseExpressiveBody,
                         elevenLabsLanguageCode,
-                        segmentTts);
+                        segmentTts,
+                        emphaticCta);
                     var json = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
                     var content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
 

@@ -22,6 +22,12 @@ namespace tiktok_Omni.Services.Showcase
         public string NarrationPath { get; set; } = string.Empty;
 
         public double TargetDurationSeconds { get; set; }
+
+        /// <summary>&gt;1 khi audio đã tua nhanh lúc khớp clip (phụ đề scale 1/tempo).</summary>
+        public double AppliedAudioTempo { get; set; } = 1d;
+
+        /// <summary>&gt;1 khi video đã tua nhanh lúc khớp thoại.</summary>
+        public double AppliedVideoTempo { get; set; } = 1d;
     }
 
     public static class ShowcaseNarrationSpeedHelper

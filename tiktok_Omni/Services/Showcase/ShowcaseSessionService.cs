@@ -9,7 +9,7 @@ using tiktok_Omni.Services.Mascot;
 
 namespace tiktok_Omni.Services.Showcase
 {
-    /// <summary>Quản lý thư mục phiên Showcase: source_images/, veo_clips/, output/, showcase_prompts.xlsx.</summary>
+    /// <summary>Quản lý thư mục phiên Showcase: source_images/, clips_render/, output/, showcase_prompts.xlsx.</summary>
     public static class ShowcaseSessionService
     {
         private static readonly string[] VideoExtensions = { ".mp4", ".mov", ".webm", ".mkv" };
@@ -34,7 +34,7 @@ namespace tiktok_Omni.Services.Showcase
             {
                 BaseDir = baseDir,
                 SourceImagesDir = Path.Combine(baseDir, "source_images"),
-                ClipsDir = Path.Combine(baseDir, "veo_clips"),
+                ClipsDir = ShowcaseRenderClipsPaths.ResolveDirectory(baseDir, createIfMissing: true),
                 OutputDir = Path.Combine(baseDir, "output"),
                 ProfileName = resolvedProfile,
                 ProductName = (productName ?? string.Empty).Trim()
@@ -174,7 +174,7 @@ namespace tiktok_Omni.Services.Showcase
             return false;
         }
 
-        /// <summary>Đường dẫn đích trong source_images — giữ tên file gốc (clip video vẫn dùng scene_XX.mp4 trong veo_clips).</summary>
+        /// <summary>Đường dẫn đích trong source_images — giữ tên file gốc (clip video vẫn dùng scene_XX.mp4 trong clips_render).</summary>
         public static string GetSourceImageDestPath(ShowcaseSessionState session, int sceneIndexOneBased, string sourceFilePath)
         {
             if (session == null)
@@ -341,7 +341,7 @@ namespace tiktok_Omni.Services.Showcase
         public static string CopyLocalSceneImage(ShowcaseSessionState session, int sceneIndexOneBased, string sourceFilePath) =>
             CopyLocalSceneImage(session, sceneIndexOneBased, sourceFilePath, overwriteExisting: true);
 
-        /// <summary>Copy clip chọn từ máy vào <c>veo_clips/scene_XX.*</c> — null nếu bỏ qua vì trùng và không ghi đè.</summary>
+        /// <summary>Copy clip chọn từ máy vào <c>clips_render/scene_XX.*</c> — null nếu bỏ qua vì trùng và không ghi đè.</summary>
         public static string CopyLocalSceneClip(
             ShowcaseSessionState session,
             int sceneIndexOneBased,
@@ -403,7 +403,440 @@ namespace tiktok_Omni.Services.Showcase
         public static string CopyLocalSceneClip(ShowcaseSessionState session, int sceneIndexOneBased, string sourceFilePath) =>
             CopyLocalSceneClip(session, sceneIndexOneBased, sourceFilePath, overwriteExisting: true);
 
-        /// <summary>Đường dẫn chuẩn clip cảnh trong veo_clips — scene_01.mp4, scene_02.mp4, …</summary>
+        /// <summary>Copy clip vào clips_render — giữ tên file gốc (chưa gán cảnh / bảng chờ render).</summary>
+        public static string CopyLocalClipPreserveName(
+            ShowcaseSessionState session,
+            string sourceFilePath,
+            bool overwriteExisting)
+        {
+            if (session == null || string.IsNullOrWhiteSpace(sourceFilePath) || !File.Exists(sourceFilePath))
+            {
+                return null;
+            }
+
+            Directory.CreateDirectory(session.ClipsDir);
+            var fileName = Path.GetFileName(sourceFilePath);
+            if (string.IsNullOrWhiteSpace(fileName) || !IsVideoExtension(Path.GetExtension(fileName)))
+            {
+                return null;
+            }
+
+            var dest = Path.Combine(session.ClipsDir, fileName);
+            if (PathsEqual(sourceFilePath, dest))
+            {
+                return dest;
+            }
+
+            if (File.Exists(dest) && !overwriteExisting)
+            {
+                return null;
+            }
+
+            CopyFileWithSharedRead(sourceFilePath, dest);
+            return dest;
+        }
+
+        /// <summary>Copy clip vào clips_render với tên file chỉ định (giữ tên gốc clip quay tay).</summary>
+        public static string CopyLocalClipWithBaseName(
+            ShowcaseSessionState session,
+            string sourceFilePath,
+            string destBaseFileName,
+            bool overwriteExisting)
+        {
+            if (session == null || string.IsNullOrWhiteSpace(sourceFilePath) || !File.Exists(sourceFilePath))
+            {
+                return null;
+            }
+
+            var fileName = Path.GetFileName((destBaseFileName ?? string.Empty).Trim());
+            if (string.IsNullOrWhiteSpace(fileName) || !IsVideoExtension(Path.GetExtension(fileName)))
+            {
+                return null;
+            }
+
+            Directory.CreateDirectory(session.ClipsDir);
+            var dest = Path.Combine(session.ClipsDir, fileName);
+            if (PathsEqual(sourceFilePath, dest))
+            {
+                return dest;
+            }
+
+            if (File.Exists(dest) && !overwriteExisting)
+            {
+                return null;
+            }
+
+            CopyFileWithSharedRead(sourceFilePath, dest);
+            return dest;
+        }
+
+        /// <summary>Liệt kê mọi clip video trong clips_render — scene_XX trước (theo số), rồi tên gốc A→Z.</summary>
+        public static IReadOnlyList<string> EnumerateClipFiles(string clipsDir)
+        {
+            if (string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
+            {
+                return Array.Empty<string>();
+            }
+
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(clipsDir);
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+
+            return files
+                .Where(f => IsVideoExtension(Path.GetExtension(f)))
+                .OrderBy(f =>
+                {
+                    return TryParseSceneOrderFromFileName(Path.GetFileName(f), out var order)
+                        ? order
+                        : 1000;
+                })
+                .ThenBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        public static int CountClipFilesOnDisk(string clipsDir) => EnumerateClipFiles(clipsDir).Count;
+
+        /// <summary>Storyboard trống nhưng clips_render còn file — tạo lại cảnh từ folder (không gọi Gemini).</summary>
+        public static int EnsureScenesFromRenderFolder(
+            ShowcaseVideoItem video,
+            string clipsDir,
+            string profileName,
+            Action<string> log = null)
+        {
+            if (video?.Scenes == null || video.Scenes.Count > 0)
+            {
+                return 0;
+            }
+
+            var resolvedDir = (clipsDir ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(resolvedDir))
+            {
+                resolvedDir = ShowcaseRenderClipsPaths.ResolveDirectory(
+                    video.ShowcaseSessionBaseDir,
+                    createIfMissing: false,
+                    migrateLegacy: true);
+            }
+
+            if (string.IsNullOrWhiteSpace(resolvedDir) || !Directory.Exists(resolvedDir))
+            {
+                return 0;
+            }
+
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            var profile = ProfileScopedPaths.ResolveProfileName(profileName);
+            var sourceDir = string.IsNullOrWhiteSpace(video.ShowcaseSessionBaseDir)
+                ? string.Empty
+                : Path.Combine(video.ShowcaseSessionBaseDir.Trim(), "source_images");
+            var added = 0;
+
+            foreach (var clipPath in EnumerateClipFiles(resolvedDir))
+            {
+                if (string.IsNullOrWhiteSpace(clipPath) || !File.Exists(clipPath))
+                {
+                    continue;
+                }
+
+                var fileName = Path.GetFileName(clipPath) ?? string.Empty;
+                var isAppScene = TryParseSceneOrderFromFileName(fileName, out var sceneOrder);
+                var isReal = !isAppScene;
+                var imagePath = string.Empty;
+                if (isAppScene && !string.IsNullOrWhiteSpace(sourceDir))
+                {
+                    imagePath = TryDetectSourceMediaForOrder(sourceDir, sceneOrder) ?? string.Empty;
+                }
+
+                video.Scenes.Add(new AiVideoGenInputItem
+                {
+                    ProfileName = profile,
+                    ProductName = productName,
+                    ClipPath = clipPath,
+                    ShowcaseRealClipSourcePath = isReal ? clipPath : string.Empty,
+                    ShowcaseClipTool = isReal ? ShowcaseClipToolHelper.ToolReal : string.Empty,
+                    SceneTitle = Path.GetFileNameWithoutExtension(fileName) ?? string.Empty,
+                    ImageUrl = imagePath,
+                    ThumbnailPath = imagePath,
+                    PipelineStatus = "Chờ"
+                });
+                added++;
+            }
+
+            if (added <= 0)
+            {
+                return 0;
+            }
+
+            if (!string.IsNullOrWhiteSpace(resolvedDir))
+            {
+                video.ShowcaseClipsDir = resolvedDir;
+            }
+
+            ShowcaseSceneNamingHelper.ApplyConventionSceneTitles(video.Scenes);
+            RefreshClipStatus(resolvedDir, video.Scenes, log);
+            log?.Invoke("[Showcase] Khôi phục " + added + " cảnh từ "
+                        + ShowcaseRenderClipsPaths.FolderName + " (clip trên đĩa).");
+            return added;
+        }
+
+        /// <summary>scene_01.mp4 → 1; tên khác → false.</summary>
+        public static bool TryParseSceneOrderFromFileName(string fileName, out int order)
+        {
+            order = 0;
+            var baseName = NormalizeSceneBaseName(fileName);
+            if (string.IsNullOrEmpty(baseName)
+                || !baseName.StartsWith("scene_", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var suffix = baseName.Substring("scene_".Length);
+            return int.TryParse(suffix, NumberStyles.None, CultureInfo.InvariantCulture, out order) && order >= 1;
+        }
+
+        public sealed class AssignPendingClipsResult
+        {
+            public int AssignedCount { get; set; }
+
+            public int RemainingPendingCount { get; set; }
+        }
+
+        /// <summary>
+        /// Sau khi có kịch bản — gán clip chờ (tên gốc) vào cảnh còn trống theo thứ tự,
+        /// chỉ cập nhật <see cref="AiVideoGenInputItem.ClipPath"/> — không đổi tên file.
+        /// </summary>
+        public static AssignPendingClipsResult AssignPendingClipsToSceneSlots(
+            string clipsDir,
+            IList<AiVideoGenInputItem> orderedScenes,
+            Action<string> log = null)
+        {
+            var result = new AssignPendingClipsResult();
+            if (orderedScenes == null || orderedScenes.Count == 0
+                || string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
+            {
+                result.RemainingPendingCount = EnumeratePendingClipFiles(clipsDir).Count;
+                return result;
+            }
+
+            var pending = EnumeratePendingClipFiles(clipsDir).ToList();
+            var pendingIndex = 0;
+            for (var i = 0; i < orderedScenes.Count && pendingIndex < pending.Count; i++)
+            {
+                if (SceneSlotHasClip(orderedScenes[i], clipsDir, i + 1))
+                {
+                    continue;
+                }
+
+                var source = pending[pendingIndex++];
+                var scene = orderedScenes[i];
+                if (scene != null)
+                {
+                    scene.ClipPath = source;
+                    scene.ShowcaseRealClipSourcePath = source;
+                    if (string.IsNullOrWhiteSpace(scene.ShowcaseClipTool))
+                    {
+                        scene.ShowcaseClipTool = ShowcaseClipToolHelper.ToolReal;
+                    }
+                }
+
+                result.AssignedCount++;
+                log?.Invoke("[Showcase] Gán clip «" + Path.GetFileName(source) + "» → cảnh "
+                            + (i + 1) + " (giữ tên gốc).");
+            }
+
+            result.RemainingPendingCount = Math.Max(0, pending.Count - pendingIndex);
+            if (result.RemainingPendingCount > 0)
+            {
+                log?.Invoke("[Showcase] Còn " + result.RemainingPendingCount
+                            + " clip chờ render chưa gán cảnh (thừa slot hoặc cảnh đã có clip).");
+            }
+
+            return result;
+        }
+
+        public sealed class AppendPendingClipsAsScenesResult
+        {
+            public int AppendedCount { get; set; }
+        }
+
+        /// <summary>
+        /// Clip quay tay trong clips_render chưa gán cảnh — thêm cảnh storyboard (cuối timeline)
+        /// để «Tạo lời thoại» và render gửi đủ clip cho Gemini.
+        /// </summary>
+        public static AppendPendingClipsAsScenesResult AppendUnassignedPendingClipsAsScenes(
+            string clipsDir,
+            IList<AiVideoGenInputItem> orderedScenes,
+            string productName,
+            string profileName,
+            Action<string> log = null)
+        {
+            var result = new AppendPendingClipsAsScenesResult();
+            if (orderedScenes == null || string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
+            {
+                return result;
+            }
+
+            var assigned = CollectAssignedClipFullPaths(orderedScenes);
+            foreach (var clipPath in EnumeratePendingClipFiles(clipsDir))
+            {
+                if (string.IsNullOrWhiteSpace(clipPath) || !File.Exists(clipPath))
+                {
+                    continue;
+                }
+
+                if (!TryNormalizeFullPath(clipPath, out var fullPath))
+                {
+                    fullPath = clipPath.Trim();
+                }
+
+                if (assigned.Contains(fullPath))
+                {
+                    continue;
+                }
+
+                var scene = new AiVideoGenInputItem
+                {
+                    ProfileName = ProfileScopedPaths.ResolveProfileName(profileName),
+                    ProductName = (productName ?? string.Empty).Trim(),
+                    ClipPath = clipPath,
+                    ShowcaseRealClipSourcePath = clipPath,
+                    ShowcaseClipTool = ShowcaseClipToolHelper.ToolReal,
+                    SceneTitle = Path.GetFileNameWithoutExtension(clipPath) ?? string.Empty,
+                    PipelineStatus = "Chờ"
+                };
+                orderedScenes.Add(scene);
+                assigned.Add(fullPath);
+                result.AppendedCount++;
+                log?.Invoke("[Showcase] Thêm cảnh quay tay «" + Path.GetFileName(clipPath)
+                            + "» — tổng " + orderedScenes.Count + " cảnh (Gemini sẽ xem clip này).");
+            }
+
+            return result;
+        }
+
+        private static HashSet<string> CollectAssignedClipFullPaths(IEnumerable<AiVideoGenInputItem> orderedScenes)
+        {
+            var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (orderedScenes == null)
+            {
+                return assigned;
+            }
+
+            foreach (var scene in orderedScenes)
+            {
+                if (scene == null)
+                {
+                    continue;
+                }
+
+                foreach (var path in new[] { scene.ClipPath, scene.ShowcaseRealClipSourcePath })
+                {
+                    if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                    {
+                        continue;
+                    }
+
+                    if (TryNormalizeFullPath(path, out var fullPath))
+                    {
+                        assigned.Add(fullPath);
+                    }
+                    else
+                    {
+                        assigned.Add(path.Trim());
+                    }
+                }
+            }
+
+            return assigned;
+        }
+
+        private static bool TryNormalizeFullPath(string path, out string fullPath)
+        {
+            fullPath = string.Empty;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            try
+            {
+                fullPath = Path.GetFullPath(path.Trim());
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool SceneSlotHasClip(AiVideoGenInputItem scene, string clipsDir, int orderOneBased)
+        {
+            if (scene != null)
+            {
+                var stored = (scene.ClipPath ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(stored) && File.Exists(stored))
+                {
+                    if (ShowcaseClipDisplayHelper.IsRealClipScene(scene)
+                        && ShowcaseClipDisplayHelper.IsAppGeneratedSceneFileName(Path.GetFileName(stored)))
+                    {
+                        return false;
+                    }
+
+                    return true;
+                }
+            }
+
+            if (ShowcaseClipDisplayHelper.IsRealClipScene(scene))
+            {
+                return false;
+            }
+
+            return !string.IsNullOrWhiteSpace(DetectClipForOrder(clipsDir, orderOneBased));
+        }
+
+        /// <summary>Clip trong clips_render chưa theo dạng scene_XX — thứ tự thêm file (creation time).</summary>
+        public static IReadOnlyList<string> EnumeratePendingClipFiles(string clipsDir)
+        {
+            if (string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
+            {
+                return Array.Empty<string>();
+            }
+
+            string[] files;
+            try
+            {
+                files = Directory.GetFiles(clipsDir);
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+
+            return files
+                .Where(f => IsVideoExtension(Path.GetExtension(f))
+                            && !TryParseSceneOrderFromFileName(Path.GetFileName(f), out _))
+                .OrderBy(GetClipFileCreationTimeUtc)
+                .ThenBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static DateTime GetClipFileCreationTimeUtc(string path)
+        {
+            try
+            {
+                return File.GetCreationTimeUtc(path);
+            }
+            catch
+            {
+                return DateTime.MaxValue;
+            }
+        }
+
+        /// <summary>Đường dẫn chuẩn clip cảnh trong clips_render — scene_01.mp4, scene_02.mp4, …</summary>
         public static string BuildSceneClipFilePath(string clipsDir, int sceneIndexOneBased, string extension = ".mp4")
         {
             if (sceneIndexOneBased < 1)
@@ -595,7 +1028,7 @@ namespace tiktok_Omni.Services.Showcase
             {
                 BaseDir = resolvedBase,
                 SourceImagesDir = Path.Combine(resolvedBase, "source_images"),
-                ClipsDir = Path.Combine(resolvedBase, "veo_clips"),
+                ClipsDir = ShowcaseRenderClipsPaths.ResolveDirectory(resolvedBase, createIfMissing: true),
                 OutputDir = Path.Combine(resolvedBase, "output"),
                 ProfileName = resolvedProfile,
                 ProductName = trimmedProduct,
@@ -793,6 +1226,17 @@ namespace tiktok_Omni.Services.Showcase
 
             if (!string.IsNullOrWhiteSpace(sourceImagesDir))
             {
+                var clipFile = (scene?.ClipPath ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(clipFile)
+                    && TryParseSceneOrderFromFileName(Path.GetFileName(clipFile), out var clipOrder))
+                {
+                    resolvedPath = DetectSourceImageForOrder(sourceImagesDir, clipOrder);
+                    if (!string.IsNullOrWhiteSpace(resolvedPath))
+                    {
+                        return true;
+                    }
+                }
+
                 resolvedPath = DetectSourceImageForOrder(sourceImagesDir, orderOneBased);
                 if (!string.IsNullOrWhiteSpace(resolvedPath))
                 {
@@ -867,6 +1311,12 @@ namespace tiktok_Omni.Services.Showcase
                     continue;
                 }
 
+                // Timeline clip-first: cảnh có clip render hợp lệ không bị coi là «thiếu ảnh» để gỡ.
+                if (ShowcaseClipStatusHelper.SceneHasClipFile(scene))
+                {
+                    continue;
+                }
+
                 missing.Add(order);
             }
 
@@ -910,7 +1360,7 @@ namespace tiktok_Omni.Services.Showcase
 
             if (removed > 0 && log != null)
             {
-                log("[Showcase] Đã gỡ " + removed + " cảnh khỏi storyboard (ảnh không còn trong source_images). Còn "
+                log("[Showcase] Đã gỡ " + removed + " cảnh khỏi storyboard (ảnh không còn trong source_images, không có clip). Còn "
                     + orderedScenes.Count + " cảnh.");
             }
 
@@ -949,7 +1399,7 @@ namespace tiktok_Omni.Services.Showcase
                    + string.Join(", ", missingOrders) + ").";
         }
 
-        /// <summary>Tìm file clip theo tên "scene_XX.*" trong thư mục veo_clips — null nếu chưa có.</summary>
+        /// <summary>Tìm file clip theo tên "scene_XX.*" trong thư mục clips_render — null nếu chưa có.</summary>
         public static string DetectClipForOrder(string clipsDir, int order)
         {
             if (order < 1 || string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
@@ -1037,7 +1487,7 @@ namespace tiktok_Omni.Services.Showcase
             return current ?? string.Empty;
         }
 
-        /// <summary>Quét thư mục clip, gán <see cref="AiVideoGenInputItem.ClipPath"/> cho từng cảnh theo thứ tự — trả về danh sách STT còn thiếu clip.</summary>
+        /// <summary>Quét thư mục clip, gán <see cref="AiVideoGenInputItem.ClipPath"/> — ưu tiên đường dẫn đã lưu, rồi scene_XX (Zoom/app).</summary>
         public static List<int> RefreshClipStatus(
             string clipsDir,
             IList<AiVideoGenInputItem> orderedScenes,
@@ -1052,10 +1502,11 @@ namespace tiktok_Omni.Services.Showcase
             for (var i = 0; i < orderedScenes.Count; i++)
             {
                 var order = i + 1;
-                var clip = DetectClipForOrder(clipsDir, order);
-                if (orderedScenes[i] != null)
+                var scene = orderedScenes[i];
+                var clip = ResolveClipForScene(scene, clipsDir, order);
+                if (scene != null)
                 {
-                    orderedScenes[i].ClipPath = clip ?? string.Empty;
+                    scene.ClipPath = clip ?? string.Empty;
                 }
 
                 if (string.IsNullOrWhiteSpace(clip))
@@ -1070,6 +1521,117 @@ namespace tiktok_Omni.Services.Showcase
             }
 
             return missing;
+        }
+
+        /// <summary>Clip đã gán cảnh (tên gốc) hoặc scene_XX do app tạo (Zoom).</summary>
+        public static string ResolveClipForScene(AiVideoGenInputItem scene, string clipsDir, int orderOneBased)
+        {
+            var stored = (scene?.ClipPath ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(stored))
+            {
+                if (File.Exists(stored))
+                {
+                    return stored;
+                }
+
+                var byStoredName = TryResolveClipPathInDirectory(clipsDir, Path.GetFileName(stored));
+                if (!string.IsNullOrWhiteSpace(byStoredName))
+                {
+                    return byStoredName;
+                }
+            }
+
+            var realSource = (scene?.ShowcaseRealClipSourcePath ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(realSource))
+            {
+                if (File.Exists(realSource))
+                {
+                    return realSource;
+                }
+
+                var byRealName = TryResolveClipPathInDirectory(clipsDir, Path.GetFileName(realSource));
+                if (!string.IsNullOrWhiteSpace(byRealName))
+                {
+                    return byRealName;
+                }
+            }
+
+            if (!ShowcaseClipDisplayHelper.IsRealClipScene(scene))
+            {
+                return DetectClipForOrder(clipsDir, orderOneBased);
+            }
+
+            return null;
+        }
+
+        /// <summary>Tìm clip trong clips_render theo tên file (không phân biệt hoa thường).</summary>
+        public static string TryResolveClipPathInDirectory(string clipsDir, string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
+            {
+                return null;
+            }
+
+            var name = (fileName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(name) || !IsVideoExtension(Path.GetExtension(name)))
+            {
+                return null;
+            }
+
+            var direct = Path.Combine(clipsDir, name);
+            if (File.Exists(direct))
+            {
+                return direct;
+            }
+
+            try
+            {
+                foreach (var file in Directory.GetFiles(clipsDir))
+                {
+                    if (string.Equals(Path.GetFileName(file), name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return file;
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+
+            return null;
+        }
+
+        /// <summary>Đếm clip thực sự có trên đĩa (ưu tiên quét clips_render, fallback ClipPath đã lưu).</summary>
+        public static int CountValidClipsOnDisk(string clipsDir, IList<AiVideoGenInputItem> orderedScenes)
+        {
+            if (orderedScenes == null || orderedScenes.Count == 0)
+            {
+                return 0;
+            }
+
+            var count = 0;
+            for (var i = 0; i < orderedScenes.Count; i++)
+            {
+                var clip = !string.IsNullOrWhiteSpace(clipsDir)
+                    ? ResolveClipForScene(orderedScenes[i], clipsDir, i + 1)
+                    : null;
+                if (string.IsNullOrWhiteSpace(clip))
+                {
+                    var stored = (orderedScenes[i]?.ClipPath ?? string.Empty).Trim();
+                    if (!string.IsNullOrWhiteSpace(stored) && File.Exists(stored))
+                    {
+                        clip = stored;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(clip) && File.Exists(clip))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private static bool IsVideoExtension(string extension)
@@ -1094,7 +1656,7 @@ namespace tiktok_Omni.Services.Showcase
         {
             if (string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
             {
-                return "[Showcase] veo_clips không tồn tại: " + (clipsDir ?? string.Empty);
+                return "[Showcase] " + ShowcaseRenderClipsPaths.FolderName + " không tồn tại: " + (clipsDir ?? string.Empty);
             }
 
             string[] files;
@@ -1104,7 +1666,7 @@ namespace tiktok_Omni.Services.Showcase
             }
             catch (Exception ex)
             {
-                return "[Showcase] Không đọc được veo_clips: " + ex.Message;
+                return "[Showcase] Không đọc được " + ShowcaseRenderClipsPaths.FolderName + ": " + ex.Message;
             }
 
             var names = files
@@ -1119,17 +1681,99 @@ namespace tiktok_Omni.Services.Showcase
                                       || n.EndsWith(".mov.mov", StringComparison.OrdinalIgnoreCase))
                 ? " Gợi ý: đổi tên bỏ đuôi lặp (vd. scene_01.mp4.mp4 → scene_01.mp4) — app đã hỗ trợ cả hai."
                 : string.Empty;
-            return "[Showcase] veo_clips có " + files.Length + " file [" + sample + "] — thiếu "
+            return "[Showcase] " + ShowcaseRenderClipsPaths.FolderName + " có " + files.Length + " file [" + sample + "] — thiếu "
                    + missingOrders.Count + "/" + sceneCount + " cảnh ("
                    + string.Join(", ", missingOrders) + ")." + hint;
         }
 
-        /// <summary>Tìm phiên Showcase gần nhất (trong 7 ngày) có đủ clip scene_01… — dùng khi draft chưa lưu đường dẫn veo_clips.</summary>
+        /// <summary>Số cảnh có clip trong clips_render (scene_01 …).</summary>
+        public static int CountClipSlots(string clipsDir)
+        {
+            if (string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
+            {
+                return 0;
+            }
+
+            var max = 0;
+            for (var order = 1; order <= 30; order++)
+            {
+                if (!string.IsNullOrWhiteSpace(DetectClipForOrder(clipsDir, order)))
+                {
+                    max = order;
+                }
+            }
+
+            return max;
+        }
+
+        /// <summary>Số file ảnh/video storyboard trong source_images (photo_XX / scene_XX).</summary>
+        public static int CountSourceMediaSlots(string sourceImagesDir)
+        {
+            if (string.IsNullOrWhiteSpace(sourceImagesDir) || !Directory.Exists(sourceImagesDir))
+            {
+                return 0;
+            }
+
+            var max = 0;
+            for (var order = 1; order <= 30; order++)
+            {
+                if (!string.IsNullOrWhiteSpace(TryDetectSourceMediaForOrder(sourceImagesDir, order)))
+                {
+                    max = order;
+                }
+            }
+
+            return max;
+        }
+
+        /// <summary>Ảnh hoặc clip gốc trong source_images theo thứ tự cảnh.</summary>
+        public static string TryDetectSourceMediaForOrder(string sourceImagesDir, int order)
+        {
+            var image = DetectSourceImageForOrder(sourceImagesDir, order);
+            if (!string.IsNullOrWhiteSpace(image))
+            {
+                return image;
+            }
+
+            if (order < 1 || string.IsNullOrWhiteSpace(sourceImagesDir) || !Directory.Exists(sourceImagesDir))
+            {
+                return null;
+            }
+
+            foreach (var prefix in new[]
+                     {
+                         "photo_" + order.ToString("D2", CultureInfo.InvariantCulture),
+                         "scene_" + order.ToString("D2", CultureInfo.InvariantCulture)
+                     })
+            {
+                string[] matches;
+                try
+                {
+                    matches = Directory.GetFiles(sourceImagesDir, prefix + ".*");
+                }
+                catch
+                {
+                    matches = Array.Empty<string>();
+                }
+
+                foreach (var file in matches)
+                {
+                    if (File.Exists(file))
+                    {
+                        return file;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>Tìm phiên Showcase gần nhất (trong 7 ngày) có đủ clip scene_01… — dùng khi draft chưa lưu đường dẫn clips_render.</summary>
         public static ShowcaseSessionState TryFindRecentSessionWithClips(string profileName, string productName, int sceneCount)
         {
             if (sceneCount < ShowcaseWorkflowConstants.MinScenes)
             {
-                return null;
+                sceneCount = 1;
             }
 
             var processedRoot = ProfileScopedPaths.GetVideoTypeFolder(null, profileName, VideoStorageType.Processed, create: false);
@@ -1153,8 +1797,8 @@ namespace tiktok_Omni.Services.Showcase
 
                 foreach (var sessionDir in Directory.EnumerateDirectories(dateDir))
                 {
-                    var clipsDir = Path.Combine(sessionDir, "veo_clips");
-                    if (!Directory.Exists(clipsDir))
+                    var clipsDir = ShowcaseRenderClipsPaths.ResolveDirectory(sessionDir, createIfMissing: false);
+                    if (string.IsNullOrWhiteSpace(clipsDir) || !Directory.Exists(clipsDir))
                     {
                         continue;
                     }

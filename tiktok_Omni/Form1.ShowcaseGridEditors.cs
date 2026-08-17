@@ -1,12 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Text;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Controls;
 using tiktok_Omni.Services;
-using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
+using tiktok_Omni.Services.Showcase;
+
+namespace tiktok_Omni
 {
     public partial class Form1
     {
@@ -77,6 +81,10 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
             {
                 ShowShowcaseProductTypeThemeChooser(video, rowIndex);
             }
+            else if (string.Equals(colName, "colAiShowcaseClipMode", StringComparison.Ordinal))
+            {
+                ShowShowcaseClipModeEditor(video, rowIndex);
+            }
             else if (string.Equals(colName, "colAiShowcaseTextSize", StringComparison.Ordinal))
             {
                 ShowShowcaseSubtitleStyleEditor(video, rowIndex);
@@ -93,6 +101,10 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
                      || string.Equals(colName, "colAiShowcaseScenePrompt", StringComparison.Ordinal))
             {
                 ShowShowcaseScriptPromptChooser(video, rowIndex);
+            }
+            else if (string.Equals(colName, "colAiShowcaseVoiceover", StringComparison.Ordinal))
+            {
+                ShowShowcaseVoiceoverEditor(video, rowIndex);
             }
 
             _showcaseGridEditorClickSuppressUntilTick = Environment.TickCount;
@@ -205,6 +217,152 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
 
             var settings = await _configManager.LoadAsync().ConfigureAwait(true);
             await OpenShowcaseOutputFolderForVideoAsync(video, settings, GetRunningProfileName()).ConfigureAwait(true);
+        }
+
+        private async void ShowShowcaseClipModeEditor(ShowcaseVideoItem video, int gridRowIndex)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            DialogResult result;
+            using (var dlg = new ShowcaseClipModeEditorForm(video, settings, this))
+            {
+                // Gắn dialog làm chủ MessageBox/log trong lúc mở, để bấm «Tạo kịch bản»/«Tạo clip Zoom»
+                // ngay trong dialog này vẫn hiển thị đúng lên trên (không bị khuất phía sau).
+                BindShowcaseWorkDialog(dlg, dlg.LogStatus);
+                try
+                {
+                    result = dlg.ShowDialog(this);
+                }
+                finally
+                {
+                    UnbindShowcaseAudioDialog();
+                }
+            }
+
+            // Clip quay tay được thêm/xoá trực tiếp trong video.Scenes — luôn đồng bộ storyboard dù Lưu hay Hủy.
+            SyncShowcaseVideoSettingsToScenes(video);
+            video.RefreshDisplayFields();
+            RefreshAffiliateDeepStoryboard();
+            SyncBuffersToGrids();
+            dgvDeepDiveInput?.InvalidateRow(gridRowIndex);
+            NotifyShowcaseDraftDirty();
+
+            if (result != DialogResult.OK)
+            {
+                return;
+            }
+        }
+
+        private void ShowShowcaseVoiceoverEditor(ShowcaseVideoItem video, int gridRowIndex)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            ActivateShowcaseVideo(video, refreshStoryboard: false);
+            var speechBefore = ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot.Capture(video);
+            DialogResult result;
+            using (var dlg = new ShowcaseVoiceoverEditorForm(video, this))
+            {
+                BindShowcaseWorkDialog(dlg, dlg.SetStatus);
+                try
+                {
+                    result = dlg.ShowDialog(this);
+                }
+                finally
+                {
+                    UnbindShowcaseAudioDialog();
+                }
+            }
+
+            SyncShowcaseVideoSettingsToScenes(video);
+            video.RefreshDisplayFields();
+            RefreshAffiliateDeepStoryboard();
+            SyncBuffersToGrids();
+            dgvDeepDiveInput?.InvalidateRow(gridRowIndex);
+            NotifyShowcaseDraftDirty();
+
+            if (result == DialogResult.OK)
+            {
+                InvalidateShowcaseAudioCacheForSpeechEdit(video, speechBefore);
+                FlushShowcaseDraftToDisk();
+            }
+        }
+
+        private void InvalidateShowcaseAudioCacheForSpeechEdit(
+            ShowcaseVideoItem video,
+            ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot speechBefore)
+        {
+            var scope = speechBefore?.DetectInvalidationScope(video) ?? ShowcaseSpeechAudioInvalidationScope.All;
+            if (scope == ShowcaseSpeechAudioInvalidationScope.None)
+            {
+                return;
+            }
+
+            var clearedAny = false;
+            foreach (var sessionBase in ResolveShowcaseAudioSessionBases(video))
+            {
+                ShowcaseNarrationCacheHelper.ApplySpeechEditInvalidation(sessionBase, scope);
+                clearedAny = true;
+            }
+
+            if (!clearedAny)
+            {
+                return;
+            }
+
+            if ((scope & ShowcaseSpeechAudioInvalidationScope.Hook) != 0)
+            {
+                LogShowcase("[Showcase] Hook đổi — xóa toàn bộ cache audio; bấm «Tạo audio hook/thân» rồi «Render Audio» lại.");
+            }
+            else
+            {
+                LogShowcase("[Showcase] Thân/CTA đổi — giữ hook audio; bấm «Tạo audio thân» rồi «Render Audio» lại.");
+            }
+        }
+
+        private void InvalidateShowcaseAudioCacheForVideo(ShowcaseVideoItem video)
+        {
+            var clearedAny = false;
+            foreach (var sessionBase in ResolveShowcaseAudioSessionBases(video))
+            {
+                ShowcaseNarrationCacheHelper.ApplySpeechEditInvalidation(
+                    sessionBase,
+                    ShowcaseSpeechAudioInvalidationScope.All);
+                clearedAny = true;
+            }
+
+            if (clearedAny)
+            {
+                LogShowcase("[Showcase] Đã xóa cache audio — bấm «Tạo audio hook/thân» rồi «Render Audio» lại.");
+            }
+        }
+
+        private IEnumerable<string> ResolveShowcaseAudioSessionBases(ShowcaseVideoItem video)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var sessionBase = (_showcaseSession?.BaseDir ?? string.Empty).Trim();
+            if (sessionBase.Length > 0 && seen.Add(sessionBase))
+            {
+                yield return sessionBase;
+            }
+
+            var fromClips = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(GetShowcaseVideoScenes(video));
+            if (!string.IsNullOrWhiteSpace(fromClips) && seen.Add(fromClips.Trim()))
+            {
+                yield return fromClips.Trim();
+            }
+
+            var fromVideo = (video?.ShowcaseSessionBaseDir ?? string.Empty).Trim();
+            if (fromVideo.Length > 0 && seen.Add(fromVideo))
+            {
+                yield return fromVideo;
+            }
         }
 
         private void ShowShowcaseProductTypeThemeChooser(ShowcaseVideoItem video, int gridRowIndex)
@@ -407,6 +565,8 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
                 }
             }
 
+            var speechBefore = ShowcaseSubtitleDisplayHelper.ScriptSpeechSnapshot.Capture(video);
+
             using (var dlg = new ShowcaseScriptEditorForm(video))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK)
@@ -427,7 +587,7 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
                               ?? ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(GetShowcaseVideoScenes(video));
             if (!string.IsNullOrWhiteSpace(sessionBase))
             {
-                ShowcaseNarrationCacheHelper.ClearAllCachedAudio(sessionBase);
+                InvalidateShowcaseAudioCacheForSpeechEdit(video, speechBefore);
             }
 
             SyncShowcaseVideoSettingsToScenes(video);
@@ -816,7 +976,7 @@ using tiktok_Omni.Services.Showcase;namespace tiktok_Omni
             else
             {
                 dgvDeepDiveInput.Rows[e.RowIndex].Cells[e.ColumnIndex].ToolTipText = isClipsColumn
-                    ? (video.SceneCountDisplay ?? "0 cảnh") + " — ➕ thêm clip · 📂 veo_clips"
+                    ? (video.SceneCountDisplay ?? "0 cảnh") + " — ➕ thêm clip · 📂 clips_render"
                     : (video.ShowcaseImagesGridLabel ?? "0 ảnh") + " — ➕ thêm ảnh · 📂 thư mục";
             }
 

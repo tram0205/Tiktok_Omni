@@ -8,7 +8,8 @@ namespace tiktok_Omni.Services.Showcase
         public static EdgeTtsSynthesisOptions Resolve(
             ShowcaseTtsRenderOptions options,
             bool emphaticHook = false,
-            bool showcaseExpressiveBody = true)
+            bool showcaseExpressiveBody = true,
+            bool emphaticCta = false)
         {
             var voiceBase = ResolveVoiceBase(options);
             voiceBase = ShowcaseEdgeProsodyHelper.ApplyUserOffsets(
@@ -20,7 +21,8 @@ namespace tiktok_Omni.Services.Showcase
                 voiceBase,
                 options?.HookStyleKey,
                 emphaticHook,
-                showcaseExpressiveBody);
+                showcaseExpressiveBody,
+                emphaticCta);
         }
 
         public static EdgeTtsSynthesisOptions ResolveVoiceBase(ShowcaseTtsRenderOptions options)

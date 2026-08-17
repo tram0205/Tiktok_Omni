@@ -23,7 +23,8 @@ namespace tiktok_Omni.Services.Showcase
             EdgeTtsSynthesisOptions voiceBase,
             string hookStyleKey,
             bool emphaticHook,
-            bool showcaseExpressiveBody)
+            bool showcaseExpressiveBody,
+            bool emphaticCta = false)
         {
             voiceBase = voiceBase ?? new EdgeTtsSynthesisOptions();
             var styleKey = NormalizeStyleKey(hookStyleKey);
@@ -42,6 +43,13 @@ namespace tiktok_Omni.Services.Showcase
                 rateDelta = style.HookRateDelta + 3;
                 pitchHz = style.HookPitchHz + 1;
                 volumePct = style.HookVolumePct + 4;
+            }
+            else if (emphaticCta)
+            {
+                // CTA: nhấn hơn thân nhưng chậm hơn hook — giữa body expressive và hook.
+                rateDelta = style.BodyRateDelta + 4;
+                pitchHz = style.BodyPitchHz + 1;
+                volumePct = style.BodyVolumePct + 2;
             }
             else if (showcaseExpressiveBody)
             {

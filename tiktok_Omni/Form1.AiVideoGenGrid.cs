@@ -45,14 +45,14 @@ namespace tiktok_Omni
         /// <summary>Cột hiển thị trên lưới Showcase — mỗi dòng = 1 video; chi tiết cảnh nằm trên storyboard.</summary>
         private static readonly string[] ShowcaseVisibleGridColumns =
         {
-            "colAiProduct", "colAiShowcaseImages", "colAiShowcaseProductType", "colAiShowcaseClipMode", "colAiShowcaseOutputAspect",
-            "colAiShowcaseScript", "colAiShowcaseSceneSummary",
-            "colAiShowcaseTextSize", "colAiShowcaseMusicVolume", "colAiShowcaseBrandLogo", "colAiStatus", "colAiShowcaseOutput"
+            "colAiProduct", "colAiShowcaseImages", "colAiShowcaseProductType", "colAiShowcaseClipMode",
+            "colAiShowcaseScript", "colAiShowcaseVoiceover", "colAiShowcaseMusicVolume", "colAiShowcaseSceneSummary",
+            "colAiShowcaseTextSize", "colAiShowcaseBrandLogo", "colAiStatus", "colAiShowcaseOutput"
         };
 
         private static readonly string[] ShowcaseLegacyOnlyGridColumns =
         {
-            "colAiShowcaseProductType", "colAiShowcaseClipMode", "colAiShowcaseOutputAspect", "colAiShowcaseTheme", "colAiShowcaseUserTheme", "colAiShowcaseSceneSummary", "colAiShowcaseScript", "colAiShowcaseScenePrompt",
+            "colAiShowcaseProductType", "colAiShowcaseClipMode", "colAiShowcaseOutputAspect", "colAiShowcaseTheme", "colAiShowcaseUserTheme", "colAiShowcaseSceneSummary", "colAiShowcaseScript", "colAiShowcaseVoiceover", "colAiShowcaseScenePrompt",
             "colAiSceneTitle", "colAiSceneRole", "colAiSceneVoice", "colAiVeoPrompt", "colAiClip",
             "colAiShowcaseMultiVoice", "colAiShowcaseTextSize", "colAiShowcaseMusicVolume", "colAiShowcaseTransition"
         };
@@ -142,11 +142,11 @@ namespace tiktok_Omni
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseImages", 2);
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseProductType", 3);
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseClipMode", 4);
-                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseOutputAspect", 5);
-                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseScript", 6);
-                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseSceneSummary", 7);
-                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseTextSize", 8);
-                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseMusicVolume", 9);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseScript", 5);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseVoiceover", 6);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseMusicVolume", 7);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseSceneSummary", 8);
+                SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseTextSize", 9);
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseBrandLogo", 10);
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiStatus", 11);
                 SetGridColumnDisplayIndex(dgvDeepDiveInput, "colAiShowcaseOutput", 12);
@@ -207,20 +207,12 @@ namespace tiktok_Omni
                 if (clipModeCol is DataGridViewComboBoxColumn clipModeCombo)
                 {
                     ApplyShowcaseClipModeComboColumn(clipModeCombo);
-                    clipModeCombo.ReadOnly = false;
+                    clipModeCombo.ReadOnly = true;
+                    clipModeCombo.DisplayStyle = DataGridViewComboBoxDisplayStyle.Nothing;
+                    clipModeCombo.FlatStyle = FlatStyle.Flat;
                     clipModeCombo.HeaderText = "Công cụ Video";
                     clipModeCombo.ToolTipText =
-                        "Công cụ clip: Veo + Zoom, Veo + Kling, Zoom + Kling, Kling + Veo + Zoom, Chỉ Veo/Kling/Zoom, Gemini gợi ý. Chọn trước «Tạo kịch bản».";
-                }
-
-                var aspectCol = dgvDeepDiveInput.Columns["colAiShowcaseOutputAspect"];
-                if (aspectCol is DataGridViewComboBoxColumn aspectCombo)
-                {
-                    ApplyShowcaseOutputAspectComboColumn(aspectCombo);
-                    aspectCombo.ReadOnly = false;
-                    aspectCombo.HeaderText = "Khung video";
-                    aspectCombo.ToolTipText =
-                        "Tỉ lệ file xuất (9:16 / 16:9 / 1:1). Chọn trước «Tạo kịch bản» và «Tạo clip Zoom» — đổi sau khi có clip nên tạo clip lại.";
+                        "Công cụ clip AI + khung video + clip quay tay — bấm ô để mở bảng tuỳ chọn.";
                 }
 
                 var themeCol = dgvDeepDiveInput.Columns["colAiShowcaseTheme"];
@@ -244,7 +236,7 @@ namespace tiktok_Omni
                     sceneSummaryCol.FillWeight = 22;
                     sceneSummaryCol.MinimumWidth = 108;
                     sceneSummaryCol.ToolTipText =
-                        "Trái: thêm clip · Phải: mở veo_clips · Di chuột vào ô xem số cảnh.";
+                        "Trái: thêm clip · Phải: mở clips_render · Di chuột vào ô xem số cảnh.";
                 }
 
                 var scriptCol = dgvDeepDiveInput.Columns["colAiShowcaseScript"];
@@ -252,10 +244,21 @@ namespace tiktok_Omni
                 {
                     scriptCol.HeaderText = "Kịch bản · Prompt";
                     scriptCol.ReadOnly = true;
-                    scriptCol.FillWeight = 28;
-                    scriptCol.MinimumWidth = 200;
+                    scriptCol.FillWeight = 22;
+                    scriptCol.MinimumWidth = 160;
                     scriptCol.ToolTipText =
-                        "Thoại (nháp theo ảnh hoặc đã «Tạo lời thoại») + prompt clip — bấm ô mở hub «Kịch bản · Prompt».";
+                        "Prompt clip Veo/Kling/Zoom — bấm ô mở hub «Kịch bản · Prompt». Thoại → cột «Lời thoại».";
+                }
+
+                var voiceoverCol = dgvDeepDiveInput.Columns["colAiShowcaseVoiceover"];
+                if (voiceoverCol != null)
+                {
+                    voiceoverCol.HeaderText = "Lời thoại";
+                    voiceoverCol.ReadOnly = true;
+                    voiceoverCol.FillWeight = 18;
+                    voiceoverCol.MinimumWidth = 148;
+                    voiceoverCol.ToolTipText =
+                        "Thoại từng cảnh — bấm ô mở bảng lời thoại và «Tạo lời thoại» (sau khi có clip).";
                 }
 
                 var promptCol = dgvDeepDiveInput.Columns["colAiShowcaseScenePrompt"];
@@ -787,7 +790,7 @@ namespace tiktok_Omni
 
                 Visible = false,
 
-                ToolTipText = "Tỉ lệ video xuất: 9:16 TikTok, 16:9 ngang, 1:1 vuông — chọn trước khi tạo clip/render."
+                ToolTipText = "Tỉ lệ video xuất: 9:16 TikTok, 16:9 ngang, 1:1 vuông, hoặc Tùy chỉnh WxH — chọn trước khi tạo clip/render."
 
             });
 
@@ -918,6 +921,32 @@ namespace tiktok_Omni
                 DefaultCellStyle =
                 {
                     ForeColor = Color.FromArgb(130, 175, 255),
+                    SelectionForeColor = Color.White
+                }
+
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+
+            {
+
+                Name = "colAiShowcaseVoiceover",
+
+                HeaderText = "Lời thoại",
+
+                DataPropertyName = nameof(ShowcaseVideoItem.ShowcaseVoiceoverLabel),
+
+                FillWeight = 16,
+
+                MinimumWidth = 132,
+
+                ReadOnly = true,
+
+                Visible = false,
+
+                DefaultCellStyle =
+                {
+                    ForeColor = Color.FromArgb(180, 150, 255),
                     SelectionForeColor = Color.White
                 }
 
@@ -1569,13 +1598,6 @@ namespace tiktok_Omni
                         Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value));
                     NotifyShowcaseDraftDirty();
                 }
-                else if (string.Equals(columnName, "colAiShowcaseOutputAspect", StringComparison.Ordinal))
-                {
-                    video.ShowcaseOutputAspectId = ShowcaseOutputAspectPresets.ResolveId(
-                        Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value),
-                        null);
-                    NotifyShowcaseDraftDirty();
-                }
 
                 SyncShowcaseVideoSettingsToScenes(video);
 
@@ -1624,6 +1646,7 @@ namespace tiktok_Omni
             if (string.Equals(columnName, "colAiProduct", StringComparison.Ordinal) && video != null)
             {
                 video.ProductName = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value) ?? string.Empty;
+                TryRestoreShowcaseVideoAfterProductRename(video);
             }
 
             if (IsShowcaseSettingsGridColumn(columnName) || (video != null && string.Equals(columnName, "colAiProduct", StringComparison.Ordinal)))
@@ -1706,9 +1729,21 @@ namespace tiktok_Omni
                 return;
             }
 
+            if (string.Equals(col.Name, "colAiShowcaseClipMode", StringComparison.Ordinal))
+            {
+                e.ToolTipText = ShowcaseContentDisplayHelper.FormatClipModeBrollGridToolTip(video);
+                return;
+            }
+
             if (string.Equals(col.Name, "colAiShowcaseScript", StringComparison.Ordinal))
             {
                 e.ToolTipText = ShowcaseContentDisplayHelper.FormatScriptPromptGridToolTip(video);
+                return;
+            }
+
+            if (string.Equals(col.Name, "colAiShowcaseVoiceover", StringComparison.Ordinal))
+            {
+                e.ToolTipText = ShowcaseContentDisplayHelper.FormatVoiceoverGridToolTip(video);
             }
         }
 
@@ -1800,6 +1835,31 @@ namespace tiktok_Omni
                     return;
                 }
 
+                if (col.Name == "colAiShowcaseVoiceover")
+                {
+                    var scenes = showcaseVideo.Scenes?.Where(s => s != null).ToList();
+                    e.Value = showcaseVideo.ShowcaseVoiceoverLabel
+                              ?? ShowcaseContentDisplayHelper.FormatVoiceoverGridLabel(showcaseVideo);
+                    e.CellStyle.WrapMode = DataGridViewTriState.True;
+                    if (ShowcaseVoiceoverHelper.HasClipAlignedVoiceover(showcaseVideo, scenes))
+                    {
+                        e.CellStyle.ForeColor = Color.FromArgb(120, 220, 160);
+                    }
+                    else if (ShowcaseVoiceoverHelper.HasCompleteVoiceover(showcaseVideo, scenes))
+                    {
+                        e.CellStyle.ForeColor = Color.FromArgb(255, 190, 120);
+                    }
+                    else if (ShowcaseVoiceoverHelper.CountVoicedScenes(scenes) > 0)
+                    {
+                        e.CellStyle.ForeColor = Color.FromArgb(180, 150, 255);
+                    }
+
+                    row.Cells[e.ColumnIndex].ToolTipText =
+                        ShowcaseContentDisplayHelper.FormatVoiceoverGridToolTip(showcaseVideo);
+                    e.FormattingApplied = true;
+                    return;
+                }
+
                 if (col.Name == "colAiShowcaseProductType")
                 {
                     e.Value = showcaseVideo.ShowcaseGeminiSetupGridLabel
@@ -1809,6 +1869,19 @@ namespace tiktok_Omni
                     e.CellStyle.WrapMode = DataGridViewTriState.True;
                     row.Cells[e.ColumnIndex].ToolTipText =
                         ShowcaseContentDisplayHelper.FormatProductTypeThemeGridToolTip(showcaseVideo);
+                    e.FormattingApplied = true;
+                    return;
+                }
+
+                if (col.Name == "colAiShowcaseClipMode")
+                {
+                    e.Value = showcaseVideo.ShowcaseClipModeGridLabel
+                              ?? ShowcaseContentDisplayHelper.FormatClipModeBrollGridLabel(showcaseVideo);
+                    e.CellStyle.ForeColor = Color.FromArgb(130, 210, 175);
+                    e.CellStyle.SelectionForeColor = Color.White;
+                    e.CellStyle.WrapMode = DataGridViewTriState.True;
+                    row.Cells[e.ColumnIndex].ToolTipText =
+                        ShowcaseContentDisplayHelper.FormatClipModeBrollGridToolTip(showcaseVideo);
                     e.FormattingApplied = true;
                     return;
                 }
@@ -1826,7 +1899,7 @@ namespace tiktok_Omni
                 {
                     e.Value = string.Empty;
                     row.Cells[e.ColumnIndex].ToolTipText =
-                        (showcaseVideo.SceneCountDisplay ?? "0 cảnh") + " — trái: thêm clip · phải: veo_clips";
+                        (showcaseVideo.SceneCountDisplay ?? "0 cảnh") + " — trái: thêm clip · phải: clips_render";
                     e.FormattingApplied = true;
                     return;
                 }

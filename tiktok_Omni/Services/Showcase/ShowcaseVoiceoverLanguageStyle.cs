@@ -12,6 +12,32 @@ namespace tiktok_Omni.Services.Showcase
             "- Câu ngắn, nhịp nhanh, dễ đọc TTS — như người miền Nam kể trải nghiệm thật.\r\n" +
             "- Không lạm dụng từ lóng quá trẻ — giữ dễ hiểu cho đa tuổi.\r\n";
 
+        /// <summary>
+        /// Quy tắc viết thoại tối ưu Edge TTS — dấu câu = nhịp thở, phẩy = nhấn mạnh, câu ngắn = ít bị tua nhanh khi render.
+        /// </summary>
+        public const string GeminiEdgeTtsWritingSection =
+            "EDGE TTS — VIẾT THOẠI TTS-FRIENDLY (BẮT BUỘC cho hook_text, voiceover mọi cảnh, cta_text):\r\n" +
+            "Mỗi voiceover là text gửi thẳng Edge TTS — dấu câu điều khiển nhịp thở & nhấn mạnh (KHÔNG dùng SSML, KHÔNG ghi chú [pause]).\r\n" +
+            "1) DẤU CÂU LÀ NHẠC CỤ:\r\n" +
+            "   - Dấu phẩy (,): thở ngắn giữa các ý — đặt chỗ người nói tự nhiên thở.\r\n" +
+            "   - Dấu chấm (.): kết thúc ý, dừng rõ — chia câu dài thành 2–3 câu ngắn, KHÔNG viết block dài không dấu.\r\n" +
+            "   - Ba chấm (...): dừng dài trước reveal/bất ngờ — vd. «Mà chất vải thì... mềm lắm nè.»\r\n" +
+            "   - Dấu hỏi (?): lên giọng cuối — dùng cho CTA dạng hỏi.\r\n" +
+            "   - Dấu chấm than (!): nhiệt tình vừa phải — tối đa 1 lần/video, tránh spam.\r\n" +
+            "2) NGẮT TỪ NHẤN MẠNH (micro-pause bằng phẩy):\r\n" +
+            "   - Chèn phẩy trước hoặc giữa cụm cần nhấn: tên SP, chất liệu, form/điểm đẹp, ưu đãi.\r\n" +
+            "   - Vd.: «Form áo này, cực kỳ tôn dáng.» / «Chất liệu, lụa cao cấp, mát tay.» / «Mức giá, hợp lý lắm nè.»\r\n" +
+            "   - Tối đa 2–3 phẩy/câu — đủ thở, không rối.\r\n" +
+            "3) NHỊP & ĐỘ DÀI (giọng tự nhiên ~110% — app có thể tua nhanh nếu thoại dài hơn clip):\r\n" +
+            "   - Mỗi cảnh ~5–8 giây đọc: 1–2 câu ngắn, tổng ~12–22 từ tiếng Việt (trừ cảnh silent).\r\n" +
+            "   - Viết như LỜI NÓI có nhịp thở — tránh văn viết sách/báo hay thuyết minh liền một mạch.\r\n" +
+            "   - Hook (cảnh 1): 1 câu, ≤12 từ, có ít nhất 1 dấu phẩy hoặc chấm/ba chấm để nhấn.\r\n" +
+            "VÍ DỤ SAI → ĐÚNG:\r\n" +
+            "   - SAI: «Cái áo này mặc lên rất tôn dáng và chất vải mềm mát»\r\n" +
+            "   - ĐÚNG: «Cái áo này, mặc lên, cực kỳ tôn dáng. Chất vải thì... mềm mát nè.»\r\n" +
+            "   - SAI: «Theo bạn mẫu nào hợp gu hơn comment cho mình biết»\r\n" +
+            "   - ĐÚNG: «Theo bạn, mẫu nào hợp gu hơn? Comment cho mình nha.»\r\n";
+
         /// <summary>Tuân thủ chính sách TikTok — tránh từ ngữ bị hạn chế phân phối.</summary>
         public const string GeminiTikTokComplianceSection =
             "TUÂN THỦ CHÍNH SÁCH CỘNG ĐỒNG TIKTOK (tránh bóp reach / vi phạm):\r\n" +

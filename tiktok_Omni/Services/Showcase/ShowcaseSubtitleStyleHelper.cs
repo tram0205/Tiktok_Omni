@@ -386,9 +386,7 @@ namespace tiktok_Omni.Services.Showcase
                 return;
             }
 
-            var canvas = ShowcaseOutputAspectPresets.Resolve(
-                render?.OutputAspectId,
-                fallbackSettings?.ShowcaseOutputAspectDefault);
+            var canvas = render?.ResolveOutputCanvas(fallbackSettings) ?? ShowcaseOutputAspectPresets.Vertical9x16;
             ApplyOutputCanvas(plan, canvas);
         }
 
@@ -399,9 +397,7 @@ namespace tiktok_Omni.Services.Showcase
                 return;
             }
 
-            var canvas = ShowcaseOutputAspectPresets.Resolve(
-                video.ShowcaseOutputAspectId,
-                fallbackSettings?.ShowcaseOutputAspectDefault);
+            var canvas = ShowcaseOutputAspectPresets.ResolveForVideo(video, fallbackSettings?.ShowcaseOutputAspectDefault);
             ApplyOutputCanvas(plan, canvas);
         }
 

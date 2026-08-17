@@ -17,7 +17,7 @@ namespace tiktok_Omni.Services
     public sealed class EdgeTtsService
     {
         private const int MaxChunkChars = 240;
-        private const int ConnectAttempts = 3;
+        private const int ConnectAttempts = 5;
 
         static EdgeTtsService()
         {
@@ -148,8 +148,9 @@ namespace tiktok_Omni.Services
                 catch (Exception ex) when (attempt < ConnectAttempts && IsTransientConnectError(ex))
                 {
                     lastError = ex;
-                    log?.Invoke("[TTS] Edge: lỗi mạng (lần " + attempt + "/" + ConnectAttempts + ") — thử lại…");
-                    await Task.Delay(800 * attempt, cancellationToken).ConfigureAwait(false);
+                    log?.Invoke("[TTS] Edge: lỗi mạng (lần " + attempt + "/" + ConnectAttempts + ") — thử lại sau "
+                                + (1200 * attempt) + "ms…");
+                    await Task.Delay(1200 * attempt, cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -162,6 +163,11 @@ namespace tiktok_Omni.Services
         {
             for (var cur = ex; cur != null; cur = cur.InnerException)
             {
+                if (cur is IOException || cur is System.Net.Sockets.SocketException)
+                {
+                    return true;
+                }
+
                 var msg = cur.Message ?? string.Empty;
                 if (cur is InvalidOperationException && msg.IndexOf("403", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
@@ -174,8 +180,14 @@ namespace tiktok_Omni.Services
                 }
 
                 if (msg.IndexOf("Unable to connect", StringComparison.OrdinalIgnoreCase) >= 0
+                    || msg.IndexOf("Unable to read data", StringComparison.OrdinalIgnoreCase) >= 0
+                    || msg.IndexOf("transport connection", StringComparison.OrdinalIgnoreCase) >= 0
+                    || msg.IndexOf("forcibly closed", StringComparison.OrdinalIgnoreCase) >= 0
+                    || msg.IndexOf("connection was closed", StringComparison.OrdinalIgnoreCase) >= 0
                     || msg.IndexOf("remote server", StringComparison.OrdinalIgnoreCase) >= 0
-                    || msg.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0)
+                    || msg.IndexOf("remote host", StringComparison.OrdinalIgnoreCase) >= 0
+                    || msg.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0
+                    || msg.IndexOf("reset by peer", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     return true;
                 }

@@ -23,6 +23,7 @@ namespace tiktok_Omni.Services.Showcase
         public string Theme { get; set; } = string.Empty;
         public string HookText { get; set; } = string.Empty;
         public string CtaText { get; set; } = string.Empty;
+
         public List<AiVideoGenInputItem> OrderedScenes { get; set; } = new List<AiVideoGenInputItem>();
 
         /// <summary>File SFX gợi ý cho CTA (tên trong thư viện) — rỗng nếu không có.</summary>
@@ -74,6 +75,7 @@ namespace tiktok_Omni.Services.Showcase
         public string theme { get; set; }
         public string hook_text { get; set; }
         public string cta_text { get; set; }
+        public string cta_broll_id { get; set; }
         public string cta_sfx_id { get; set; }
         public string cta_sfx_hint { get; set; }
         public string hook_sfx_id { get; set; }
@@ -105,6 +107,10 @@ namespace tiktok_Omni.Services.Showcase
     internal sealed class ShowcaseSceneDto
     {
         public int order { get; set; }
+
+        /// <summary>1-based — clip nào trong danh sách INPUT gửi kèm (folder clips_render).</summary>
+        public int clip_index { get; set; }
+
         public string role { get; set; }
         public string scene_title { get; set; }
         public string voiceover { get; set; }

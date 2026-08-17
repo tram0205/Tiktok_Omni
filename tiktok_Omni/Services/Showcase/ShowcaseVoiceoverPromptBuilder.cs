@@ -65,7 +65,8 @@ namespace tiktok_Omni.Services.Showcase
 
                 "Video CHỈ có đúng " + sceneCount + " clip phân cảnh — KHÔNG có clip hook hay CTA riêng. Mỗi clip = 1 slot thoại duy nhất.\r\n" +
 
-                "Clip gửi kèm đã nén 144p nhưng GIỮ NGUYÊN tốc độ và thời lượng thật — căn độ dài thoại theo thời gian clip.\r\n\r\n" +
+                "Clip gửi kèm đã nén 144p nhưng GIỮ NGUYÊN tốc độ và thời lượng thật — căn độ dài thoại theo thời gian clip.\r\n" +
+                "Danh sách clip có thể gồm cảnh AI (Zoom/Veo/Kling) và clip quay tay thật — viết thoại khớp đúng hình từng clip theo thứ tự timeline (cảnh 1→" + sceneCount + "), không phân biệt nguồn clip.\r\n\r\n" +
 
                 "Sản phẩm: \"" + (productName ?? string.Empty).Trim() + "\".\r\n" +
 
@@ -83,6 +84,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 "   - Cảnh 2 → " + sceneCount + ": viết thoại thân bài + CTA cuối sao cho KHI GHÉP LIỀN các câu lại vẫn đọc trôi một mạch (app sẽ TTS 1 lần duy nhất).\r\n" +
                 ShowcaseVoiceoverLanguageStyle.GeminiPromptSection +
+                ShowcaseVoiceoverLanguageStyle.GeminiEdgeTtsWritingSection +
                 ShowcaseVoiceoverLanguageStyle.GeminiTikTokComplianceSection +
                 ctaSection +
                 lastSceneCtaLine +
@@ -99,8 +101,102 @@ namespace tiktok_Omni.Services.Showcase
 
                 "CHỈ trả về JSON hợp lệ (không markdown):\r\n" +
 
-                "{\"theme\":\"...\",\"hook_text\":\"...\",\"cta_text\":\"...\",\"scenes\":[{\"order\":1,\"voiceover\":\"...\",\"silent\":false}]}";
+                "{\"theme\":\"...\",\"hook_text\":\"...\",\"cta_text\":\"...\",\"scenes\":[{\"order\":1,\"clip_index\":1,\"voiceover\":\"...\",\"silent\":false}]}";
 
+        }
+
+        /// <summary>Prompt folder-first: mọi clip trong clips_render, Gemini chọn thứ tự timeline.</summary>
+        internal static string BuildFromRenderFolder(
+            string productName,
+            string productTypeLabel,
+            string userTheme,
+            IReadOnlyList<ShowcaseRenderClipsTimelineHelper.ClipManifestEntry> manifest,
+            IReadOnlyList<double> sceneDurationsSeconds,
+            string userVideoFormatId = null)
+        {
+            var clipCount = manifest?.Count ?? 0;
+            if (clipCount == 0)
+            {
+                return Build(productName, userTheme, 1, sceneDurationsSeconds, userVideoFormatId);
+            }
+
+            var themeInstruction = string.IsNullOrWhiteSpace(userTheme)
+                ? "Chủ đề quảng cáo: tự suy từ clip — giữ góc TikTok affiliate tự nhiên, không quảng cáo quá lố."
+                : "Chủ đề quảng cáo BẮT BUỘC tôn trọng: \"" + userTheme.Trim() + "\".";
+
+            var typeLine = string.IsNullOrWhiteSpace(productTypeLabel)
+                ? string.Empty
+                : "Loại sản phẩm: " + productTypeLabel.Trim() + ".\r\n";
+
+            var manifestBlock = BuildClipManifestBlock(manifest, sceneDurationsSeconds);
+            var durationBlock = BuildSceneDurationBlock(clipCount, sceneDurationsSeconds);
+            var formatParts = ShowcaseVideoFormatPromptHelper.Resolve(userVideoFormatId);
+            var ctaSection = formatParts.CtaSectionOverride ?? ShowcaseVoiceoverLanguageStyle.GeminiCtaPromptSection;
+
+            var lastSceneCtaLine = formatParts.SuppressCta
+                ? "   - Cảnh cuối timeline: KHÔNG lồng CTA/lời mời liên hệ — kết bằng câu chốt tự nhiên.\r\n"
+                : "   - Cảnh cuối timeline: lồng CTA (câu hỏi / mời tương tác) vào cuối đoạn thân — KHÔNG tách thành câu hô hào riêng.\r\n";
+
+            var ctaTextInstruction = formatParts.SuppressCta
+                ? "3) cta_text: để chuỗi rỗng \"\" — video này KHÔNG có CTA/lời mời liên hệ.\r\n"
+                : "3) cta_text: cụm ngắn cho chữ overlay cuối video (≤18 từ) — PHẢI trích từ đuôi voiceover cảnh cuối timeline.\r\n";
+
+            return
+                "Bạn là biên kịch voiceover TikTok affiliate tiếng Việt.\r\n\r\n"
+                + "NHIỆM VỤ: Xem TẤT CẢ clip đính kèm (INPUT 1.." + clipCount + ") từ thư mục clips_render. "
+                + "Sắp xếp lại thứ tự clip cho thành MỘT video logic (hook → thân → CTA), "
+                + "clip quay tay có thể đặt đầu/giữa/cuối tùy nội dung. "
+                + "Viết lời thoại KHỚP đúng hình từng clip — không bịa chi tiết không có trong video.\r\n"
+                + "Mỗi clip INPUT chỉ dùng ĐÚNG 1 lần trong timeline. Clip gửi kèm đã nén 144p nhưng GIỮ NGUYÊN tốc độ và thời lượng thật.\r\n\r\n"
+                + "Sản phẩm: \"" + (productName ?? string.Empty).Trim() + "\".\r\n"
+                + typeLine
+                + themeInstruction + "\r\n\r\n"
+                + manifestBlock
+                + durationBlock
+                + "QUY TẮC JSON scenes[]:\r\n"
+                + "- Mỗi phần tử: order (1.." + clipCount + " thứ tự PHÁT trong video cuối), "
+                + "clip_index (1.." + clipCount + " clip INPUT nào dùng), voiceover, silent.\r\n"
+                + "- order có thể KHÁC clip_index — bạn được phép đổi thứ tự clip cho mạch kể chuyện tốt hơn.\r\n"
+                + "- Cảnh order=1: hook ngắn (1 câu gây tò mò) — TTS đọc riêng.\r\n"
+                + "- Cảnh order≥2: thân bài + CTA cuối đọc liền một mạch (TTS gom).\r\n"
+                + ShowcaseVoiceoverLanguageStyle.GeminiPromptSection
+                + ShowcaseVoiceoverLanguageStyle.GeminiEdgeTtsWritingSection
+                + ShowcaseVoiceoverLanguageStyle.GeminiTikTokComplianceSection
+                + ctaSection
+                + lastSceneCtaLine
+                + "   - Tối đa 1 cảnh silent. KHÔNG lặp ý giữa các cảnh.\r\n"
+                + "1) hook_text: metadata tóm hook (trùng ý cảnh order=1).\r\n"
+                + ctaTextInstruction
+                + "4) theme: tóm tắt 3-6 từ chủ đề thực tế của video.\r\n\r\n"
+                + "CHỈ trả về JSON hợp lệ (không markdown):\r\n"
+                + "{\"theme\":\"...\",\"hook_text\":\"...\",\"cta_text\":\"...\",\"scenes\":[{\"order\":1,\"clip_index\":2,\"voiceover\":\"...\",\"silent\":false}]}";
+        }
+
+        private static string BuildClipManifestBlock(
+            IReadOnlyList<ShowcaseRenderClipsTimelineHelper.ClipManifestEntry> manifest,
+            IReadOnlyList<double> sceneDurationsSeconds)
+        {
+            if (manifest == null || manifest.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var lines = new List<string>
+            {
+                "DANH SÁCH CLIP INPUT (thứ tự đính kèm — clip_index = số INPUT):"
+            };
+
+            for (var i = 0; i < manifest.Count; i++)
+            {
+                var entry = manifest[i];
+                var dur = sceneDurationsSeconds != null && i < sceneDurationsSeconds.Count
+                    ? " ~" + Math.Max(0.5d, sceneDurationsSeconds[i]).ToString("0.#", CultureInfo.InvariantCulture) + "s"
+                    : string.Empty;
+                var kind = entry.IsAppSceneFile ? "AI/app" : "quay tay";
+                lines.Add("- INPUT " + entry.InputIndexOneBased + ": «" + entry.FileName + "» (" + kind + ")" + dur);
+            }
+
+            return string.Join("\r\n", lines) + "\r\n\r\n";
         }
 
 

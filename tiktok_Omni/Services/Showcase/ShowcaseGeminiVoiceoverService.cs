@@ -1,381 +1,222 @@
 using System;
-
 using System.Collections.Generic;
-
 using System.IO;
-
 using System.Linq;
-
 using System.Text.RegularExpressions;
-
 using System.Threading;
-
 using System.Threading.Tasks;
-
 using Newtonsoft.Json;
 
-
-
 namespace tiktok_Omni.Services.Showcase
-
 {
-
-    /// <summary>Gemini xem clip phân cảnh (nén trước) → viết hook/voiceover/CTA khớp hình và chủ đề.</summary>
-
+    /// <summary>Gemini xem mọi clip trong clips_render → sắp timeline + viết thoại khớp từng clip.</summary>
     public sealed class ShowcaseGeminiVoiceoverService
-
     {
-
         private readonly GeminiService _gemini = new GeminiService();
 
-
-
-        public async Task<ShowcaseVoiceoverResult> GenerateAsync(
-
-            IList<AiVideoGenInputItem> orderedScenesWithClips,
-
+        /// <summary>
+        /// Quét folder clips_render, gửi toàn bộ clip cho Gemini, nhận timeline (có thể đổi thứ tự) → cập nhật storyboard.
+        /// </summary>
+        public async Task<ShowcaseVoiceoverResult> GenerateFromRenderFolderAsync(
+            ShowcaseVideoItem video,
+            string clipsDir,
             string userTheme,
-
+            string productTypePrompt,
+            string profileName,
             AppSettings settings,
-
             Action<string> logAction,
-
             CancellationToken cancellationToken,
-
             string userVideoFormatId = null)
-
         {
-
-            if (orderedScenesWithClips == null || !ShowcaseWorkflowConstants.HasEnoughScenes(orderedScenesWithClips.Count))
-
+            if (video == null)
             {
-
-                throw new InvalidOperationException("Showcase cần ít nhất 1 cảnh trên storyboard để sinh thoại.");
-
+                throw new ArgumentNullException(nameof(video));
             }
-
-
 
             if (string.IsNullOrWhiteSpace(settings?.AiApiKey))
-
             {
-
                 throw new InvalidOperationException("Cần cấu hình AI API Key trong tab Cài đặt.");
-
             }
 
-
-
-            var clipSceneIndexes = new List<int>();
-
-            for (var i = 0; i < orderedScenesWithClips.Count; i++)
-
+            var resolvedDir = (clipsDir ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(resolvedDir))
             {
-
-                if (ShowcaseClipStatusHelper.SceneHasClipFile(orderedScenesWithClips[i]))
-
+                resolvedDir = ShowcaseRenderClipsPaths.ResolveDirectory(
+                    video.ShowcaseSessionBaseDir,
+                    createIfMissing: false);
+            }
+            else
+            {
+                var sessionBase = Path.GetDirectoryName(resolvedDir);
+                if (!string.IsNullOrWhiteSpace(sessionBase))
                 {
-
-                    clipSceneIndexes.Add(i);
-
+                    ShowcaseRenderClipsPaths.ResolveDirectory(sessionBase, createIfMissing: false, migrateLegacy: true);
                 }
 
+                if (!Directory.Exists(resolvedDir))
+                {
+                    resolvedDir = ShowcaseRenderClipsPaths.ResolveDirectory(sessionBase, createIfMissing: false);
+                }
             }
 
-
-
-            if (clipSceneIndexes.Count == 0)
-
+            if (string.IsNullOrWhiteSpace(resolvedDir) || !Directory.Exists(resolvedDir))
             {
-
                 throw new InvalidOperationException(
-
-                    "Chưa có clip nào trong veo_clips — bỏ ít nhất scene_01.mp4 (…) rồi bấm «Tạo lời thoại» lại.");
-
+                    "Chưa có thư mục " + ShowcaseRenderClipsPaths.FolderName
+                    + " — bấm «Duyệt video vào bảng» để thêm clip trước.");
             }
 
-
+            var manifest = ShowcaseRenderClipsTimelineHelper.BuildManifest(resolvedDir);
+            if (manifest.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "Chưa có clip nào trong " + ShowcaseRenderClipsPaths.FolderName
+                    + " — thêm clip AI hoặc quay tay rồi bấm «Tạo lời thoại» lại.");
+            }
 
             FfmpegToolkitService.TryResolve(settings, out var toolkit, out _);
-
             var ffprobe = toolkit?.FfprobeExe ?? FfmpegToolkitService.GetBundledFfprobePath();
 
-
-
             var clipPaths = new List<string>();
-
             var sceneDurations = new List<double>();
-
-            foreach (var index in clipSceneIndexes)
-
+            foreach (var entry in manifest)
             {
-
-                var clipPath = orderedScenesWithClips[index].ClipPath;
-
-                clipPaths.Add(clipPath);
-
-                var duration = await ShowcaseMediaProbeHelper.ProbeDurationSecondsAsync(ffprobe, clipPath, cancellationToken)
-
+                clipPaths.Add(entry.ClipPath);
+                var duration = await ShowcaseMediaProbeHelper.ProbeDurationSecondsAsync(
+                        ffprobe,
+                        entry.ClipPath,
+                        cancellationToken)
                     .ConfigureAwait(false);
-
                 sceneDurations.Add(duration > 0 ? duration : ShowcaseSceneDurationHelper.DefaultClipSeconds);
-                orderedScenesWithClips[index].ShowcaseClipDurationSeconds =
-                    ShowcaseSceneDurationHelper.Clamp(sceneDurations[sceneDurations.Count - 1]);
-
             }
 
+            logAction?.Invoke("[Showcase] Gửi Gemini " + manifest.Count + " clip từ "
+                              + ShowcaseRenderClipsPaths.FolderName
+                              + " — có thể sắp lại thứ tự timeline cho hợp lý.");
 
-
-            if (clipSceneIndexes.Count < orderedScenesWithClips.Count)
-
-            {
-
-                logAction?.Invoke("[Showcase] Chỉ gửi Gemini " + clipSceneIndexes.Count + "/" + orderedScenesWithClips.Count
-
-                    + " cảnh có clip — cảnh thiếu clip giữ thoại nháp (ảnh) cho đến khi bổ sung clip.");
-
-            }
-
-
-
-            var productName = orderedScenesWithClips[0]?.ProductName ?? string.Empty;
-
-            var prompt = ShowcaseVoiceoverPromptBuilder.Build(
-
+            var productName = (video.ProductName ?? string.Empty).Trim();
+            var productTypeLabel = ShowcaseProductTypePresets.GetDisplayLabel(productTypePrompt);
+            var prompt = ShowcaseVoiceoverPromptBuilder.BuildFromRenderFolder(
                 productName,
-
+                productTypeLabel,
                 userTheme,
-
-                clipSceneIndexes.Count,
-
+                manifest,
                 sceneDurations,
-
                 userVideoFormatId);
 
-
-
-            logAction?.Invoke("[Showcase] Gemini đang nén " + clipPaths.Count + " clip (144p, giữ tốc độ) và phân tích thoại…");
+            logAction?.Invoke("[Showcase] Gemini đang nén " + clipPaths.Count
+                              + " clip (144p, giữ tốc độ) và dựng timeline thoại…");
 
             var raw = await _gemini.GenerateShowcaseVoiceoverFromClipsAsync(
-
-                prompt,
-
-                clipPaths,
-
-                settings.AiProvider,
-
-                settings.AiApiKey,
-
-                settings.AiModel,
-
-                logAction,
-
-                cancellationToken).ConfigureAwait(false);
-
-
+                    prompt,
+                    clipPaths,
+                    settings.AiProvider,
+                    settings.AiApiKey,
+                    settings.AiModel,
+                    logAction,
+                    cancellationToken)
+                .ConfigureAwait(false);
 
             var json = ExtractJsonObject(raw);
-
             var dto = JsonConvert.DeserializeObject<ShowcaseScriptDto>(json);
-
             if (dto?.scenes == null || dto.scenes.Count == 0)
-
             {
-
                 throw new InvalidOperationException("Gemini không trả về thoại Showcase hợp lệ.");
-
             }
 
+            var timelineScenes = ShowcaseRenderClipsTimelineHelper.ApplyTimelineToVideo(
+                video,
+                manifest,
+                dto.scenes,
+                profileName);
 
-
-            return MapToResult(dto, orderedScenesWithClips, clipSceneIndexes);
-
-        }
-
-
-
-        private static ShowcaseVoiceoverResult MapToResult(
-
-            ShowcaseScriptDto dto,
-
-            IList<AiVideoGenInputItem> allScenes,
-
-            IList<int> clipSceneIndexes)
-
-        {
-
-            var sceneDtoByOrder = dto.scenes
-
-                .Where(s => s != null && s.order > 0)
-
-                .GroupBy(s => s.order)
-
-                .ToDictionary(g => g.Key, g => g.First());
-
-
-
-            for (var k = 0; k < clipSceneIndexes.Count; k++)
-
+            if (timelineScenes.Count == 0)
             {
-
-                var sceneIndex = clipSceneIndexes[k];
-
-                if (sceneIndex < 0 || sceneIndex >= allScenes.Count)
-
-                {
-
-                    continue;
-
-                }
-
-
-
-                var scene = allScenes[sceneIndex];
-
-                if (scene == null)
-
-                {
-
-                    continue;
-
-                }
-
-
-
-                var dtoOrder = k + 1;
-
-                ShowcaseSceneDto sceneDto = null;
-
-                if (!sceneDtoByOrder.TryGetValue(dtoOrder, out sceneDto))
-
-                {
-
-                    sceneDto = dto.scenes.ElementAtOrDefault(k);
-
-                }
-
-
-
-                if (sceneDto == null)
-
-                {
-
-                    scene.ShowcaseSceneSilent = false;
-
-                    continue;
-
-                }
-
-
-
-                var silent = sceneDto.silent;
-
-                if (silent && !string.IsNullOrWhiteSpace(sceneDto.voiceover))
-
-                {
-
-                    silent = false;
-
-                }
-
-
-
-                scene.ShowcaseSceneSilent = silent;
-
-                scene.SceneVoiceover = silent ? string.Empty : (sceneDto.voiceover ?? string.Empty).Trim();
-
-                if (sceneDto.clip_duration_seconds > 0)
-                {
-                    scene.ShowcaseClipDurationSeconds = ShowcaseSceneDurationHelper.Clamp(sceneDto.clip_duration_seconds);
-                }
-                else
-                {
-                    scene.ShowcaseClipDurationSeconds = ShowcaseSceneDurationHelper.EstimateFromVoiceover(
-                        scene.SceneVoiceover,
-                        scene.ShowcaseSceneSilent);
-                }
-
+                throw new InvalidOperationException("Không ghép được timeline clip — thử «Tạo lời thoại» lại.");
             }
 
-            for (var i = 0; i < allScenes.Count; i++)
+            video.Scenes.Clear();
+            foreach (var scene in timelineScenes)
             {
-                var scene = allScenes[i];
-                if (scene == null || scene.ShowcaseClipDurationSeconds > 0)
-                {
-                    continue;
-                }
-
-                scene.ShowcaseClipDurationSeconds = ShowcaseSceneDurationHelper.EstimateFromVoiceover(
-                    scene.SceneVoiceover,
-                    scene.ShowcaseSceneSilent);
+                video.Scenes.Add(scene);
             }
 
-
-
-            ShowcaseVoiceoverHelper.EnforceMaxSilentScenes(allScenes);
-
-
+            ShowcaseSceneNamingHelper.ApplyConventionSceneTitles(video.Scenes);
+            ShowcaseVoiceoverHelper.EnforceMaxSilentScenes(video.Scenes);
 
             var ctaText = ShowcaseCtaDedupHelper.NormalizeScriptCta(
-                allScenes,
+                video.Scenes,
                 (dto.cta_text ?? string.Empty).Trim());
 
+            logAction?.Invoke("[Showcase] Timeline render: " + timelineScenes.Count + " cảnh — thứ tự theo Gemini.");
+
             return new ShowcaseVoiceoverResult
-
             {
-
                 Theme = (dto.theme ?? string.Empty).Trim(),
-
                 HookText = (dto.hook_text ?? string.Empty).Trim(),
-
                 CtaText = ctaText,
-
-                Scenes = allScenes.ToList()
-
+                Scenes = video.Scenes.ToList()
             };
-
         }
 
+        /// <summary>Giữ tương thích — ưu tiên gọi <see cref="GenerateFromRenderFolderAsync"/>.</summary>
+        public Task<ShowcaseVoiceoverResult> GenerateAsync(
+            IList<AiVideoGenInputItem> orderedScenesWithClips,
+            string userTheme,
+            AppSettings settings,
+            Action<string> logAction,
+            CancellationToken cancellationToken,
+            string userVideoFormatId = null)
+        {
+            var video = new ShowcaseVideoItem
+            {
+                ProductName = orderedScenesWithClips?.FirstOrDefault()?.ProductName ?? string.Empty
+            };
+            if (orderedScenesWithClips != null)
+            {
+                foreach (var scene in orderedScenesWithClips)
+                {
+                    if (scene != null)
+                    {
+                        video.Scenes.Add(scene);
+                    }
+                }
+            }
 
+            var clipsDir = orderedScenesWithClips?
+                .Select(s => s?.ClipPath)
+                .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p));
+            clipsDir = string.IsNullOrWhiteSpace(clipsDir) ? string.Empty : Path.GetDirectoryName(clipsDir);
+
+            return GenerateFromRenderFolderAsync(
+                video,
+                clipsDir,
+                userTheme,
+                string.Empty,
+                orderedScenesWithClips?.FirstOrDefault()?.ProfileName ?? string.Empty,
+                settings,
+                logAction,
+                cancellationToken,
+                userVideoFormatId);
+        }
 
         private static string ExtractJsonObject(string raw)
-
         {
-
             var text = (raw ?? string.Empty).Trim();
-
             if (text.StartsWith("```", StringComparison.Ordinal))
-
             {
-
                 text = Regex.Replace(text, "^```[a-zA-Z]*\\s*", string.Empty, RegexOptions.Multiline);
-
                 text = Regex.Replace(text, "```\\s*$", string.Empty, RegexOptions.Multiline).Trim();
-
             }
-
-
 
             var start = text.IndexOf('{');
-
             var end = text.LastIndexOf('}');
-
             if (start >= 0 && end > start)
-
             {
-
                 return text.Substring(start, end - start + 1);
-
             }
 
-
-
             throw new InvalidOperationException("Không tách được JSON object từ phản hồi Gemini.");
-
         }
-
     }
-
 }
-
-

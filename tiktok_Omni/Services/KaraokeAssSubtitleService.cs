@@ -33,7 +33,8 @@ namespace tiktok_Omni.Services
             string assFileName = null,
             IReadOnlyList<WordTimestamp> precomputedWordTimestamps = null,
             double? knownAudioDurationSeconds = null,
-            ShowcaseNarrationTimingManifest showcaseTiming = null)
+            ShowcaseNarrationTimingManifest showcaseTiming = null,
+            double appliedAudioTempo = 1d)
         {
             if (string.IsNullOrWhiteSpace(audioFilePath) || !File.Exists(audioFilePath))
             {
@@ -85,7 +86,8 @@ namespace tiktok_Omni.Services
                                 showcaseTiming,
                                 audioFilePath,
                                 ffmpegExecutablePath,
-                                cancellationToken)
+                                cancellationToken,
+                                appliedAudioTempo)
                             .ConfigureAwait(false);
                         if (timestamps != null && timestamps.Count > 0)
                         {
@@ -165,7 +167,8 @@ namespace tiktok_Omni.Services
             string showcaseCtaText = null,
             ShowcasePerVideoRenderSettings renderSettingsForStyle = null,
             AppSettings appSettings = null,
-            string assFileName = null)
+            string assFileName = null,
+            double appliedAudioTempo = 1d)
         {
             if (renderPlan == null || !renderPlan.HasAnyEnabled)
             {
@@ -210,11 +213,12 @@ namespace tiktok_Omni.Services
                                 showcaseTiming,
                                 audioFilePath,
                                 ffmpegExecutablePath,
-                                cancellationToken)
+                                cancellationToken,
+                                appliedAudioTempo)
                             .ConfigureAwait(false);
                         if (timestamps != null && timestamps.Count > 0)
                         {
-                            log?.Invoke("[Karaoke ASS] Showcase timing: " + timestamps.Count + " từ.");
+                            log?.Invoke("[Karaoke ASS] Showcase timing: " + timestamps.Count + " từ (khớp audio render).");
                         }
                     }
                 }
@@ -224,6 +228,14 @@ namespace tiktok_Omni.Services
                     log?.Invoke("[Karaoke ASS] Không có timestamp — bỏ qua phụ đề Showcase.");
                     return null;
                 }
+
+                timestamps = await ShowcaseKaraokeTimingHelper.NormalizeTimestampsToRenderAudioAsync(
+                        timestamps,
+                        audioFilePath,
+                        ffmpegExecutablePath,
+                        showcaseTiming,
+                        cancellationToken)
+                    .ConfigureAwait(false);
 
                 var dir = string.IsNullOrWhiteSpace(workDirectory)
                     ? Path.GetDirectoryName(audioFilePath) ?? "."
@@ -264,7 +276,16 @@ namespace tiktok_Omni.Services
                         return null;
                     }
 
-                    AssSubtitleGenerator.WriteShowcaseAssFile(assPath, timestamps, showcaseTiming, renderPlan);
+                    AssSubtitleGenerator.WriteShowcaseAssFile(
+                        assPath,
+                        timestamps,
+                        showcaseTiming,
+                        renderPlan,
+                        subtitleDisplayPlan,
+                        orderedScenes,
+                        showcaseCtaText,
+                        styleVideo,
+                        settings);
                 }
                 var layers = (renderPlan.HookEnabled ? "hook" : string.Empty) +
                              (renderPlan.HookEnabled && renderPlan.BodyEnabled ? "+" : string.Empty) +

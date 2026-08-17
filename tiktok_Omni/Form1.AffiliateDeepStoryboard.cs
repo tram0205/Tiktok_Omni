@@ -49,7 +49,7 @@ namespace tiktok_Omni
             lblAffiliateDeepStoryboard.BringToFront();
         }
 
-        private void RefreshAffiliateDeepStoryboard()
+        private void RefreshAffiliateDeepStoryboard(bool skipSourceImagePrune = false)
         {
             if (flpAffiliateDeepStoryboard == null)
             {
@@ -58,7 +58,7 @@ namespace tiktok_Omni
 
             var video = GetActiveShowcaseVideo();
             var prunedScenes = 0;
-            if (video != null && video.Scenes.Count > 0)
+            if (!skipSourceImagePrune && video != null && video.Scenes.Count > 0)
             {
                 prunedScenes = SyncShowcaseSourceImagesForVideo(video, refreshUi: false);
             }

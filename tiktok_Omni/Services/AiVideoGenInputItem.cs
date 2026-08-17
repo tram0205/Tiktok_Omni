@@ -70,6 +70,9 @@ namespace tiktok_Omni.Services
         /// <summary>Màu tô dòng — rỗng = theo mẫu / kiểu chữ.</summary>
         public string ShowcaseSubtitleDisplayHighlightColourAss { get; set; } = string.Empty;
 
+        /// <summary>Tab Phụ đề — tắt burn-in dòng này (mặc định false = vẫn hiện).</summary>
+        public bool ShowcaseSubtitleDisplayDisabled { get; set; }
+
         /// <summary>Showcase: đường dẫn đầy đủ file ảnh khi user chọn từ máy (trước khi copy vào source_images).</summary>
         public string ShowcaseLocalPickPath { get; set; } = string.Empty;
 
@@ -97,11 +100,17 @@ namespace tiktok_Omni.Services
         /// <summary>Showcase: tốc độ Ken Burns — slow, medium, fast (<see cref="ShowcaseZoomSpeedCatalog"/>).</summary>
         public string ShowcaseZoomSpeedId { get; set; } = string.Empty;
 
+        /// <summary>Showcase render: lấp khung khi clip ≠ tỉ lệ xuất — cắt (cover) hoặc blur nền.</summary>
+        public ShowcaseZoomAspectFitMode ShowcaseClipAspectFitMode { get; set; } = ShowcaseZoomAspectFitMode.Crop;
+
         /// <summary>Showcase: thời lượng clip gợi ý (giây) — Gemini / ước từ thoại; dùng cho clip Zoom FFmpeg.</summary>
         public double ShowcaseClipDurationSeconds { get; set; }
 
-        /// <summary>Showcase: đường dẫn clip Veo đã tạo tay, khớp phân cảnh này (vd. veo_clips\scene_02.mp4).</summary>
+        /// <summary>Showcase: đường dẫn clip phân cảnh — clip quay tay giữ tên gốc; Zoom app tạo scene_XX.mp4.</summary>
         public string ClipPath { get; set; } = string.Empty;
+
+        /// <summary>Showcase: cảnh là clip quay tay thật do người dùng chọn — đường dẫn file gốc trong thư viện CtaBRolls (chưa chuẩn hoá khung hình).</summary>
+        public string ShowcaseRealClipSourcePath { get; set; } = string.Empty;
 
         /// <summary>Showcase: chủ đề tuỳ chọn (Gemini tự suy nếu để trống) — dùng chung cả phiên, lưu trên dòng đầu lưới.</summary>
         public string ShowcaseTheme { get; set; } = string.Empty;

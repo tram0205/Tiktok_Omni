@@ -25,7 +25,7 @@ namespace tiktok_Omni
         private Label _lblThemeHeaderSubtitle;
         private string _selectedFormatId = ShowcaseVideoFormatPresets.DefaultId;
 
-        private const int VideoFormatStepHeight = 208;
+        private const int VideoFormatStepHeight = 232;
         private const int StepCaptionRowHeight = 36;
 
         private const int ListRowHeight = 48;
@@ -228,7 +228,7 @@ namespace tiktok_Omni
                 BackColor = Bg,
                 Margin = new Padding(0, 0, 0, 8)
             };
-            shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 32F));
+            shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 36F));
             shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
             shell.Controls.Add(new Label
@@ -286,10 +286,10 @@ namespace tiktok_Omni
                 ColumnCount = 1,
                 RowCount = 2,
                 BackColor = ShowcasePastelTheme.FormatFrame,
-                Padding = new Padding(14, 14, 14, 12)
+                Padding = new Padding(14, 10, 14, 10)
             };
-            inner.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
-            inner.RowStyles.Add(new RowStyle(SizeType.Absolute, 48F));
+            inner.RowStyles.Add(new RowStyle(SizeType.Absolute, 54F));
+            inner.RowStyles.Add(new RowStyle(SizeType.Absolute, 56F));
 
             var title = new Label
             {
@@ -297,10 +297,10 @@ namespace tiktok_Omni
                 Text = preset.DisplayLabel,
                 ForeColor = ShowcasePastelTheme.TextPrimary,
                 Font = new Font("Segoe UI", 11F, FontStyle.Bold),
-                TextAlign = ContentAlignment.TopLeft,
-                Padding = new Padding(0, 4, 0, 10),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(0, 0, 0, 2),
                 Margin = new Padding(0),
-                UseCompatibleTextRendering = true
+                UseCompatibleTextRendering = false
             };
 
             var hint = new Label
@@ -310,9 +310,9 @@ namespace tiktok_Omni
                 ForeColor = ShowcasePastelTheme.HintText,
                 Font = new Font("Segoe UI", 9.75F),
                 TextAlign = ContentAlignment.TopLeft,
-                Padding = new Padding(0, 2, 0, 0),
+                Padding = new Padding(0, 4, 0, 2),
                 Margin = new Padding(0),
-                UseCompatibleTextRendering = true
+                UseCompatibleTextRendering = false
             };
 
             inner.Controls.Add(title, 0, 0);

@@ -29,6 +29,9 @@ namespace tiktok_Omni.Services.Showcase
         public string DisplayLookPreset { get; set; } = string.Empty;
 
         public string DisplayPosition { get; set; } = string.Empty;
+
+        /// <summary>false = tắt burn-in dòng cảnh này khi render.</summary>
+        public bool DisplayDisabled { get; set; }
     }
 
     public sealed class ShowcaseSubtitleLineRenderOverride
@@ -73,6 +76,8 @@ namespace tiktok_Omni.Services.Showcase
 
         public string CtaAnimation { get; set; } = string.Empty;
 
+        public bool CtaDisabled { get; set; }
+
         public List<ShowcaseSceneSubtitleDisplayEntry> Scenes { get; set; } = new List<ShowcaseSceneSubtitleDisplayEntry>();
     }
 
@@ -92,7 +97,8 @@ namespace tiktok_Omni.Services.Showcase
                 Hook = video.ShowcaseSubtitleDisplayHook ?? string.Empty,
                 HookAnimation = video.ShowcaseSubtitleDisplayHookAnimation ?? string.Empty,
                 Cta = video.ShowcaseSubtitleDisplayCta ?? string.Empty,
-                CtaAnimation = video.ShowcaseSubtitleDisplayCtaAnimation ?? string.Empty
+                CtaAnimation = video.ShowcaseSubtitleDisplayCtaAnimation ?? string.Empty,
+                CtaDisabled = video.ShowcaseSubtitleDisplayCtaDisabled
             };
 
             var order = 0;
@@ -115,7 +121,8 @@ namespace tiktok_Omni.Services.Showcase
                     DisplayFontSize = scene.ShowcaseSubtitleDisplayFontSize,
                     DisplayFontFace = scene.ShowcaseSubtitleDisplayFontFace ?? string.Empty,
                     DisplayLookPreset = scene.ShowcaseSubtitleDisplayLookPreset ?? string.Empty,
-                    DisplayPosition = scene.ShowcaseSubtitleDisplayPosition ?? string.Empty
+                    DisplayPosition = scene.ShowcaseSubtitleDisplayPosition ?? string.Empty,
+                    DisplayDisabled = scene.ShowcaseSubtitleDisplayDisabled
                 });
             }
 
@@ -134,6 +141,7 @@ namespace tiktok_Omni.Services.Showcase
             video.ShowcaseSubtitleDisplayHookAnimation = (plan.HookAnimation ?? string.Empty).Trim();
             video.ShowcaseSubtitleDisplayCta = (plan.Cta ?? string.Empty).Trim();
             video.ShowcaseSubtitleDisplayCtaAnimation = (plan.CtaAnimation ?? string.Empty).Trim();
+            video.ShowcaseSubtitleDisplayCtaDisabled = plan.CtaDisabled;
 
             var byOrder = (plan.Scenes ?? new List<ShowcaseSceneSubtitleDisplayEntry>())
                 .Where(s => s != null && s.SceneOrder > 0)
@@ -144,6 +152,11 @@ namespace tiktok_Omni.Services.Showcase
                 .Where(s => s != null && s.SceneOrder > 0)
                 .GroupBy(s => s.SceneOrder)
                 .ToDictionary(g => g.Key, g => (g.First().DisplayAnimation ?? string.Empty).Trim());
+
+            var byDisabled = (plan.Scenes ?? new List<ShowcaseSceneSubtitleDisplayEntry>())
+                .Where(s => s != null && s.SceneOrder > 0)
+                .GroupBy(s => s.SceneOrder)
+                .ToDictionary(g => g.Key, g => g.First().DisplayDisabled);
 
             var order = 0;
             foreach (var scene in video.Scenes ?? Enumerable.Empty<AiVideoGenInputItem>())
@@ -160,6 +173,10 @@ namespace tiktok_Omni.Services.Showcase
                 scene.ShowcaseSubtitleDisplayAnimation = byAnim.TryGetValue(order, out var anim)
                     ? anim
                     : string.Empty;
+                if (byDisabled.TryGetValue(order, out var disabled))
+                {
+                    scene.ShowcaseSubtitleDisplayDisabled = disabled;
+                }
             }
         }
 
@@ -261,6 +278,98 @@ namespace tiktok_Omni.Services.Showcase
                 }
 
                 return snap;
+            }
+
+            public ShowcaseSpeechAudioInvalidationScope DetectInvalidationScope(ShowcaseVideoItem videoAfter)
+            {
+                if (videoAfter == null)
+                {
+                    return ShowcaseSpeechAudioInvalidationScope.All;
+                }
+
+                var after = Capture(videoAfter);
+                var scope = ShowcaseSpeechAudioInvalidationScope.None;
+
+                if (!SpeechLineEquals(Hook, after.Hook))
+                {
+                    scope |= ShowcaseSpeechAudioInvalidationScope.Hook;
+                }
+
+                if (!SpeechLineEquals(Cta, after.Cta))
+                {
+                    scope |= ShowcaseSpeechAudioInvalidationScope.Cta;
+                }
+
+                var beforeScenes = SceneVoiceovers ?? new List<string>();
+                var afterScenes = after.SceneVoiceovers ?? new List<string>();
+                var sceneCount = Math.Max(beforeScenes.Count, afterScenes.Count);
+                for (var i = 0; i < sceneCount; i++)
+                {
+                    var beforeLine = i < beforeScenes.Count ? beforeScenes[i] : string.Empty;
+                    var afterLine = i < afterScenes.Count ? afterScenes[i] : string.Empty;
+                    if (SpeechLineEquals(beforeLine, afterLine))
+                    {
+                        continue;
+                    }
+
+                    if (i == 0
+                        && (scope & ShowcaseSpeechAudioInvalidationScope.Hook) == 0
+                        && SpeechLineEquals(afterLine, after.Hook))
+                    {
+                        continue;
+                    }
+
+                    var lastIndex = sceneCount - 1;
+                    if (i == lastIndex
+                        && lastIndex > 0
+                        && (scope & ShowcaseSpeechAudioInvalidationScope.Cta) == 0
+                        && SpeechLineEquals(afterLine, after.Cta))
+                    {
+                        continue;
+                    }
+
+                    scope |= ShowcaseSpeechAudioInvalidationScope.Body;
+                    break;
+                }
+
+                if ((scope & ShowcaseSpeechAudioInvalidationScope.Cta) != 0)
+                {
+                    scope |= ShowcaseSpeechAudioInvalidationScope.Body;
+                }
+
+                if ((scope & ShowcaseSpeechAudioInvalidationScope.Hook) != 0)
+                {
+                    return ShowcaseSpeechAudioInvalidationScope.All;
+                }
+
+                return scope;
+            }
+
+            private static bool SpeechLineEquals(string left, string right)
+            {
+                return string.Equals(
+                    (left ?? string.Empty).Trim(),
+                    (right ?? string.Empty).Trim(),
+                    StringComparison.Ordinal);
+            }
+        }
+
+        /// <summary>Xóa chữ phụ đề burn-in tùy chỉnh — editor/render lấy theo thoại TTS hiện tại.</summary>
+        public static void ClearDisplayTextOverrides(ShowcaseVideoItem video)
+        {
+            if (video == null)
+            {
+                return;
+            }
+
+            video.ShowcaseSubtitleDisplayHook = string.Empty;
+            video.ShowcaseSubtitleDisplayCta = string.Empty;
+            foreach (var scene in video.Scenes ?? Enumerable.Empty<AiVideoGenInputItem>())
+            {
+                if (scene != null)
+                {
+                    scene.ShowcaseSubtitleDisplayVoiceover = string.Empty;
+                }
             }
         }
 
@@ -397,7 +506,7 @@ namespace tiktok_Omni.Services.Showcase
                 return new List<WordTimestamp>();
             }
 
-            if (plan == null || !PlanHasAnyOverride(plan))
+            if (plan == null || !NeedsBurnInSceneFiltering(plan, orderedScenes))
             {
                 return words.ToList();
             }
@@ -444,17 +553,46 @@ namespace tiktok_Omni.Services.Showcase
                 return true;
             }
 
+            if (plan.CtaDisabled)
+            {
+                return true;
+            }
+
             if (HasAnyLineAnimationOverride(plan))
             {
                 return true;
             }
 
-            return plan.Scenes != null &&
-                   plan.Scenes.Any(s => s != null && !string.IsNullOrWhiteSpace(s.DisplayVoiceover));
+            if (plan.Scenes != null &&
+                plan.Scenes.Any(s => s != null &&
+                    (!string.IsNullOrWhiteSpace(s.DisplayVoiceover) || s.DisplayDisabled)))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         public static bool NeedsPerLineAssProcessing(ShowcaseSubtitleDisplayPlan plan)
             => PlanHasAnyOverride(plan);
+
+        public static bool NeedsBurnInSceneFiltering(
+            ShowcaseSubtitleDisplayPlan plan,
+            IList<AiVideoGenInputItem> orderedScenes)
+        {
+            if (PlanHasAnyOverride(plan))
+            {
+                return true;
+            }
+
+            if (plan != null && plan.CtaDisabled)
+            {
+                return true;
+            }
+
+            return orderedScenes != null
+                   && orderedScenes.Any(s => s != null && s.ShowcaseSubtitleDisplayDisabled);
+        }
 
         private static string ResolveHookSpeechSourceFromScenes(IList<AiVideoGenInputItem> orderedScenes, string ctaText)
         {
@@ -479,6 +617,8 @@ namespace tiktok_Omni.Services.Showcase
             public string Display { get; set; }
 
             public string Animation { get; set; }
+
+            public bool Enabled { get; set; } = true;
 
             public ShowcaseSubtitleLineRenderOverride LineStyle { get; set; }
         }
@@ -506,6 +646,22 @@ namespace tiktok_Omni.Services.Showcase
 
             return plan.Scenes != null &&
                    plan.Scenes.Any(s => s != null && !string.IsNullOrWhiteSpace(s.DisplayAnimation));
+        }
+
+        public static List<WordTimestamp> SelectBodyWordsForBurnIn(
+            IReadOnlyList<WordTimestamp> bodyWords,
+            IList<AiVideoGenInputItem> orderedScenes,
+            string ctaText,
+            ShowcaseSubtitleDisplayPlan plan)
+        {
+            if (bodyWords == null || bodyWords.Count == 0 || orderedScenes == null || orderedScenes.Count == 0)
+            {
+                return new List<WordTimestamp>();
+            }
+
+            plan = plan ?? new ShowcaseSubtitleDisplayPlan();
+            var segments = BuildBodySegments(orderedScenes, ctaText, plan, FindFirstVoicedSceneIndex(orderedScenes));
+            return FilterBodySegments(bodyWords, segments);
         }
 
         public static List<ShowcaseDisplayLineWordSlice> SliceBodyWordsForLineEffects(
@@ -547,7 +703,8 @@ namespace tiktok_Omni.Services.Showcase
                     Source = source,
                     Display = string.IsNullOrWhiteSpace(displayOverride) ? source : displayOverride.Trim(),
                     Animation = GetPlanSceneAnimation(plan, i + 1),
-                    LineStyle = BuildLineStyleOverrideFromScene(scene)
+                    LineStyle = BuildLineStyleOverrideFromScene(scene),
+                    Enabled = !scene.ShowcaseSubtitleDisplayDisabled
                 });
             }
 
@@ -560,7 +717,8 @@ namespace tiktok_Omni.Services.Showcase
                 {
                     Source = cta,
                     Display = ctaDisplay,
-                    Animation = plan?.CtaAnimation ?? string.Empty
+                    Animation = plan?.CtaAnimation ?? string.Empty,
+                    Enabled = plan == null || !plan.CtaDisabled
                 });
             }
 
@@ -620,6 +778,12 @@ namespace tiktok_Omni.Services.Showcase
                 var segmentWordCount = Math.Min(sourceTokens.Count, Math.Max(0, bodyWords.Count - wordIndex));
                 if (segmentWordCount <= 0)
                 {
+                    continue;
+                }
+
+                if (!segment.Enabled)
+                {
+                    wordIndex += segmentWordCount;
                     continue;
                 }
 

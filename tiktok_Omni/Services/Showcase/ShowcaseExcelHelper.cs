@@ -180,7 +180,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 clipWs.Cell(row + 1, 1).Value =
 
-                    "Huong dan: Veo/Kling — copy prompt + anh sang cong cu I2V. Zoom — bam «Tao clip Zoom» trong app hoac tu tao. Dat ten clip dung cot «Ten file clip can dat», bo vao veo_clips, roi Render.";
+                    "Huong dan: Veo/Kling — copy prompt + anh sang cong cu I2V. Zoom — bam «Tao clip Zoom» trong app hoac tu tao. Dat ten clip dung cot «Ten file clip can dat», bo vao clips_render, roi Render.";
 
 
 

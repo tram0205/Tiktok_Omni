@@ -47,8 +47,14 @@ namespace tiktok_Omni.Services.Showcase
         /// <summary>Định dạng video (Quảng cáo SP / Kể chuyện / Tutorial / Không CTA) — gửi Gemini trước khi sinh kịch bản.</summary>
         public string ShowcaseVideoFormatId { get; set; } = ShowcaseVideoFormatPresets.DefaultId;
 
-        /// <summary>Khung video: 9x16 | 16x9 | 1x1 — cột lưới «Khung video».</summary>
+        /// <summary>Khung video: 9x16 | 16x9 | 1x1 | custom — cột lưới «Khung video».</summary>
         public string ShowcaseOutputAspectId { get; set; } = ShowcaseOutputAspectPresets.DefaultId;
+
+        /// <summary>Chiều rộng khi <see cref="ShowcaseOutputAspectId"/> = custom (mặc định 1080).</summary>
+        public int ShowcaseOutputAspectCustomWidth { get; set; } = ShowcaseOutputAspectPresets.DefaultCustomWidth;
+
+        /// <summary>Chiều cao khi <see cref="ShowcaseOutputAspectId"/> = custom (mặc định 1350).</summary>
+        public int ShowcaseOutputAspectCustomHeight { get; set; } = ShowcaseOutputAspectPresets.DefaultCustomHeight;
 
         public string ShowcaseHookText { get; set; } = string.Empty;
 
@@ -66,12 +72,24 @@ namespace tiktok_Omni.Services.Showcase
         /// <summary>Hiệu ứng CTA trên tab Chữ hiển thị.</summary>
         public string ShowcaseSubtitleDisplayCtaAnimation { get; set; } = string.Empty;
 
+        /// <summary>Tab Phụ đề — tắt burn-in dòng CTA (mặc định false = vẫn hiện).</summary>
+        public bool ShowcaseSubtitleDisplayCtaDisabled { get; set; }
+
         /// <summary>Fingerprint clip lúc «Tạo lời thoại» — 0 = chỉ có thoại nháp từ «Tạo kịch bản» (ảnh).</summary>
         public long ShowcaseVoiceoverClipFingerprint { get; set; }
+
+        /// <summary>Fingerprint đường dẫn clip (không gồm mtime) — phát hiện thay file cùng tên.</summary>
+        public long ShowcaseVoiceoverClipPathFingerprint { get; set; }
+
+        /// <summary>Thời lượng từng clip lúc «Tạo lời thoại» — dạng 1:3.45;2:5.1.</summary>
+        public string ShowcaseVoiceoverClipDurationSignature { get; set; } = string.Empty;
 
         public string ShowcaseScriptLabel { get; set; } = string.Empty;
 
         public string ShowcaseScenePromptLabel { get; set; } = string.Empty;
+
+        /// <summary>Nhãn cột «Lời thoại» — cập nhật qua <see cref="RefreshDisplayFields"/>.</summary>
+        public string ShowcaseVoiceoverLabel { get; set; } = string.Empty;
 
         /// <summary>Nhãn gộp loại SP + chủ đề trên lưới.</summary>
         public string ShowcaseGeminiSetupGridLabel { get; private set; } = string.Empty;
@@ -264,6 +282,15 @@ namespace tiktok_Omni.Services.Showcase
 
         public string ShowcaseCtaSfxGeminiHint { get; set; } = string.Empty;
 
+        /// <summary>Thư mục con trong kho clip quay tay (vd. hoc-sinh trong ao-dai) — dùng khi duyệt/thêm clip.</summary>
+        public string ShowcaseCtaBrollSubLibraryId { get; set; } = string.Empty;
+
+        /// <summary>Thư viện clip quay tay do người dùng chọn — rỗng = theo Loại SP (+ nhóm con).</summary>
+        public string ShowcaseCtaBrollLibraryId { get; set; } = string.Empty;
+
+        /// <summary>Nhãn cột «Công cụ Video» — cập nhật qua <see cref="RefreshDisplayFields"/>.</summary>
+        public string ShowcaseClipModeGridLabel { get; private set; } = string.Empty;
+
         public double ShowcaseTransitionSeconds { get; set; } = 0.6;
 
 
@@ -297,10 +324,10 @@ namespace tiktok_Omni.Services.Showcase
         /// <summary>Nhãn gộp trạng thái + output trên lưới — cập nhật qua <see cref="RefreshDisplayFields"/>.</summary>
         public string ShowcaseOutputGridLabel { get; private set; } = "Chờ";
 
-        /// <summary>Thư mục phiên Showcase (Processed/Showcase/.../) — giữ lại sau Gemini/Excel để Render tìm đúng veo_clips.</summary>
+        /// <summary>Thư mục phiên Showcase (Processed/Showcase/.../) — giữ lại sau Gemini/Excel để Render tìm đúng clips_render.</summary>
         public string ShowcaseSessionBaseDir { get; set; } = string.Empty;
 
-        /// <summary>Thư mục veo_clips của phiên — nơi đặt scene_01.mp4, scene_02.mp4, ...</summary>
+        /// <summary>Thư mục clips_render của phiên — nơi đặt scene_01.mp4, clip quay tay, ...</summary>
         public string ShowcaseClipsDir { get; set; } = string.Empty;
 
 
@@ -363,7 +390,19 @@ namespace tiktok_Omni.Services.Showcase
 
             {
 
-                SceneCountDisplay = "0 cảnh";
+                var clipsDir = ResolveClipsDirForDisplay();
+
+                var folderClips = !string.IsNullOrWhiteSpace(clipsDir) && Directory.Exists(clipsDir)
+
+                    ? ShowcaseSessionService.CountClipFilesOnDisk(clipsDir)
+
+                    : 0;
+
+                SceneCountDisplay = folderClips > 0
+
+                    ? folderClips + " clip · " + ShowcaseRenderClipsPaths.FolderName
+
+                    : "0 cảnh";
 
             }
 
@@ -371,7 +410,13 @@ namespace tiktok_Omni.Services.Showcase
 
             {
 
-                var clips = Scenes.Count(s => !string.IsNullOrWhiteSpace(s?.ClipPath) && File.Exists(s.ClipPath));
+                var clipsDir = ResolveClipsDirForDisplay();
+
+                var clips = !string.IsNullOrWhiteSpace(clipsDir)
+
+                    ? ShowcaseSessionService.CountValidClipsOnDisk(clipsDir, Scenes)
+
+                    : Scenes.Count(s => !string.IsNullOrWhiteSpace(s?.ClipPath) && File.Exists(s.ClipPath));
 
                 SceneCountDisplay = count + " cảnh · " + clips + "/" + count + " clip";
 
@@ -391,7 +436,21 @@ namespace tiktok_Omni.Services.Showcase
 
             ShowcaseGeminiSetupGridLabel = ShowcaseContentDisplayHelper.FormatProductTypeThemeGridLabel(this);
 
+            ShowcaseClipModeGridLabel = ShowcaseContentDisplayHelper.FormatClipModeBrollGridLabel(this);
+
             ShowcaseOutputGridLabel = ShowcaseContentDisplayHelper.FormatOutputGridLabel(this);
+        }
+
+        private string ResolveClipsDirForDisplay()
+        {
+            var clipsDir = (ShowcaseClipsDir ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(clipsDir))
+            {
+                return clipsDir;
+            }
+
+            var baseDir = (ShowcaseSessionBaseDir ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(baseDir) ? string.Empty : ShowcaseRenderClipsPaths.Combine(baseDir);
         }
 
 

@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using tiktok_Omni.Services;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Controls
 {
@@ -46,14 +48,26 @@ namespace tiktok_Omni.Controls
         /// <summary>Showcase sản phẩm: tạo clip Zoom Ken Burns trong app cho các cảnh gán công cụ zoom.</summary>
         Task GenerateShowcaseZoomClipsAsync();
 
-        /// <summary>Showcase sản phẩm: mở (và tạo nếu chưa có) thư mục veo_clips của phiên hiện tại.</summary>
+        /// <summary>Showcase sản phẩm: mở (và tạo nếu chưa có) thư mục clips_render của phiên hiện tại.</summary>
         Task OpenShowcaseClipsFolderAsync();
 
-        /// <summary>Showcase sản phẩm: quét lại thư mục veo_clips, cập nhật trạng thái ✓/✗ từng cảnh mà không cần Render.</summary>
+        /// <summary>Duyệt file video từ máy → copy vào clips_render/scene_XX của phiên video đang chọn.</summary>
+        Task ImportShowcaseClipsForVideoAsync(ShowcaseVideoItem video);
+
+        /// <summary>Copy clip từ thư viện quay tay vào clips_render/scene_XX (bảng chờ render).</summary>
+        Task AddShowcaseLibraryClipsToRenderQueueAsync(ShowcaseVideoItem video, IList<string> clipPaths);
+
+        /// <summary>Showcase sản phẩm: quét lại thư mục clips_render, cập nhật trạng thái ✓/✗ từng cảnh mà không cần Render.</summary>
         Task RefreshShowcaseClipStatusAsync();
 
         /// <summary>Showcase: Gemini xem clip phân cảnh (nén) → viết hook/voiceover/CTA khớp hình và chủ đề.</summary>
         Task GenerateShowcaseVoiceoverAsync();
+
+        /// <summary>Showcase: «Tạo lời thoại» cho đúng một dòng video (dialog cột Lời thoại).</summary>
+        Task GenerateShowcaseVoiceoverForVideoAsync(ShowcaseVideoItem video);
+
+        /// <summary>Ghi ngay draft Showcase — tránh mất thoại nếu đóng app trước auto-save.</summary>
+        void FlushShowcaseDraftToDisk();
 
         /// <summary>Showcase: tạo narration.mp3 (lần đầu) hoặc tạo lại từ kịch bản hiện tại.</summary>
         Task BuildShowcaseNarrationAsync();
@@ -75,6 +89,21 @@ namespace tiktok_Omni.Controls
 
         /// <summary>Showcase sản phẩm: mở thùng rác — khôi phục dòng đã xóa (giữ 24 giờ).</summary>
         void OpenShowcaseTrash();
+
+        /// <summary>Showcase: quét thư mục phiên trên đĩa → gắn clip/ảnh/kịch bản vào dòng lưới (khi draft mất liên kết).</summary>
+        void RestoreShowcaseVideosFromDisk();
+
+        /// <summary>Showcase: quản lý thư viện clip quay tay theo loại SP (Assets\CtaBRolls\).</summary>
+        void OpenShowcaseRealClipLibrary();
+
+        /// <summary>Showcase: quản lý nhạc nền dùng chung (Assets\Audio\Music).</summary>
+        void OpenShowcaseMusicLibrary();
+
+        /// <summary>Showcase: quản lý hiệu ứng âm thanh (Assets\Audio\Sfx).</summary>
+        void OpenShowcaseSfxLibrary();
+
+        /// <summary>Showcase: quản lý logo thương hiệu (Assets\Logos).</summary>
+        void OpenShowcaseLogoLibrary();
 
         /// <summary>Showcase: đẩy dòng đã render sang tab Đăng tự động (TikTok + Facebook + YouTube).</summary>
         void PushShowcaseSelectionToAutoPost();

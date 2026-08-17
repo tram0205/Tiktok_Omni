@@ -16,6 +16,9 @@ namespace tiktok_Omni.Services.Showcase
 
         public const string ToolKling = "kling";
 
+        /// <summary>Clip quay tay thật — người dùng tự chọn, KHÔNG generate bằng AI.</summary>
+        public const string ToolReal = "real";
+
 
 
         public const string KindFlatlay = "flatlay";
@@ -353,6 +356,11 @@ namespace tiktok_Omni.Services.Showcase
 
         {
 
+            if (string.Equals((clipTool ?? string.Empty).Trim().ToLowerInvariant(), ToolReal, StringComparison.Ordinal))
+            {
+                return "Quay tay";
+            }
+
             switch (NormalizeClipTool(clipTool))
 
             {
@@ -403,6 +411,13 @@ namespace tiktok_Omni.Services.Showcase
 
                 return string.Empty;
 
+            }
+
+
+
+            if (string.Equals((scene.ShowcaseClipTool ?? string.Empty).Trim().ToLowerInvariant(), ToolReal, StringComparison.Ordinal))
+            {
+                return string.Empty;
             }
 
 

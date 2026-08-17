@@ -405,7 +405,7 @@ namespace tiktok_Omni.Services
             {
                 throw new InvalidOperationException(
                     "Thiếu clip Veo cho cảnh: " + string.Join(", ", missingClips) +
-                    ". Hãy tạo clip (đúng tên scene_XX) và bỏ vào thư mục veo_clips trước khi Render.");
+                    ". Hãy gán clip vào từng cảnh (clips_render) trước khi Render.");
             }
 
             var sessionBaseEarly = ShowcaseNarrationCacheHelper.TryResolveSessionBaseFromClips(orderedScenes);
@@ -513,9 +513,8 @@ namespace tiktok_Omni.Services
                 var overviewWork = Path.Combine(sessionBase, "overview_clip_work");
                 Directory.CreateDirectory(overviewWork);
                 var ffmpegExe = ResolveFfmpegExecutablePath();
-                var outputCanvas = ShowcaseOutputAspectPresets.Resolve(
-                    renderSettings?.OutputAspectId,
-                    settings?.ShowcaseOutputAspectDefault);
+                var outputCanvas = renderSettings?.ResolveOutputCanvas(settings)
+                                   ?? ShowcaseOutputAspectPresets.Vertical9x16;
                 veoClipPaths = new List<string>();
                 for (var i = 0; i < orderedScenes.Count; i++)
                 {
@@ -560,14 +559,9 @@ namespace tiktok_Omni.Services
                 preRenderedAudioPath,
                 narrationPathForSubtitles).ConfigureAwait(false);
 
-            progressCallback?.Invoke(90, "CTA & hoàn tất");
-            var polished = await _affiliatePostProcessing.ApplyCtaTailWithTextOverlayAsync(
-                finalOutput,
-                ctaText,
-                settings,
-                sessionBase,
-                logAction,
-                cancellationToken).ConfigureAwait(false);
+            progressCallback?.Invoke(90, "Hoàn tất");
+            var polished = finalOutput;
+            logAction?.Invoke("[Showcase] Bỏ overlay chữ CTA cố định — dùng phụ đề burn-in.");
 
             progressCallback?.Invoke(100, "Xong");
             logAction?.Invoke("Showcase: lưu tại Processed/" + resolvedProfile + "/" + cat + "/ → " + polished);
@@ -704,10 +698,26 @@ namespace tiktok_Omni.Services
                 if (ttsOptions == null)
                 {
                     throw new InvalidOperationException(
-                        "Chưa có narration.mp3 hoặc kịch bản/giọng đổi — mở «Âm thanh», chọn giọng rồi bấm «🎙 Tạo audio».");
+                        "Chưa có narration.mp3 hoặc kịch bản/giọng đổi — mở «Âm thanh», chọn giọng rồi bấm «Tạo audio hook/thân».");
                 }
 
                 TtsAvailabilityHelper.ValidateEngine(settings, ttsOptions.Engine);
+
+                var previewsLookFresh = NarrationPreviewsMatchFingerprint(audioDir, narrationFingerprint);
+                if (!previewsLookFresh)
+                {
+                    if (ShowcaseNarrationCacheHelper.HasBodyPreviewFile(sessionBase))
+                    {
+                        logAction?.Invoke("[Showcase] Lời thoại thân đổi — xóa preview thân/narration cũ (giữ hook nếu có).");
+                        ShowcaseNarrationCacheHelper.ClearBodyPreview(sessionBase);
+                    }
+                    else
+                    {
+                        ShowcaseNarrationCacheHelper.ClearCachedNarration(sessionBase);
+                    }
+
+                    ShowcaseNarrationCacheHelper.ClearFullMixPreview(sessionBase);
+                }
 
                 if (ShowcaseNarrationCacheHelper.HasHookPreviewFile(sessionBase)
                     && (ShowcaseNarrationCacheHelper.HasBodyPreviewFile(sessionBase)
@@ -727,6 +737,13 @@ namespace tiktok_Omni.Services
                         logAction,
                         cancellationToken).ConfigureAwait(false);
                     ShowcaseNarrationCacheHelper.SaveFingerprint(audioDir, narrationFingerprint);
+                }
+                else if (ShowcaseNarrationCacheHelper.HasHookPreviewFile(sessionBase)
+                         && !ShowcaseNarrationCacheHelper.HasBodyPreviewFile(sessionBase)
+                         && HasShowcaseBodyVoiceAfterHook(orderedScenes))
+                {
+                    throw new InvalidOperationException(
+                        "Chưa có body_preview.mp3 — bấm «Tạo audio thân» (giữ hook_preview hiện có).");
                 }
                 else
                 {
@@ -782,13 +799,31 @@ namespace tiktok_Omni.Services
             var workDir = Path.Combine(audioDir, "full_mix_preview_work");
             Directory.CreateDirectory(workDir);
 
+            var speedPercent = renderSettings?.NarrationSpeedPercent ?? 0;
+            var narrForMix = await ShowcaseNarrationAvSyncHelper.PrepareSpeedAdjustedMp3Async(
+                    ffmpegExe,
+                    ffprobeExe,
+                    narrIn,
+                    workDir,
+                    speedPercent,
+                    "narration_speed_for_mix.mp3",
+                    logAction,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!string.Equals(narrForMix, narrIn, StringComparison.OrdinalIgnoreCase))
+            {
+                logAction?.Invoke("[Showcase] Tốc độ thoại: "
+                    + ShowcaseNarrationSpeedHelper.ResolveEffectiveSpeedPercent(speedPercent).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + "% — áp dụng trước khi ghép SFX/nhạc.");
+            }
+
             var clipPaths = orderedScenes?.Select(s => (s?.ClipPath ?? string.Empty).Trim()).ToList()
                             ?? new List<string>();
             var transitionSeconds = renderSettings?.TransitionSeconds > 0
                 ? ShowcaseTransitionHelper.ClampSeconds(renderSettings.TransitionSeconds)
                 : ResolveTransitionDuration(settings);
 
-            var narrationDuration = await GetAudioDurationSecondsAsync(narrIn, logAction, cancellationToken)
+            var narrationDuration = await GetAudioDurationSecondsAsync(narrForMix, logAction, cancellationToken)
                 .ConfigureAwait(false);
             var timelineDuration = narrationDuration > 0.05d ? narrationDuration : 30d;
 
@@ -796,7 +831,7 @@ namespace tiktok_Omni.Services
             var narrationWithSfx = await ShowcaseSfxMixHelper.MixIntoNarrationIfNeededAsync(
                     ffmpegExe,
                     ffprobeExe,
-                    narrIn,
+                    narrForMix,
                     orderedScenes,
                     clipPaths,
                     new ShowcaseSfxMixHelper.HookSfxOptions
@@ -951,6 +986,30 @@ namespace tiktok_Omni.Services
                 logAction,
                 cancellationToken,
                 showcaseTts).ConfigureAwait(false);
+        }
+
+        private static bool NarrationPreviewsMatchFingerprint(string audioDir, string fingerprint)
+        {
+            if (string.IsNullOrWhiteSpace(audioDir) || string.IsNullOrWhiteSpace(fingerprint))
+            {
+                return false;
+            }
+
+            var fingerprintPath = Path.Combine(audioDir, ShowcaseNarrationCacheHelper.FingerprintFileName);
+            if (!File.Exists(fingerprintPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                var saved = File.ReadAllText(fingerprintPath, TextFileEncoding.Utf8).Trim();
+                return string.Equals(saved, fingerprint.Trim(), StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static bool HasShowcaseBodyVoiceAfterHook(IList<AiVideoGenInputItem> orderedScenes)
@@ -2983,9 +3042,8 @@ namespace tiktok_Omni.Services
             var hookText = customHookText != null
                 ? (customHookText ?? string.Empty).Trim()
                 : ResolveOpeningHookText();
-            var outputCanvas = ShowcaseOutputAspectPresets.Resolve(
-                renderSettings?.OutputAspectId,
-                settings?.ShowcaseOutputAspectDefault);
+            var outputCanvas = renderSettings?.ResolveOutputCanvas(settings)
+                               ?? ShowcaseOutputAspectPresets.Vertical9x16;
             logAction?.Invoke("[Showcase] Khung video: " + outputCanvas.DisplayLabel + " ("
                 + outputCanvas.Width + "×" + outputCanvas.Height + ").");
             for (var i = 0; i < clipFiles.Count; i++)
@@ -2993,7 +3051,8 @@ namespace tiktok_Omni.Services
                 cancellationToken.ThrowIfCancellationRequested();
                 var normalized = Path.Combine(renderDir, $"normalized_{i + 1:D2}.mp4");
                 var sourceDuration = await GetVideoDurationSecondsAsync(clipFiles[i], logAction, cancellationToken).ConfigureAwait(false);
-                var kenBurnsVf = BuildKenBurnsFilter(sourceDuration, i, hookText, outputCanvas);
+                var fitMode = ResolveClipAspectFitMode(showcaseOrderedScenes, i);
+                var kenBurnsVf = BuildKenBurnsFilter(sourceDuration, i, hookText, outputCanvas, fitMode);
                 string audioEncodeArgs;
                 if (usePreRenderedAudio)
                 {
@@ -3040,6 +3099,7 @@ namespace tiktok_Omni.Services
             FfmpegToolkitService.TryResolve(settings, out var renderToolkit, out _);
             var ffprobeExe = renderToolkit?.FfprobeExe ?? FfmpegToolkitService.GetBundledFfprobePath();
             var narrationSpeedPercent = renderSettings?.NarrationSpeedPercent ?? 0;
+
             var avSync = await ShowcaseNarrationAvSyncHelper.ApplyAtRenderAsync(
                     ffmpegExe,
                     ffprobeExe,
@@ -3052,6 +3112,7 @@ namespace tiktok_Omni.Services
                     preserveAudioSource: usePreRenderedAudio)
                 .ConfigureAwait(false);
             stitched = avSync.VideoPath;
+
             var narrationForRender = avSync.NarrationPath;
             var stitchedDuration = avSync.TargetDurationSeconds > 0.01d
                 ? avSync.TargetDurationSeconds
@@ -3111,9 +3172,20 @@ namespace tiktok_Omni.Services
             var karaokeScript = showcaseTiming != null
                 ? ShowcaseKaraokeTimingHelper.ResolveDisplayScript(showcaseTiming, narrationScript)
                 : narrationScript;
-            var karaokeNarrationPath = !string.IsNullOrWhiteSpace(narrationPathForSubtitles)
-                ? narrationPathForSubtitles.Trim()
-                : narrationForRender;
+            var karaokeNarrationPath = narrationForRender;
+            if (avSync.AppliedAudioTempo > 1.03d)
+            {
+                logAction?.Invoke("[Showcase] Phụ đề: scale timeline theo audio tua x"
+                    + avSync.AppliedAudioTempo.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + ".");
+            }
+            else if (avSync.AppliedVideoTempo > 1.03d)
+            {
+                logAction?.Invoke("[Showcase] Phụ đề: video tua x"
+                    + avSync.AppliedVideoTempo.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    + " — timeline theo audio render (~"
+                    + avSync.TargetDurationSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                    + "s).");
+            }
             KaraokeAssSubtitleService.KaraokeAssBurnInResult karaokeBurnIn = null;
             try
             {
@@ -3136,7 +3208,9 @@ namespace tiktok_Omni.Services
                         showcaseOrderedScenes,
                         showcaseCtaText,
                         renderSettings,
-                        settings).ConfigureAwait(false);
+                        settings,
+                        assFileName: null,
+                        appliedAudioTempo: avSync.AppliedAudioTempo).ConfigureAwait(false);
                 }
                 else
                 {
@@ -3225,14 +3299,14 @@ namespace tiktok_Omni.Services
             var tagTitle = "tiktok_omni_" + Guid.NewGuid().ToString("N").Substring(0, 8);
             var tagComment = "rendered_" + DateTime.Now.ToString("yyyyMMddHHmmss");
             var safeVariant = fingerprintVariant ?? new RenderFingerprintVariant();
-            var audioArgs = "-c:a aac -b:a 320k -ar " + safeVariant.AudioSampleRate + " -movflags +faststart";
+            var audioArgs = "-c:a aac -b:a 320k -ar 48000 -movflags +faststart";
             var metaArgs = "-map_metadata -1 -metadata title=\"" + tagTitle + "\" -metadata comment=\"" + tagComment
                 + "\" -metadata artist=\"Omni Studio\" -metadata encoder=\"ffmpeg\"";
 
             if (copyVideoStream && string.IsNullOrWhiteSpace(captionVideoFilter))
             {
                 return "-y -i \"" + stitchedInput + "\" -i \"" + preRenderedAudioPath
-                    + "\" -map 0:v:0 -map 1:a:0 " + metaArgs + " -c:v copy " + audioArgs + " \"" + outputFile + "\"";
+                    + "\" -map 0:v:0 -map 1:a:0 " + metaArgs + " -c:v copy " + audioArgs + " -shortest \"" + outputFile + "\"";
             }
 
             var qualityArgs = "-c:v libx264 -preset veryfast -crf 20 -profile:v high -level 4.2 -pix_fmt yuv420p -movflags +faststart -c:a aac -b:a 320k" +
@@ -3303,7 +3377,7 @@ namespace tiktok_Omni.Services
         private RenderFingerprintVariant BuildRenderFingerprintVariant()
         {
             var fpsPool = new[] { "29.97", "30.00", "30.03", "29.98" };
-            var sampleRatePool = new[] { 44100, 48000, 47952 };
+            var sampleRatePool = new[] { 44100, 48000 };
             var colorPool = new[] { "0xF7EFE1", "0xEEF7FF", "0xFFF3E8", "0xF1F0FF" };
             return new RenderFingerprintVariant
             {
@@ -3455,11 +3529,24 @@ namespace tiktok_Omni.Services
             return rounded;
         }
 
+        private static ShowcaseZoomAspectFitMode ResolveClipAspectFitMode(
+            IList<AiVideoGenInputItem> showcaseOrderedScenes,
+            int clipIndex)
+        {
+            if (showcaseOrderedScenes == null || clipIndex < 0 || clipIndex >= showcaseOrderedScenes.Count)
+            {
+                return ShowcaseZoomAspectFitMode.Crop;
+            }
+
+            return showcaseOrderedScenes[clipIndex]?.ShowcaseClipAspectFitMode ?? ShowcaseZoomAspectFitMode.Crop;
+        }
+
         private static string BuildKenBurnsFilter(
             double clipDurationSeconds,
             int clipIndex,
             string openingHookText,
-            ShowcaseOutputAspectPreset canvas = null)
+            ShowcaseOutputAspectPreset canvas = null,
+            ShowcaseZoomAspectFitMode aspectFitMode = ShowcaseZoomAspectFitMode.Crop)
         {
             canvas = canvas ?? ShowcaseOutputAspectPresets.Vertical9x16;
             var w = canvas.Width;
@@ -3480,9 +3567,19 @@ namespace tiktok_Omni.Services
                 : $"{hText}*(1+{deltaText}*(1-min(1\\,max(0\\,t/{durationText}))))";
             var panX = $"(in_w-out_w)/2 + ((in_w-out_w)/8)*sin(2*PI*t/{durationText})";
             var panY = $"(in_h-out_h)/2 + ((in_h-out_h)/10)*cos(2*PI*t/{durationText})";
-            var baseFilter = ShowcaseOutputAspectPresets.FormatScaleIncrease(w, h) + "," +
-                   $"scale='{scaleExpr}':'{scaleExprY}':eval=frame," +
-                   $"crop={wText}:{hText}:x='{panX}':y='{panY}',setsar=1";
+            var kenBurns = $"scale='{scaleExpr}':'{scaleExprY}':eval=frame," +
+                           $"crop={wText}:{hText}:x='{panX}':y='{panY}',setsar=1";
+            string baseFilter;
+            if (aspectFitMode == ShowcaseZoomAspectFitMode.BlurPad)
+            {
+                baseFilter = ShowcaseZoomAspectFitHelper.BuildBlurPadCompositePrefix(w, h) + kenBurns;
+            }
+            else
+            {
+                baseFilter = ShowcaseOutputAspectPresets.FormatScaleIncrease(w, h) + "," +
+                             ShowcaseOutputAspectPresets.FormatScaleCrop(w, h) + ",setsar=1," +
+                             kenBurns;
+            }
 
             if (clipIndex != 0)
             {

@@ -11,7 +11,21 @@ namespace tiktok_Omni.Services.Showcase
 
     {
 
-        public static string Build(string productName, string userTheme, string userProductType, string userClipModeId, string userOutputAspectId, int sceneCount, AppSettings settings = null, string userVideoFormatId = null)
+        /// <summary>Ảnh (1-based) là clip quay tay thật đã có sẵn — thời lượng CỐ ĐỊNH, không cần Gemini generate clip.</summary>
+        public readonly struct RealClipHint
+        {
+            public RealClipHint(int imageIndex, double durationSeconds)
+            {
+                ImageIndex = imageIndex;
+                DurationSeconds = durationSeconds;
+            }
+
+            public int ImageIndex { get; }
+
+            public double DurationSeconds { get; }
+        }
+
+        public static string Build(string productName, string userTheme, string userProductType, string userClipModeId, string userOutputAspectId, int sceneCount, AppSettings settings = null, string userVideoFormatId = null, System.Collections.Generic.IReadOnlyList<RealClipHint> realClipHints = null, int customAspectWidth = 0, int customAspectHeight = 0)
 
         {
 
@@ -37,6 +51,8 @@ namespace tiktok_Omni.Services.Showcase
                 ? "2) Viết 1 câu HOOK mở đầu (tối đa 12 từ tiếng Việt, giật gân, giữ chân người xem trong 3 giây đầu). KHÔNG viết CTA — cảnh cuối kết bằng câu chốt tự nhiên (cta_text để trống \"\").\r\n"
                 : "2) Viết hook_text (câu mở metadata, tối đa 12 từ) và cta_text (CHỈ cụm ngắn cho chữ overlay — trích từ đuôi voiceover cảnh cuối, ≤18 từ, KHÔNG viết thêm câu thoại đọc riêng).\r\n";
 
+            var realClipSection = BuildRealClipSection(realClipHints);
+
             var themeInstruction = string.IsNullOrWhiteSpace(userTheme)
 
                 ? "Chủ đề quảng cáo KHÔNG được người dùng cung cấp — hãy TỰ suy luận góc QC phù hợp nhất từ ảnh."
@@ -53,7 +69,11 @@ namespace tiktok_Omni.Services.Showcase
 
             var clipModeInstruction = BuildClipModeInstruction(clipModeId);
 
-            var outputAspect = ShowcaseOutputAspectPresets.Resolve(userOutputAspectId, null);
+            var outputAspect = ShowcaseOutputAspectPresets.Resolve(
+                userOutputAspectId,
+                settings?.ShowcaseOutputAspectDefault,
+                customAspectWidth,
+                customAspectHeight);
             var aspectInstruction = outputAspect.GeminiHint;
 
             var zoomOnlyExtra = string.Equals(clipModeId, ShowcaseClipModePresets.ZoomOnlyId, StringComparison.Ordinal)
@@ -98,7 +118,7 @@ namespace tiktok_Omni.Services.Showcase
 
                 ctaStepInstruction +
 
-                "3) Với MỖI cảnh, viết: 'scene_title' (2-4 từ), 'voiceover' (tiếng Việt, 5-8 giây, KHÔNG lặp ý), 'clip_duration_seconds' (số giây clip gợi ý 3–12, căn độ dài đọc voiceover; cảnh silent ~4–5), 'image_kind' (flatlay hoặc on_model), 'clip_tool' (veo/zoom/kling), và prompt phù hợp công cụ. Cảnh cuối PHẢI lồng CTA tự nhiên ở cuối đoạn thoại — cta_text chỉ trích đoạn CTA đó, không viết câu thứ hai.\r\n" +
+                "3) Với MỖI cảnh, viết: 'scene_title' (2-4 từ mô tả cảnh — KHÔNG ghi scene_01, app tự gắn theo thứ tự video), 'voiceover' (tiếng Việt, 5-8 giây, KHÔNG lặp ý), 'clip_duration_seconds' (số giây clip gợi ý 3–12, căn độ dài đọc voiceover; cảnh silent ~4–5), 'image_kind' (flatlay hoặc on_model), 'clip_tool' (veo/zoom/kling), và prompt phù hợp công cụ. Cảnh cuối PHẢI lồng CTA tự nhiên ở cuối đoạn thoại — cta_text chỉ trích đoạn CTA đó, không viết câu thứ hai.\r\n" +
 
                 "4) BẮT BUỘC giữ NHẤT QUÁN lighting, color palette và camera style xuyên suốt toàn bộ prompt clip.\r\n" +
 
@@ -106,8 +126,10 @@ namespace tiktok_Omni.Services.Showcase
 
                 "6) 'role' chỉ nhận đúng 1 trong các giá trị: " + roleList + ".\r\n" +
                 ShowcaseVoiceoverLanguageStyle.GeminiPromptSection + "\r\n" +
+                ShowcaseVoiceoverLanguageStyle.GeminiEdgeTtsWritingSection + "\r\n" +
                 ShowcaseVoiceoverLanguageStyle.GeminiTikTokComplianceSection + "\r\n" +
                 ctaSection + "\r\n" +
+                (string.IsNullOrWhiteSpace(realClipSection) ? string.Empty : realClipSection + "\r\n") +
                 "7) HIỆU ỨNG ÂM THANH (SFX) — KHÔNG phải cảnh nào cũng cần:\r\n" +
                 "   - hook_text là lớp riêng; CẢNH 1 trên storyboard KHÔNG đồng nghĩa hook thoại (cảnh đầu có thể silent).\r\n" +
                 "   - Root 'hook_sfx_id' (+ hint): tối đa 1 tiếng MỞ video (impact/whoosh ~0s) — hoặc \"none\".\r\n" +
@@ -156,19 +178,20 @@ namespace tiktok_Omni.Services.Showcase
                 "   - KHÔNG dùng \"ON-MODEL fashion lookbook —\", \"FLATLAY\", hay copy nguyên veo_prompt.\r\n" +
                 "   - QUY TẮC VÀNG: CHỈ mô tả chi tiết TRANG PHỤC & BỐI CẢNH NHÌN THẤY TRONG ẢNH — KHÔNG bịa thêu/hoa văn/nút/cổ tay nếu ảnh trơn.\r\n" +
                 "   - CẤM: beautiful, young, gorgeous, sexy, celebrity, supermodel — và KHÔNG mô tả địa điểm/hành động KHÔNG có trong ảnh.\r\n" +
-                "   - CHUYỂN ĐỘNG VỪA PHẢI: video phải CÓ cảm giác động; tránh gió mạnh, đi xa, xoay, runway.\r\n" +
+                "   - CHUYỂN ĐỘNG TỰ NHIÊN (quan trọng): video phải SỐNG như quay TikTok thật — TRÁNH mô tả quá chậm/cứng (very slow, one slow step, subtle only, static) vì clip trông giả/AI.\r\n" +
+                "   - Vẫn AN TOÀN: tránh gió mạnh, đi xa khung, xoay 360, runway, nhảy — giữ pose & bối cảnh ảnh.\r\n" +
                 "   - CHUYỂN ĐỘNG KHỚP POSE trong ảnh:\r\n" +
-                "       • tay chạm tóc/cầm tà/pose phức tạp → subtle weight shift hoặc hand lowers naturally (KHÔNG one slow step mặc định)\r\n" +
-                "       • đứng thẳng, chân rõ, nền trống → one slow step forward được phép\r\n" +
-                "   - CÔNG THỨC = trang phục (theo ảnh) + same setting as the photo + COMBO 2-3 lớp NHẸ: cơ thể + vải + very slow cinematic push-in.\r\n" +
+                "       • tay chạm tóc/cầm tà/pose phức tạp → natural weight shift, hand lowers naturally, fabric follow-through (KHÔNG đứng tượng)\r\n" +
+                "       • đứng thẳng, chân rõ → natural relaxed step forward + panels sway in light breeze\r\n" +
+                "   - CÔNG THỨC = trang phục (theo ảnh) + same setting as the photo + COMBO 2-3 lớp: cơ thể tự nhiên + vải theo nhịp + smooth handheld-style camera drift / push-in.\r\n" +
                 "   - BẮT BUỘC: \"face and outfit stay consistent\".\r\n" +
                 "F) Áo dài trong kling_prompt (XEM ẢNH trước khi viết):\r\n" +
-                "   - Có thêu/hoa văn RÕ trong ảnh → nói \"embroidery\" / \"floral pattern\"; ảnh lụa TRƠN → \"smooth plain white silk panels\", CẤM nói embroidery.\r\n" +
+                "   - Có thêu/hoa văn RÕ trong ảnh → nói \"embroidery\" / \"floral pattern\"; ảnh lụa TRƠN → \"smooth plain fabric panels as shown\", CẤM nói embroidery.\r\n" +
                 "   - Preserve: \"preserve ao dai silhouette, mandarin collar and visible fabric details from the photo\" (KHÔNG ghi embroidery nếu ảnh không có).\r\n" +
-                "   - Mẫu áo TRƠN: \"White silk ao dai on model in the same bright columned hallway as the photo. Subtle weight shift forward, dress panels and hem sway gently in soft breeze, very slow cinematic push-in. Preserve ao dai silhouette, mandarin collar and smooth plain silk fabric. Face and outfit stay consistent. smooth cinematic motion, no text overlay\"\r\n" +
-                "   - Mẫu áo CÓ THÊU: \"Red silk ao dai with gold embroidery on collar on model in the same garden setting as the photo. One slow step forward, embroidered panels sway gently in soft breeze, very slow push-in on collar embroidery. Preserve ao dai shape and visible embroidery from the photo. Face and outfit stay consistent. smooth cinematic motion, no text overlay\"\r\n" +
+                "   - Mẫu áo TRƠN: \"Ao dai on model in the same setting as the photo. Fabric color and texture as shown. Natural relaxed step forward, dress panels and hem sway in light breeze, smooth handheld-style camera drift with gentle push-in. Preserve ao dai silhouette, mandarin collar and smooth plain fabric as shown. Face and outfit stay consistent. fluid natural motion, no text overlay\"\r\n" +
+                "   - Mẫu áo CÓ THÊU: \"Ao dai with visible gold embroidery on collar as shown in the photo, on model in the same garden setting as the photo. Natural step forward, embroidered panels sway in light breeze, smooth push-in on collar embroidery visible in the photo. Preserve ao dai shape and visible embroidery from the photo. Face and outfit stay consistent. fluid natural motion, no text overlay\"\r\n" +
 
-                "D) Mỗi veo_prompt/kling_prompt: 1-2 câu tiếng Anh; kết thúc \"smooth cinematic motion, no text overlay\" (KHÔNG ghi thời lượng giây — người dùng chọn 5s/7s/10s trên Veo/Kling).\r\n\r\n" +
+                "D) Mỗi veo_prompt/kling_prompt: 1-2 câu tiếng Anh; kết thúc veo: \"smooth cinematic motion, no text overlay\"; kling: \"fluid natural motion, no text overlay\" (KHÔNG ghi thời lượng giây — người dùng chọn 5s/7s/10s trên Veo/Kling).\r\n\r\n" +
 
                 "Trả về DUY NHẤT JSON object thuần túy (không markdown), đúng khung:\r\n" +
 
@@ -179,6 +202,28 @@ namespace tiktok_Omni.Services.Showcase
         }
 
 
+
+        private static string BuildRealClipSection(System.Collections.Generic.IReadOnlyList<RealClipHint> hints)
+        {
+            if (hints == null || hints.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("CẢNH LÀ CLIP QUAY TAY THẬT (đã quay sẵn, KHÔNG cần tạo clip bằng AI):");
+            sb.AppendLine("- Các ảnh sau là khung hình đại diện của clip quay tay thật, thời lượng CỐ ĐỊNH — viết voiceover vừa khớp độ dài này (không cần khớp tuyệt đối, chỉ ước lượng gần đúng):");
+            foreach (var hint in hints)
+            {
+                sb.Append("  • Ảnh số ").Append(hint.ImageIndex).Append(": ~")
+                    .Append(hint.DurationSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))
+                    .AppendLine(" giây");
+            }
+
+            sb.AppendLine("- Với các ảnh này: 'clip_duration_seconds' PHẢI đúng bằng số giây nêu trên; 'clip_tool' ghi \"veo\" (giá trị này sẽ bị bỏ qua); 'veo_prompt', 'kling_prompt', 'zoom_hint' để trống \"\".");
+            sb.AppendLine();
+            return sb.ToString();
+        }
 
         private static string BuildClipModeInstruction(string clipModeId)
 

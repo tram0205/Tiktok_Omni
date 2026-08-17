@@ -212,6 +212,7 @@ namespace tiktok_Omni
                     GetShowcaseVideoBuffer().Clear();
                     _activeShowcaseVideoId = null;
                     _showcaseSession = null;
+                    AllowShowcaseDraftShrinkOnNextSave();
                     NotifyShowcaseDraftDirty();
                     RefreshAffiliateDeepStoryboard();
                     Log("[Grid] Đã làm sạch lưới video Showcase.");

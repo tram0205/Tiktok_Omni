@@ -14,7 +14,7 @@ namespace tiktok_Omni
         private const string ColVoiceover = "colScriptVoiceover";
         private const int ScriptGridMinHeight = 480;
         private const int ScriptGridMinRowHeight = 64;
-        private const int ScriptVoiceCellPad = 18;
+        private const int ScriptVoiceCellPad = 24;
         private const string ScriptGridLayoutLock = "ScriptGridLayoutLock";
 
         private enum ScriptGridRowKind
@@ -165,7 +165,11 @@ namespace tiktok_Omni
                 return;
             }
 
-            _dgvScenes.BeginInvoke(new Action(() => ResizeScriptVoiceoverRows(_dgvScenes)));
+            _dgvScenes.BeginInvoke(new Action(() =>
+            {
+                FitScriptSceneColumnWidth(_dgvScenes);
+                ResizeScriptVoiceoverRows(_dgvScenes);
+            }));
         }
 
         private Control BuildThemeFieldPanel()
@@ -232,7 +236,8 @@ namespace tiktok_Omni
                     SelectionBackColor = Color.FromArgb(68, 118, 168),
                     SelectionForeColor = Color.White,
                     Font = new Font("Segoe UI", 10.5F),
-                    WrapMode = DataGridViewTriState.True
+                    WrapMode = DataGridViewTriState.True,
+                    Padding = new Padding(4, 6, 4, 6)
                 },
                 ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
                 {
@@ -356,19 +361,22 @@ namespace tiktok_Omni
 
             var measureWidth = Math.Max(48, colWidth - ScriptVoiceCellPad);
             var cell = row.Cells[colName];
-            var font = cell.InheritedStyle.Font ?? grid.DefaultCellStyle.Font ?? grid.Font;
+            var style = cell.InheritedStyle;
+            var font = style.Font ?? grid.DefaultCellStyle.Font ?? grid.Font;
             var text = cell.Value?.ToString() ?? string.Empty;
             if (text.Length == 0)
             {
                 return ScriptGridMinRowHeight;
             }
 
+            var pad = style.Padding;
+            measureWidth = Math.Max(48, colWidth - pad.Horizontal - ScriptVoiceCellPad);
             var size = TextRenderer.MeasureText(
                 text,
                 font,
                 new Size(measureWidth, int.MaxValue),
                 TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPadding);
-            return Math.Max(ScriptGridMinRowHeight, size.Height + ScriptVoiceCellPad);
+            return Math.Max(ScriptGridMinRowHeight, size.Height + pad.Vertical + ScriptVoiceCellPad);
         }
 
         /// <summary>Cột Phân cảnh co theo nội dung; Lời thoại chiếm phần còn lại.</summary>
@@ -463,18 +471,18 @@ namespace tiktok_Omni
 
             if (voice.Length > 0)
             {
-                sceneName = title.Length > 0 ? title : "Cảnh " + (index + 1);
+                sceneName = ShowcaseSceneNamingHelper.FormatDisplayLabel(scene, index);
                 return;
             }
 
             if (title.Length > 0)
             {
                 voice = title;
-                sceneName = role.Length > 0 ? role : "Cảnh " + (index + 1);
+                sceneName = ShowcaseSceneNamingHelper.FormatDisplayLabel(scene, index);
                 return;
             }
 
-            sceneName = "Cảnh " + (index + 1);
+            sceneName = ShowcaseSceneNamingHelper.FormatDisplayLabel(scene, index);
         }
 
         private bool ValidateAndSave()
@@ -514,6 +522,7 @@ namespace tiktok_Omni
             }
 
             _video.ApplySettingsToScenes();
+            ShowcaseVoiceoverHelper.PersistHookCtaIntoSceneVoiceovers(_video, _video.Scenes);
             ShowcaseVoiceoverHelper.SyncSilentFlagsFromVoiceover(_video.Scenes);
             ShowcaseSubtitleDisplayHelper.SyncDisplayTextFromSpeechEdits(_video, _speechBeforeEdit);
             ShowcaseContentDisplayHelper.RefreshContentLabels(_video);

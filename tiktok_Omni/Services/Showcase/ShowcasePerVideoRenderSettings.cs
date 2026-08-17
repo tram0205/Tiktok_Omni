@@ -90,6 +90,17 @@ namespace tiktok_Omni.Services.Showcase
 
         public string OutputAspectId { get; set; } = ShowcaseOutputAspectPresets.DefaultId;
 
+        public int OutputAspectCustomWidth { get; set; } = ShowcaseOutputAspectPresets.DefaultCustomWidth;
+
+        public int OutputAspectCustomHeight { get; set; } = ShowcaseOutputAspectPresets.DefaultCustomHeight;
+
+        public ShowcaseOutputAspectPreset ResolveOutputCanvas(AppSettings fallbackSettings = null) =>
+            ShowcaseOutputAspectPresets.Resolve(
+                OutputAspectId,
+                fallbackSettings?.ShowcaseOutputAspectDefault,
+                OutputAspectCustomWidth,
+                OutputAspectCustomHeight);
+
         public ShowcaseSubtitleDisplayPlan SubtitleDisplay { get; set; }
 
         public bool SfxMasterEnabled { get; set; } = true;
@@ -185,6 +196,10 @@ namespace tiktok_Omni.Services.Showcase
                 OutputAspectId = ShowcaseOutputAspectPresets.ResolveId(
                     video.ShowcaseOutputAspectId,
                     appSettings?.ShowcaseOutputAspectDefault),
+                OutputAspectCustomWidth = ShowcaseOutputAspectPresets.NormalizeCustomWidth(
+                    video.ShowcaseOutputAspectCustomWidth),
+                OutputAspectCustomHeight = ShowcaseOutputAspectPresets.NormalizeCustomHeight(
+                    video.ShowcaseOutputAspectCustomHeight),
                 SubtitleDisplay = ShowcaseSubtitleDisplayHelper.FromVideo(video),
                 SfxMasterEnabled = video.ShowcaseSfxMasterEnabled,
                 CtaSfxFile = video.ShowcaseCtaSfxFile ?? string.Empty,
@@ -216,7 +231,7 @@ namespace tiktok_Omni.Services.Showcase
                 BrandLogoOpacityPercent = ShowcaseBrandOverlayHelper.ClampOpacityPercent(
                     video.ShowcaseBrandLogoOpacityPercent > 0
                         ? video.ShowcaseBrandLogoOpacityPercent
-                        : ShowcaseBrandOverlayHelper.DefaultOpacityPercent)
+                        : ShowcaseBrandOverlayHelper.DefaultOpacityPercent),
             };
         }
 

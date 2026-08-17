@@ -1087,6 +1087,7 @@ namespace tiktok_Omni
                                 subtitle,
                                 tag.SourceSpeech);
                             _video.ShowcaseSubtitleDisplayCtaAnimation = anim;
+                            _video.ShowcaseSubtitleDisplayCtaDisabled = !ReadBoolCell(row.Cells["colStyleEnabled"]);
                         }
                         else
                         {
@@ -1096,7 +1097,7 @@ namespace tiktok_Omni
                             tag.Scene.ShowcaseSubtitleDisplayAnimation = anim;
                         }
 
-                        SaveSceneRowStyleOverrides(row, tag.Scene);
+                        SaveSceneRowStyleOverrides(row, tag.Scene, saveBurnInDisabled: !tag.IsFinalCtaScene);
                         break;
                 }
             }

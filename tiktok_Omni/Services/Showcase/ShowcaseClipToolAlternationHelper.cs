@@ -55,6 +55,12 @@ namespace tiktok_Omni.Services.Showcase
             for (var i = 0; i < scenes.Count; i++)
             {
                 var mapped = scenes[i];
+                if (string.Equals(mapped.ClipTool, ShowcaseClipToolHelper.ToolReal, StringComparison.Ordinal))
+                {
+                    previousFlexibleTool = null;
+                    continue;
+                }
+
                 if (!TryGetFlexiblePair(clipModeId, mapped.ImageKind, out var motionTool, out var zoomTool))
                 {
                     previousFlexibleTool = ShowcaseClipToolHelper.NormalizeClipTool(mapped.ClipTool);
