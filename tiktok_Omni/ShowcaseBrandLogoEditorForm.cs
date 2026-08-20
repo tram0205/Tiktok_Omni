@@ -9,7 +9,12 @@ namespace tiktok_Omni
 {
     internal sealed class ShowcaseBrandLogoEditorForm : Form
     {
-        private const int DialogClientWidth = 1020;
+        private const int DialogClientWidth = 1280;
+        private const int SettingsColumnWidth = 760;
+        private const int PreviewColumnWidth = PreviewFrameWidth + 32;
+        private const int ColumnGap = 24;
+        private const int PreviewFrameWidth = 300;
+        private const int PreviewFrameHeight = 420;
         private const int LabelColumnWidth = 198;
         private const int OuterPaddingH = 18;
         private const int OuterPaddingTop = 18;
@@ -34,7 +39,12 @@ namespace tiktok_Omni
         private NumericUpDown _numOpacity;
         private Label _lblLibraryDir;
         private Label _lblLibraryHint;
+        private Label _lblPreviewHint;
+        private PictureBox _picPreview;
+        private Button _btnRefreshPreview;
         private TableLayoutPanel _tbl;
+        private TableLayoutPanel _root;
+        private Control _previewPanel;
 
         public ShowcaseBrandLogoEditorForm(ShowcaseVideoItem video, AppSettings settings)
         {
@@ -49,7 +59,7 @@ namespace tiktok_Omni
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            AutoScroll = false;
+            AutoScroll = true;
             AutoScaleMode = AutoScaleMode.None;
             BackColor = Color.FromArgb(31, 34, 42);
             ForeColor = Color.Gainsboro;
@@ -77,17 +87,17 @@ namespace tiktok_Omni
 
             _tbl = new TableLayoutPanel
             {
-                Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 2,
                 RowCount = 7,
                 BackColor = BackColor,
-                Width = DialogClientWidth - Padding.Horizontal
+                Dock = DockStyle.Top,
+                Width = SettingsColumnWidth
             };
             _tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LabelColumnWidth));
             _tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            _tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 88F));
+            _tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 168F));
             _tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 118F));
             _tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, 108F));
@@ -110,6 +120,7 @@ namespace tiktok_Omni
             {
                 Text = "Chèn logo lên video",
                 AutoSize = true,
+                MaximumSize = new Size(720, 0),
                 ForeColor = Color.WhiteSmoke,
                 Font = new Font("Segoe UI", 10.5F)
             };
@@ -129,10 +140,31 @@ namespace tiktok_Omni
                 Font = new Font("Segoe UI", 9.5F),
                 Margin = new Padding(0, 0, 12, 0)
             };
+            _lblPreviewHint = new Label
+            {
+                AutoSize = false,
+                Height = 44,
+                ForeColor = Color.FromArgb(130, 138, 152),
+                Font = new Font("Segoe UI", 9.5F),
+                Margin = new Padding(0, 0, 0, 8),
+                Text = "Khung 9:16 · cập nhật theo thiết lập hiện tại"
+            };
+            _picPreview = new PictureBox
+            {
+                BackColor = Color.FromArgb(18, 24, 38),
+                BorderStyle = BorderStyle.FixedSingle,
+                Height = PreviewFrameHeight,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Width = PreviewFrameWidth
+            };
+            _btnRefreshPreview = CreateInlineButton("Xem thử");
+            _btnRefreshPreview.Width = PreviewFrameWidth;
+            _btnRefreshPreview.Click += (_, __) => UpdateVisualPreview();
 
             _txtFile = new TextBox
             {
                 Height = ControlHeight,
+                MinimumSize = new Size(240, ControlHeight),
                 ReadOnly = true,
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.WhiteSmoke,
@@ -148,6 +180,7 @@ namespace tiktok_Omni
                 Height = ControlHeight,
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.WhiteSmoke,
+                FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10F)
             };
             _cbPosition.Items.AddRange(new object[]
@@ -184,6 +217,23 @@ namespace tiktok_Omni
             _tbl.Controls.Add(MkLbl("Độ mờ (%)"), 0, 6);
             _tbl.Controls.Add(CreateFieldHost(CreateOpacityRow()), 1, 6);
 
+            _root = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                Dock = DockStyle.Top,
+                RowCount = 1,
+                BackColor = BackColor,
+                Width = SettingsColumnWidth + ColumnGap + PreviewColumnWidth
+            };
+            _root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SettingsColumnWidth));
+            _root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, PreviewColumnWidth));
+            _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _previewPanel = CreatePreviewPanel();
+            _root.Controls.Add(_tbl, 0, 0);
+            _root.Controls.Add(_previewPanel, 1, 0);
+
             var btnBar = new Panel
             {
                 Dock = DockStyle.Bottom,
@@ -204,33 +254,82 @@ namespace tiktok_Omni
             flpFooter.Controls.Add(btnOk);
             btnBar.Controls.Add(flpFooter);
 
-            Controls.Add(_tbl);
+            Controls.Add(_root);
             Controls.Add(btnBar);
 
             var tips = new ToolTip { AutoPopDelay = 8000, InitialDelay = 400, ReshowDelay = 200, ShowAlways = true };
             tips.SetToolTip(btnOpenLibrary, "Mở thư mục");
 
             Load += (_, __) => ApplyLayoutMetrics();
+            FormClosed += (_, __) =>
+            {
+                var image = _picPreview.Image;
+                _picPreview.Image = null;
+                image?.Dispose();
+            };
             btnOk.Click += (_, __) => SaveToVideo();
+        }
+
+        private Control CreatePreviewPanel()
+        {
+            var wrap = new Panel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = BackColor,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(ColumnGap, 0, 0, 0),
+                Width = PreviewColumnWidth
+            };
+
+            var title = new Label
+            {
+                AutoSize = true,
+                Font = new Font("Segoe UI Semibold", 10.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(220, 230, 245),
+                Margin = new Padding(0, 0, 0, 6),
+                Text = "Xem thử logo"
+            };
+
+            var stack = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                BackColor = BackColor,
+                Width = PreviewColumnWidth,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
+            };
+            stack.Controls.Add(title);
+            stack.Controls.Add(_lblPreviewHint);
+            _lblPreviewHint.Width = PreviewFrameWidth;
+            stack.Controls.Add(_picPreview);
+            stack.Controls.Add(_btnRefreshPreview);
+            wrap.Controls.Add(stack);
+            return wrap;
         }
 
         private void SyncDialogBounds()
         {
-            var innerW = Math.Max(320, DialogClientWidth - Padding.Horizontal);
-            _tbl.Width = innerW;
-            var tableHeight = _tbl.GetPreferredSize(new Size(innerW, 0)).Height;
-            ClientSize = new Size(DialogClientWidth, Padding.Vertical + tableHeight + FooterBarHeight);
+            var innerW = SettingsColumnWidth + ColumnGap + PreviewColumnWidth;
+            _root.Width = innerW;
+            var settingsHeight = _tbl.GetPreferredSize(new Size(SettingsColumnWidth, 0)).Height;
+            var previewHeight = _previewPanel.GetPreferredSize(new Size(PreviewColumnWidth, 0)).Height;
+            var contentHeight = Math.Max(settingsHeight, previewHeight);
+            ClientSize = new Size(DialogClientWidth, Padding.Vertical + contentHeight + FooterBarHeight);
         }
 
         private void ApplyLayoutMetrics()
         {
-            var w = ClientSize.Width - Padding.Horizontal;
-            var fieldWidth = Math.Max(320, w - LabelColumnWidth - 24);
-            var compactWidth = GetCompactFieldWidth(w);
-            var fileWidth = Math.Max(compactWidth * 2, compactWidth);
+            var fieldWidth = Math.Max(320, SettingsColumnWidth - LabelColumnWidth - 24);
+            var compactWidth = GetCompactFieldWidth(SettingsColumnWidth);
+            var fileWidth = Math.Max(280, fieldWidth - InlineButtonWidth - 16);
 
-            _lblLibraryDir.MaximumSize = new Size(Math.Max(180, fieldWidth - InlineIconButtonWidth - 16), 0);
+            _tbl.Width = SettingsColumnWidth;
+            _lblLibraryDir.MaximumSize = new Size(Math.Max(240, fieldWidth - InlineIconButtonWidth - 16), 0);
             _txtFile.Width = fileWidth;
+            _cbPosition.Width = Math.Min(ComboWidth, fieldWidth);
             ApplyCompactFieldWidths(compactWidth);
             UpdatePreview();
             SyncDialogBounds();
@@ -265,15 +364,18 @@ namespace tiktok_Omni
                 RowCount = 1,
                 BackColor = Color.FromArgb(31, 34, 42),
                 Margin = Padding.Empty,
-                Padding = Padding.Empty
+                Padding = Padding.Empty,
+                Width = SettingsColumnWidth - LabelColumnWidth - 24
             };
-            row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, width + 12));
             primary.Margin = new Padding(0, 0, 12, 0);
+            primary.Dock = DockStyle.Fill;
+            action.Dock = DockStyle.Fill;
+            row.RowStyles.Add(new RowStyle(centerActionWithPrimary ? SizeType.AutoSize : SizeType.Absolute, ControlHeight));
 
             if (centerActionWithPrimary)
             {
-                row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
                 row.Controls.Add(primary, 0, 0);
 
                 var actionHost = new Panel
@@ -281,6 +383,7 @@ namespace tiktok_Omni
                     AutoSize = true,
                     AutoSizeMode = AutoSizeMode.GrowAndShrink,
                     BackColor = row.BackColor,
+                    Dock = DockStyle.Fill,
                     MinimumSize = new Size(action.Width, ControlHeight)
                 };
                 actionHost.Controls.Add(action);
@@ -296,10 +399,6 @@ namespace tiktok_Omni
             }
             else
             {
-                row.RowStyles.Add(new RowStyle(SizeType.Absolute, ControlHeight));
-                primary.Height = ControlHeight;
-                primary.Dock = DockStyle.Fill;
-                action.Dock = DockStyle.Fill;
                 row.Controls.Add(primary, 0, 0);
                 row.Controls.Add(action, 1, 0);
             }
@@ -451,6 +550,63 @@ namespace tiktok_Omni
             OmniBrandLogoLibrary.FormatLibraryPanelLines(_settings, out var dir, out var hint);
             _lblLibraryDir.Text = dir;
             _lblLibraryHint.Text = hint;
+            UpdateVisualPreview();
+        }
+
+        private void UpdateVisualPreview()
+        {
+            var previous = _picPreview.Image;
+            _picPreview.Image = null;
+            previous?.Dispose();
+
+            var plan = BuildCurrentPreviewPlan();
+            string statusMessage;
+            if (!_chkEnabled.Checked)
+            {
+                statusMessage = "Logo đang tắt";
+            }
+            else if (!plan.IsActive)
+            {
+                statusMessage = "Chưa chọn file logo";
+            }
+            else
+            {
+                statusMessage = string.Empty;
+            }
+
+            _lblPreviewHint.Text = plan.IsActive
+                ? ShowcaseBrandLogoPositionCatalog.GetDisplayLabel(plan.PositionId)
+                  + " · " + plan.ScaleWidthPercent + "% · mờ " + plan.OpacityPercent + "%"
+                : "Khung 9:16 · cập nhật theo thiết lập hiện tại";
+
+            try
+            {
+                _picPreview.Image = ShowcaseBrandOverlayHelper.RenderLogoPreviewBitmap(
+                    plan,
+                    statusMessage,
+                    PreviewFrameWidth);
+            }
+            catch
+            {
+                _picPreview.Image = ShowcaseBrandOverlayHelper.RenderLogoPreviewBitmap(
+                    new ShowcaseBrandLogoRenderPlan(),
+                    "Không tạo được xem thử",
+                    PreviewFrameWidth);
+            }
+        }
+
+        private ShowcaseBrandLogoRenderPlan BuildCurrentPreviewPlan()
+        {
+            return ShowcaseBrandOverlayHelper.BuildPreviewPlan(
+                _chkEnabled.Checked,
+                _txtFile.Text ?? string.Empty,
+                _video.ProfileName,
+                _settings,
+                (_cbPosition.SelectedItem as PositionItem)?.Id ?? ShowcaseBrandLogoPositionCatalog.BottomRight,
+                (int)_numScale.Value,
+                (int)_numMarginX.Value,
+                (int)_numMarginY.Value,
+                (int)_numOpacity.Value);
         }
 
         private Control CreateLibraryInfoStack()

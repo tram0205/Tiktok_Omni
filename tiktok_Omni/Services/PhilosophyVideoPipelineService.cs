@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using tiktok_Omni.Models;
 using tiktok_Omni.Services.Mascot;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services
 {
@@ -20,7 +21,6 @@ namespace tiktok_Omni.Services
         private const int TargetHeight = 1920;
         private const double DefaultBackgroundSeconds = 18d;
         private const double VoiceMixGain = 1.65d;
-        private const double MusicBedVolume = 0.10d;
         private const double AmbientBedVolume = 0.05d;
         private static readonly Random BrollRandom = new Random();
 
@@ -35,9 +35,80 @@ namespace tiktok_Omni.Services
 
         private MascotWorker MascotWorker => _mascotWorker ?? (_mascotWorker = new MascotWorker(_videoService));
 
+        private const string LegacyOutputFolderName = "Output";
+
+        /// <summary>Thư mục thành phẩm — mỗi profile một thư mục con.</summary>
         public static string GetOutputRootDirectory()
         {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "PhilosophyVideo", "Output");
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "PhilosophyVideo", "ThanhPham");
+        }
+
+        public static string GetLegacyOutputRootDirectory()
+        {
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "PhilosophyVideo", LegacyOutputFolderName);
+        }
+
+        public static string GetProfileOutputDirectory(string profileName)
+        {
+            var profileDir = Path.Combine(
+                GetOutputRootDirectory(),
+                ProfileScopedPaths.ResolveProfileName(profileName));
+            Directory.CreateDirectory(profileDir);
+            return profileDir;
+        }
+
+        /// <summary>Tạo PhilosophyVideo\ThanhPham và thư mục con theo từng profile trong Cài đặt.</summary>
+        public static void EnsureFinishedProductLayout(AppSettings settings)
+        {
+            Directory.CreateDirectory(GetOutputRootDirectory());
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "default" };
+            if (settings?.Profiles != null)
+            {
+                foreach (var profile in settings.Profiles)
+                {
+                    if (profile == null || string.IsNullOrWhiteSpace(profile.Name))
+                    {
+                        continue;
+                    }
+
+                    names.Add(ProfileScopedPaths.ResolveProfileName(profile.Name));
+                }
+            }
+
+            foreach (var name in names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+            {
+                Directory.CreateDirectory(Path.Combine(GetOutputRootDirectory(), name));
+            }
+        }
+
+        public static IEnumerable<string> EnumerateFinishedProductSearchRoots()
+        {
+            yield return GetOutputRootDirectory();
+            var legacy = GetLegacyOutputRootDirectory();
+            if (Directory.Exists(legacy))
+            {
+                yield return legacy;
+            }
+        }
+
+        private static bool IsUnderPhilosophyOutputRoot(string directoryPath)
+        {
+            if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath))
+            {
+                return false;
+            }
+
+            var full = Path.GetFullPath(directoryPath);
+            foreach (var root in EnumerateFinishedProductSearchRoots())
+            {
+                var rootFull = Path.GetFullPath(root);
+                if (full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Xóa thư mục stage output cũ trước khi render lại cùng một dòng.</summary>
@@ -57,27 +128,26 @@ namespace tiktok_Omni.Services
                     return false;
                 }
 
-                var outputRoot = Path.GetFullPath(GetOutputRootDirectory());
                 var stageDir = Path.GetDirectoryName(fullPath);
                 if (!string.IsNullOrEmpty(stageDir)
                     && Directory.Exists(stageDir)
-                    && stageDir.StartsWith(outputRoot, StringComparison.OrdinalIgnoreCase))
+                    && IsUnderPhilosophyOutputRoot(stageDir))
                 {
                     Directory.Delete(stageDir, recursive: true);
-                    log?.Invoke("[Triết lý] Đã xóa kết quả render trước: " + Path.GetFileName(stageDir));
+                    log?.Invoke("[Quote] Đã xóa kết quả render trước: " + Path.GetFileName(stageDir));
                     return true;
                 }
 
                 if (File.Exists(fullPath))
                 {
                     File.Delete(fullPath);
-                    log?.Invoke("[Triết lý] Đã xóa file render trước: " + Path.GetFileName(fullPath));
+                    log?.Invoke("[Quote] Đã xóa file render trước: " + Path.GetFileName(fullPath));
                     return true;
                 }
             }
             catch (Exception ex)
             {
-                log?.Invoke("[Triết lý] Không xóa được kết quả cũ: " + ex.Message);
+                log?.Invoke("[Quote] Không xóa được kết quả cũ: " + ex.Message);
             }
 
             return false;
@@ -112,7 +182,7 @@ namespace tiktok_Omni.Services
             }
 
             return lines.Count == 0
-                ? "Sẵn sàng — nhập quote hoặc link rồi bấm «Tạo video Triết lý»."
+                ? "Sẵn sàng — nhập quote hoặc link rồi bấm «Tạo video Quote»."
                 : string.Join("\r\n", lines);
         }
 
@@ -179,8 +249,18 @@ namespace tiktok_Omni.Services
 
             var resolvedVoiceId = ResolveVoiceIdByMood(mood, settings, brandProfile.VoiceId);
             brandProfile.VoiceId = resolvedVoiceId;
-            log?.Invoke("[Triết lý] Profile: «" + nick + "» | Mood: " + mood +
-                        (string.IsNullOrWhiteSpace(resolvedVoiceId) ? "" : " | Voice ID: " + resolvedVoiceId));
+            if (renderOptions.TtsOptions != null)
+            {
+                log?.Invoke("[Quote] Profile: «" + nick + "» | Mood: " + mood
+                            + " | TTS: popup Âm thanh ("
+                            + (renderOptions.TtsOptions.BodyEngine == TtsEngineKind.ElevenLabs ? "ElevenLabs" : "Edge")
+                            + ")");
+            }
+            else
+            {
+                log?.Invoke("[Quote] Profile: «" + nick + "» | Mood: " + mood +
+                            (string.IsNullOrWhiteSpace(resolvedVoiceId) ? "" : " | Voice ID: " + resolvedVoiceId));
+            }
 
             await VideoReupRemixService.EnsureFfmpegToolkitAsync(settings, log, cancellationToken).ConfigureAwait(false);
             if (!FfmpegToolkitService.TryResolve(settings, out var toolkit, out var ffResolveErr))
@@ -189,10 +269,13 @@ namespace tiktok_Omni.Services
             }
 
             var ffmpeg = toolkit.FfmpegExe;
+            EnsureFinishedProductLayout(settings);
+            var profileOutputDir = GetProfileOutputDirectory(nick);
             var stage = Path.Combine(
-                GetOutputRootDirectory(),
+                profileOutputDir,
                 DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + "_" + Guid.NewGuid().ToString("N").Substring(0, 6));
             Directory.CreateDirectory(stage);
+            log?.Invoke("[Quote] Thành phẩm → " + profileOutputDir);
             var assets = Path.Combine(stage, "assets");
             Directory.CreateDirectory(assets);
 
@@ -203,8 +286,8 @@ namespace tiktok_Omni.Services
             var visualMode = PhilosophyVisualModes.Normalize(renderOptions.VisualMode);
             var (minDurationSeconds, maxDurationSeconds) = NormalizeDurationBounds(renderOptions);
             var backgroundTargetSeconds = Math.Max(8d, Math.Min(120d, (minDurationSeconds + maxDurationSeconds) / 2d));
-            log?.Invoke("[Triết lý] Chế độ hình ảnh: " + DescribeVisualMode(visualMode));
-            log?.Invoke("[Triết lý] Thời lượng xuất: đọc hết quote + "
+            log?.Invoke("[Quote] Chế độ hình ảnh: " + DescribeVisualMode(visualMode));
+            log?.Invoke("[Quote] Thời lượng xuất: đọc hết quote + "
                         + PhilosophyRenderOptions.OutroPadMinSeconds.ToString("0", CultureInfo.InvariantCulture)
                         + "–"
                         + PhilosophyRenderOptions.OutroPadMaxSeconds.ToString("0", CultureInfo.InvariantCulture)
@@ -224,11 +307,31 @@ namespace tiktok_Omni.Services
 
             var bgDuration = await ProbeDurationAsync(toolkit.FfprobeExe, bgPath, cancellationToken).ConfigureAwait(false);
 
-            progress?.Invoke("Bước 2/4: ElevenLabs đọc script…", 45);
-            log?.Invoke("[Triết lý] Bước 2/4: TTS (eleven_v3, ngắt nghỉ sâu)…");
-            var ttsText = ElevenLabsTtsHelper.ApplyDeepPauses(quote);
+            progress?.Invoke("Bước 2/4: TTS đọc script…", 45);
             var voicePath = Path.Combine(assets, "voice.mp3");
-            await BuildTtsVoiceAsync(ttsText, voicePath, settings, mood, brandProfile.VoiceId, log, cancellationToken).ConfigureAwait(false);
+            var ttsWorkDir = Path.Combine(assets, "tts_work");
+            if (renderOptions.TtsOptions != null)
+            {
+                log?.Invoke("[Quote] Bước 2/4: TTS theo cấu hình popup Âm thanh…");
+                await PhilosophyBatchTtsHelper.GenerateQuoteVoiceMp3Async(
+                    quote,
+                    renderOptions.TtsOptions,
+                    settings,
+                    voicePath,
+                    ttsWorkDir,
+                    renderOptions.NarrationSpeedPercent,
+                    ffmpeg,
+                    toolkit.FfprobeExe,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                log?.Invoke("[Quote] Bước 2/4: TTS (eleven_v3, ngắt nghỉ sâu)…");
+                var ttsText = ElevenLabsTtsHelper.ApplyDeepPauses(quote);
+                await BuildTtsVoiceAsync(ttsText, voicePath, settings, mood, brandProfile.VoiceId, log, cancellationToken).ConfigureAwait(false);
+            }
+
             var voiceWav = Path.Combine(assets, "voice.wav");
             await ConvertToWavAsync(ffmpeg, voicePath, voiceWav, log, cancellationToken).ConfigureAwait(false);
             var voiceDur = await ProbeDurationAsync(toolkit.FfprobeExe, voiceWav, cancellationToken).ConfigureAwait(false);
@@ -239,7 +342,7 @@ namespace tiktok_Omni.Services
 
             var outroPad = PhilosophyRenderOptions.ResolveOutroPadSeconds(voiceDur, bgDuration);
             var outputDuration = PhilosophyRenderOptions.ResolveOutputDuration(voiceDur, bgDuration);
-            log?.Invoke("[Triết lý] TTS " + voiceDur.ToString("0.0", CultureInfo.InvariantCulture) + "s | nền "
+            log?.Invoke("[Quote] TTS " + voiceDur.ToString("0.0", CultureInfo.InvariantCulture) + "s | nền "
                         + bgDuration.ToString("0.0", CultureInfo.InvariantCulture) + "s → thở "
                         + outroPad.ToString("0.0", CultureInfo.InvariantCulture) + "s → xuất "
                         + outputDuration.ToString("0.0", CultureInfo.InvariantCulture) + "s.");
@@ -247,7 +350,7 @@ namespace tiktok_Omni.Services
             var voiceRenderDuration = voiceDur;
 
             progress?.Invoke("Bước 3/4: render MP4 (1-pass)…", 75);
-            log?.Invoke("[Triết lý] Bước 3/4: render MP4 1-pass (nền + audio + phụ đề + CTA)…");
+            log?.Invoke("[Quote] Bước 3/4: render MP4 1-pass (nền + audio + phụ đề + CTA)…");
             var outputPath = Path.Combine(stage, "philosophy_video_branded.mp4");
             await RenderFinalAsync(
                 ffmpeg,
@@ -266,7 +369,7 @@ namespace tiktok_Omni.Services
 
             var outDur = await ProbeDurationAsync(toolkit.FfprobeExe, outputPath, cancellationToken).ConfigureAwait(false);
             progress?.Invoke("Hoàn tất", 100);
-            log?.Invoke("[Triết lý] Xong → " + outputPath);
+            log?.Invoke("[Quote] Xong → " + outputPath);
 
             return new PhilosophyVideoResult
             {
@@ -293,11 +396,12 @@ namespace tiktok_Omni.Services
         {
             if (visualMode == PhilosophyVisualModes.VeoMascot)
             {
-                log?.Invoke("[Triết lý] Bước 1/4: Mode 2 — AI Nhân vật (Veo Image-to-Video)…");
+                log?.Invoke("[Quote] Bước 1/4: Mode 2 — AI Nhân vật (Veo Image-to-Video)…");
                 var (ok, reason) = await TryGenerateMascotBackgroundVideoAsync(
                     motionPrompt,
                     visualPrompt,
                     nick,
+                    renderOptions?.ReferenceImagePath,
                     bgPath,
                     settings,
                     backgroundTargetSeconds,
@@ -315,7 +419,7 @@ namespace tiktok_Omni.Services
 
             if (visualMode == PhilosophyVisualModes.VeoScenery)
             {
-                log?.Invoke("[Triết lý] Bước 1/4: Mode 1 — AI Cảnh vật (Veo Text-to-Video)…");
+                log?.Invoke("[Quote] Bước 1/4: Mode 1 — AI Cảnh vật (Veo Text-to-Video)…");
                 var (ok, reason) = await TryGenerateSceneryBackgroundVideoAsync(
                     motionPrompt,
                     bgPath,
@@ -335,7 +439,7 @@ namespace tiktok_Omni.Services
 
             if (visualMode == PhilosophyVisualModes.PreRendered)
             {
-                log?.Invoke("[Triết lý] Bước 1/4: Mode 3 — Video phân cảnh tự làm sẵn…");
+                log?.Invoke("[Quote] Bước 1/4: Mode 3 — Video phân cảnh tự làm sẵn…");
                 var (ok, reason) = await TryAssemblePreRenderedBackgroundAsync(
                     renderOptions,
                     bgPath,
@@ -351,7 +455,7 @@ namespace tiktok_Omni.Services
                 return;
             }
 
-            log?.Invoke("[Triết lý] Bước 1/4: Mode 0 — kho B-Roll…");
+            log?.Invoke("[Quote] Bước 1/4: Mode 0 — kho B-Roll…");
             if (TryResolveBrollBackground(nick, renderOptions, bgPath, log))
             {
                 return;
@@ -380,7 +484,7 @@ namespace tiktok_Omni.Services
 
             if (string.IsNullOrEmpty(quote))
             {
-                return (false, "Không có nội dung câu triết lý để tìm tên file quy ước.");
+                return (false, "Không có nội dung quote để tìm tên file quy ước.");
             }
 
             var files = PhilosophySceneHelper.FindPreRenderedVideoFiles(folder, quote);
@@ -396,7 +500,7 @@ namespace tiktok_Omni.Services
             if (missing.Count > 0)
             {
                 var missingStr = string.Join(", ", missing.Select(n => n.ToString("D2")));
-                log?.Invoke("[Triết lý] Cảnh thiếu: " + missingStr + " — sẽ render không đủ phân cảnh.");
+                log?.Invoke("[Quote] Cảnh thiếu: " + missingStr + " — sẽ render không đủ phân cảnh.");
                 // Không ném exception — bỏ qua cảnh thiếu, concat những cảnh có
             }
 
@@ -404,7 +508,7 @@ namespace tiktok_Omni.Services
             {
                 // Chỉ 1 file — copy thẳng
                 File.Copy(files[0], outputPath, overwrite: true);
-                log?.Invoke("[Triết lý] Mode 3: 1 file → copy trực tiếp.");
+                log?.Invoke("[Quote] Mode 3: 1 file → copy trực tiếp.");
                 return (true, string.Empty);
             }
 
@@ -415,7 +519,7 @@ namespace tiktok_Omni.Services
                     .ConfigureAwait(false);
                 if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 10_000L)
                 {
-                    log?.Invoke("[Triết lý] Mode 3: concat " + files.Count + " cảnh → " + Path.GetFileName(outputPath));
+                    log?.Invoke("[Quote] Mode 3: concat " + files.Count + " cảnh → " + Path.GetFileName(outputPath));
                     return (true, string.Empty);
                 }
 
@@ -452,7 +556,7 @@ namespace tiktok_Omni.Services
                 File.WriteAllLines(listFile, lines, TextFileEncoding.Utf8NoBom);
 
                 var args = "-y -f concat -safe 0 -i \"" + listFile + "\" -c copy \"" + outputPath + "\"";
-                log?.Invoke("[Triết lý] FFmpeg concat " + inputFiles.Count + " file…");
+                log?.Invoke("[Quote] FFmpeg concat " + inputFiles.Count + " file…");
                 await RunFfmpegAsync(ffmpeg, args, log, cancellationToken).ConfigureAwait(false);
             }
             finally
@@ -530,12 +634,12 @@ namespace tiktok_Omni.Services
             try
             {
                 File.Copy(src, destPath, true);
-                log?.Invoke("[Triết lý] " + logLabel);
+                log?.Invoke("[Quote] " + logLabel);
                 return new FileInfo(destPath).Length > 10_000L;
             }
             catch (Exception ex)
             {
-                log?.Invoke("[Triết lý] B-Roll lỗi: " + ex.Message);
+                log?.Invoke("[Quote] B-Roll lỗi: " + ex.Message);
                 return false;
             }
         }
@@ -615,12 +719,12 @@ namespace tiktok_Omni.Services
             try
             {
                 File.Copy(src, destPath, true);
-                log?.Invoke("[Triết lý] DynamicBackground: " + src);
+                log?.Invoke("[Quote] DynamicBackground: " + src);
                 return new FileInfo(destPath).Length > 10_000L;
             }
             catch (Exception ex)
             {
-                log?.Invoke("[Triết lý] DynamicBackground lỗi: " + ex.Message);
+                log?.Invoke("[Quote] DynamicBackground lỗi: " + ex.Message);
                 return false;
             }
         }
@@ -636,12 +740,12 @@ namespace tiktok_Omni.Services
             try
             {
                 File.Copy(src, destPath, true);
-                log?.Invoke("[Triết lý] Nền từ Assets/" + ProfileScopedPaths.ResolveProfileName(profileName) + ": " + Path.GetFileName(src));
+                log?.Invoke("[Quote] Nền từ Assets/" + ProfileScopedPaths.ResolveProfileName(profileName) + ": " + Path.GetFileName(src));
                 return new FileInfo(destPath).Length > 10_000L;
             }
             catch (Exception ex)
             {
-                log?.Invoke("[Triết lý] Không copy nền profile: " + ex.Message);
+                log?.Invoke("[Quote] Không copy nền profile: " + ex.Message);
                 return false;
             }
         }
@@ -680,10 +784,12 @@ namespace tiktok_Omni.Services
         {
             switch (visualMode)
             {
-                case 1:
+                case PhilosophyVisualModes.VeoScenery:
                     return "1 — AI tự sinh Cảnh vật (Veo Text-to-Video)";
-                case 2:
+                case PhilosophyVisualModes.VeoMascot:
                     return "2 — AI có Nhân vật (Veo Image-to-Video)";
+                case PhilosophyVisualModes.PreRendered:
+                    return "3 — Video phân cảnh tự làm sẵn";
                 default:
                     return "0 — Kho B-Roll có sẵn (Tiết kiệm)";
             }
@@ -710,6 +816,7 @@ namespace tiktok_Omni.Services
             string motionPrompt,
             string visualPrompt,
             string profileName,
+            string referenceImagePath,
             string outputPath,
             AppSettings settings,
             double clipDurationSeconds,
@@ -723,17 +830,33 @@ namespace tiktok_Omni.Services
 
             try
             {
-                AvatarIdentityPackStore.LoadOrCreate(profileName);
-                var identityFiles = AvatarIdentityPackStore.SyncIdentityImagesFromVault(profileName);
-                var firstIdentity = identityFiles.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f) && File.Exists(f));
-                if (string.IsNullOrWhiteSpace(firstIdentity))
+                var prompt = string.IsNullOrWhiteSpace(motionPrompt) ? visualPrompt : motionPrompt.Trim();
+                string firstIdentity = null;
+                var refPath = (referenceImagePath ?? string.Empty).Trim();
+                if (!string.IsNullOrEmpty(refPath) && File.Exists(refPath))
                 {
-                    return (false, "Chưa có Identity Image trong AvatarVault/«" + profileName + "».");
+                    firstIdentity = refPath;
+                    log?.Invoke("[Quote] Mode 2: dùng ảnh tham chiếu từ popup «Nền»…");
+                }
+                else
+                {
+                    AvatarIdentityPackStore.LoadOrCreate(profileName);
+                    var identityFiles = AvatarIdentityPackStore.SyncIdentityImagesFromVault(profileName);
+                    firstIdentity = identityFiles.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f) && File.Exists(f));
+                    if (!string.IsNullOrWhiteSpace(firstIdentity))
+                    {
+                        log?.Invoke("[Quote] Mode 2: dùng Identity Image từ AvatarVault/«" + profileName + "»…");
+                    }
                 }
 
-                var prompt = string.IsNullOrWhiteSpace(motionPrompt) ? visualPrompt : motionPrompt.Trim();
+                if (string.IsNullOrWhiteSpace(firstIdentity))
+                {
+                    return (false, "Chưa có ảnh tham chiếu (popup «Nền») hoặc Identity Image trong AvatarVault/«"
+                                 + profileName + "».");
+                }
+
                 var identityDataUrl = MascotMediaHelper.BuildImageDataUrl(firstIdentity);
-                log?.Invoke("[Triết lý] Mode 2: sinh ảnh cảnh có nhân vật từ Identity Image…");
+                log?.Invoke("[Quote] Mode 2: sinh ảnh cảnh có nhân vật từ ảnh tham chiếu…");
 
                 var contextImageUrl = await MascotWorker.GenerateContextImageWithPollingAsync(
                     identityDataUrl,
@@ -749,7 +872,7 @@ namespace tiktok_Omni.Services
                     return (false, "Veo không trả ảnh cảnh (context image).");
                 }
 
-                log?.Invoke("[Triết lý] Mode 2: Veo Image-to-Video từ ảnh cảnh…");
+                log?.Invoke("[Quote] Mode 2: Veo Image-to-Video từ ảnh cảnh…");
                 var videoUrl = await MascotWorker.GenerateVideoFromImageWithPollingAsync(
                     contextImageUrl,
                     prompt + ". Subtle cinematic motion, vertical 9:16, no text.",
@@ -764,7 +887,7 @@ namespace tiktok_Omni.Services
                     return (false, "Veo không trả URL video nền.");
                 }
 
-                log?.Invoke("[Triết lý] Mode 2: đang tải clip nền…");
+                log?.Invoke("[Quote] Mode 2: đang tải clip nền…");
                 await DownloadUrlToFileAsync(videoUrl, outputPath, cancellationToken).ConfigureAwait(false);
                 if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 10_000L)
                 {
@@ -816,7 +939,7 @@ namespace tiktok_Omni.Services
                     return (false, "Veo không trả URL video (Text-to-Video).");
                 }
 
-                log?.Invoke("[Triết lý] Mode 1: đang tải video nền Veo…");
+                log?.Invoke("[Quote] Mode 1: đang tải video nền Veo…");
                 await DownloadUrlToFileAsync(videoUrl, outputPath, cancellationToken).ConfigureAwait(false);
                 if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 10_000L)
                 {
@@ -854,7 +977,7 @@ namespace tiktok_Omni.Services
                      "crop=" + TargetWidth + ":" + TargetHeight + ",format=yuv420p";
             var args = "-y -f lavfi -i color=c=" + color + ":s=" + TargetWidth + "x" + TargetHeight + ":d=" + dur +
                        " -vf \"" + vf + "\" -c:v libx264 -preset fast -crf 23 -an \"" + outputPath + "\"";
-            log?.Invoke("[Triết lý] FFmpeg: tạo nền gradient " + dur + "s…");
+            log?.Invoke("[Quote] FFmpeg: tạo nền gradient " + dur + "s…");
             await RunFfmpegAsync(ffmpeg, args, log, cancellationToken).ConfigureAwait(false);
         }
 
@@ -873,7 +996,7 @@ namespace tiktok_Omni.Services
                 throw new InvalidOperationException("Script trống — không gọi TTS.");
             }
 
-            log?.Invoke("[Triết lý] ElevenLabs chỉ đọc nội dung quote (" + ttsScript.Length + " ký tự).");
+            log?.Invoke("[Quote] ElevenLabs chỉ đọc nội dung quote (" + ttsScript.Length + " ký tự).");
             var audioResult = await _elevenLabsTtsService.GenerateAudioWithFallbackAsync(
                 ttsScript,
                 settings,
@@ -893,7 +1016,7 @@ namespace tiktok_Omni.Services
             }
 
             await SaveTtsAudioResultAsync(audioResult, outputMp3, cancellationToken).ConfigureAwait(false);
-            log?.Invoke("[Triết lý] TTS OK → " + Path.GetFileName(outputMp3));
+            log?.Invoke("[Quote] TTS OK → " + Path.GetFileName(outputMp3));
         }
 
         private static async Task SaveTtsAudioResultAsync(string audioPathOrUrl, string outputMp3, CancellationToken cancellationToken)
@@ -953,10 +1076,15 @@ namespace tiktok_Omni.Services
                 musicPath = TryPickMusicByMood(settings, mood);
             }
 
-            var ambientPath = TryPickAmbientFromFolder(renderOptions?.AmbientFolder, mood);
+            var ambientPath = renderOptions?.AmbientFolder ?? string.Empty;
+            if (!string.IsNullOrEmpty(ambientPath) && Directory.Exists(ambientPath))
+            {
+                ambientPath = TryPickAmbientFromFolder(ambientPath, mood);
+            }
             if (!string.IsNullOrEmpty(musicPath) && File.Exists(musicPath))
             {
-                log?.Invoke("[Triết lý] Nhạc nền (~10%): " + Path.GetFileName(musicPath));
+                var musicPct = renderOptions?.MusicVolumePercent ?? PhilosophyBatchHelper.DefaultMusicVolumePercent;
+                log?.Invoke("[Quote] Nhạc nền (" + musicPct + "%): " + Path.GetFileName(musicPath));
                 await BuildVoicePlusMusicWavAsync(
                     ffmpeg,
                     voiceWav,
@@ -965,12 +1093,13 @@ namespace tiktok_Omni.Services
                     voiceSourceDuration,
                     outputDuration,
                     fullAudio,
+                    PhilosophyBatchHelper.ResolveMusicBedLinearVolume(musicPct),
                     log,
                     cancellationToken).ConfigureAwait(false);
             }
             else if (!string.IsNullOrEmpty(ambientPath) && File.Exists(ambientPath))
             {
-                log?.Invoke("[Triết lý] Chỉ voice + ambient (~5%): " + Path.GetFileName(ambientPath));
+                log?.Invoke("[Quote] Chỉ voice + ambient (~5%): " + Path.GetFileName(ambientPath));
                 await BuildVoicePlusMusicWavAsync(
                     ffmpeg,
                     voiceWav,
@@ -979,6 +1108,7 @@ namespace tiktok_Omni.Services
                     voiceSourceDuration,
                     outputDuration,
                     fullAudio,
+                    0d,
                     log,
                     cancellationToken).ConfigureAwait(false);
             }
@@ -992,13 +1122,13 @@ namespace tiktok_Omni.Services
                 File.Copy(voiceWav, fullAudio, true);
             }
 
-            log?.Invoke("[Triết lý] Mix audio xong → " + Path.GetFileName(fullAudio));
+            log?.Invoke("[Quote] Mix audio xong → " + Path.GetFileName(fullAudio));
 
             var assOptions = renderOptions?.SubtitleOptions ?? CreatePhilosophyKaraokeOptions();
             KaraokeAssSubtitleService.KaraokeAssBurnInResult quoteKaraoke = null;
             try
             {
-                log?.Invoke("[Triết lý] Phụ đề: ước lượng timing từ giọng TTS (bỏ qua Whisper).");
+                log?.Invoke("[Quote] Phụ đề: ước lượng timing từ giọng TTS (bỏ qua Whisper).");
                 quoteKaraoke = await KaraokeAssSubtitleService.TryCreateBurnInAsync(
                     ffmpeg,
                     quote,
@@ -1010,11 +1140,11 @@ namespace tiktok_Omni.Services
                     assOptions: assOptions,
                     knownAudioDurationSeconds: voiceSourceDuration).ConfigureAwait(false);
                 log?.Invoke(quoteKaraoke != null
-                    ? "[Triết lý] Phụ đề ASS OK."
-                    : "[Triết lý] Không có phụ đề ASS.");
+                    ? "[Quote] Phụ đề ASS OK."
+                    : "[Quote] Không có phụ đề ASS.");
 
-                var logoPath = PhilosophyProfileAssets.TryPickBrandOverlayImage(profileName);
-                var hasLogo = !string.IsNullOrWhiteSpace(logoPath) && File.Exists(logoPath);
+                var logoPlan = PhilosophyBatchHelper.BuildLogoRenderPlan(renderOptions, profileName, settings, TargetWidth);
+                var hasLogo = logoPlan.IsActive;
                 var subtitleFilter = quoteKaraoke?.VideoFilterFragment ?? string.Empty;
 
                 // ── Time-matching: bóp/giãn tốc độ hình ảnh nền khớp với audio ──────
@@ -1034,11 +1164,11 @@ namespace tiktok_Omni.Services
 
                 if (hasLogo)
                 {
-                    var filterComplex = BuildPhilosophyOnePassFilterComplex(subtitleFilter, hasLogo: true, setptsFilter);
-                    args = "-y " + loopFlag + "-i \"" + backgroundPath + "\" -i \"" + fullAudio + "\" -i \"" + logoPath +
+                    var filterComplex = BuildPhilosophyOnePassFilterComplex(subtitleFilter, logoPlan, setptsFilter);
+                    args = "-y " + loopFlag + "-i \"" + backgroundPath + "\" -i \"" + fullAudio + "\" -i \"" + logoPlan.LogoPath +
                            "\" -filter_complex \"" + filterComplex + "\" -map \"[vout]\" -map 1:a -t " + durStr +
                            " -c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p -c:a aac -b:a 192k \"" + outputPath + "\"";
-                    log?.Invoke("[Triết lý] FFmpeg 1-pass (nền + logo + phụ đề + CTA) → " + durStr + "s…");
+                    log?.Invoke("[Quote] FFmpeg 1-pass (nền + logo + phụ đề + CTA) → " + durStr + "s…");
                 }
                 else
                 {
@@ -1046,11 +1176,11 @@ namespace tiktok_Omni.Services
                     args = "-y " + loopFlag + "-i \"" + backgroundPath + "\" -i \"" + fullAudio + "\" -vf \"" + videoFilters +
                            "\" -map 0:v -map 1:a -t " + durStr +
                            " -c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p -c:a aac -b:a 192k \"" + outputPath + "\"";
-                    log?.Invoke("[Triết lý] FFmpeg 1-pass (nền + phụ đề + CTA) → " + durStr + "s…");
+                    log?.Invoke("[Quote] FFmpeg 1-pass (nền + phụ đề + CTA) → " + durStr + "s…");
                 }
 
                 await RunFfmpegAsync(ffmpeg, args, log, cancellationToken).ConfigureAwait(false);
-                log?.Invoke("[Triết lý] Render 1-pass xong → " + Path.GetFileName(outputPath));
+                log?.Invoke("[Quote] Render 1-pass xong → " + Path.GetFileName(outputPath));
             }
             finally
             {
@@ -1074,7 +1204,7 @@ namespace tiktok_Omni.Services
             }
 
             var pts = ratio.ToString("0.######", CultureInfo.InvariantCulture);
-            log?.Invoke("[Triết lý] Time-match: bgDur=" + bgDuration.ToString("0.0") + "s / audioDur=" +
+            log?.Invoke("[Quote] Time-match: bgDur=" + bgDuration.ToString("0.0") + "s / audioDur=" +
                         outputDuration.ToString("0.0") + "s → setpts=" + pts + "*PTS");
             return "setpts=" + pts + "*PTS";
         }
@@ -1108,7 +1238,10 @@ namespace tiktok_Omni.Services
             return KaraokeAssSubtitleService.MergeVideoFilters(chain, BuildPhilosophyCtaDrawTextFilter());
         }
 
-        private static string BuildPhilosophyOnePassFilterComplex(string subtitleFilterFragment, bool hasLogo, string setptsFilter = null)
+        private static string BuildPhilosophyOnePassFilterComplex(
+            string subtitleFilterFragment,
+            ShowcaseBrandLogoRenderPlan logoPlan,
+            string setptsFilter = null)
         {
             var baseChain = BuildPhilosophyBaseVideoFilterChain(setptsFilter);
             var cta = BuildPhilosophyCtaDrawTextFilter();
@@ -1120,16 +1253,28 @@ namespace tiktok_Omni.Services
                 current = "[vsub]";
             }
 
-            if (hasLogo)
+            if (logoPlan != null && logoPlan.IsActive)
             {
-                parts.Add(current + "[2:v]overlay=W-w-40:40:format=auto[vl]");
-                parts.Add("[vl]" + cta + "[vout]");
-            }
-            else
-            {
-                parts.Add(current + cta + "[vout]");
+                var targetWidth = Math.Max(32, logoPlan.CanvasWidth * ShowcaseBrandOverlayHelper.ClampScaleWidthPercent(logoPlan.ScaleWidthPercent) / 100);
+                var alpha = ShowcaseBrandOverlayHelper.ClampOpacityPercent(logoPlan.OpacityPercent) / 100d;
+                var overlay = ShowcaseBrandLogoPositionCatalog.BuildOverlayExpression(
+                    logoPlan.PositionId,
+                    logoPlan.MarginX,
+                    logoPlan.MarginY);
+                var logoChain = "[2:v]scale=w=" + targetWidth + ":h=-1";
+                if (alpha < 0.995d)
+                {
+                    var alphaText = alpha.ToString("0.##", CultureInfo.InvariantCulture);
+                    logoChain += ",format=rgba,colorchannelmixer=aa=" + alphaText;
+                }
+
+                logoChain += "[logo]";
+                parts.Add(logoChain);
+                parts.Add(current + "[logo]overlay=" + overlay + "[vl]");
+                current = "[vl]";
             }
 
+            parts.Add(current + cta + "[vout]");
             return string.Join(";", parts);
         }
 
@@ -1207,7 +1352,7 @@ namespace tiktok_Omni.Services
             var outStr = outputSeconds.ToString("0.#####", CultureInfo.InvariantCulture);
             var args = "-y -i \"" + voiceWav + "\" -filter:a \"apad=whole_dur=" + outStr + "\" -t " + outStr +
                        " \"" + outputWav + "\"";
-            log?.Invoke("[Triết lý] Kéo dài audio từ " + voiceStr + "s → " + outStr + "s…");
+            log?.Invoke("[Quote] Kéo dài audio từ " + voiceStr + "s → " + outStr + "s…");
             await RunFfmpegAsync(ffmpeg, args, log, cancellationToken).ConfigureAwait(false);
         }
 
@@ -1219,12 +1364,13 @@ namespace tiktok_Omni.Services
             double voiceSourceSeconds,
             double outputSeconds,
             string outputWav,
+            double musicBedVolume,
             Action<string> log,
             CancellationToken cancellationToken)
         {
             var voiceStr = voiceSourceSeconds.ToString("0.#####", CultureInfo.InvariantCulture);
             var outStr = outputSeconds.ToString("0.#####", CultureInfo.InvariantCulture);
-            var musicVol = MusicBedVolume.ToString("0.###", CultureInfo.InvariantCulture);
+            var musicVol = musicBedVolume.ToString("0.###", CultureInfo.InvariantCulture);
             var ambientVol = AmbientBedVolume.ToString("0.###", CultureInfo.InvariantCulture);
             var voiceGain = VoiceMixGain.ToString("0.###", CultureInfo.InvariantCulture);
             var hasMusic = !string.IsNullOrWhiteSpace(musicMp3) && File.Exists(musicMp3);

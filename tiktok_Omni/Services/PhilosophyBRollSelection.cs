@@ -164,6 +164,97 @@ namespace tiktok_Omni.Services
                 .ToList();
         }
 
+        public sealed class BrollCatalogEntry
+        {
+            public string FileName { get; set; } = string.Empty;
+
+            public string FullPath { get; set; } = string.Empty;
+
+            public string Category { get; set; } = string.Empty;
+        }
+
+        /// <summary>Liệt kê toàn bộ video B-roll kèm tên file cho Gemini gợi ý.</summary>
+        public static List<BrollCatalogEntry> EnumerateVideoCatalog(string profileName)
+        {
+            return CollectVideoFiles(profileName)
+                .Select(path => new BrollCatalogEntry
+                {
+                    FileName = Path.GetFileName(path) ?? string.Empty,
+                    FullPath = path,
+                    Category = DescribeVideoCategory(path, profileName)
+                })
+                .OrderBy(e => e.Category, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(e => e.FileName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        /// <summary>Ánh xạ tên file Gemini gợi ý → đường dẫn video hợp lệ.</summary>
+        public static string ResolveGeminiBrollFileName(string profileName, string suggestedFileName)
+        {
+            var suggestion = (suggestedFileName ?? string.Empty).Trim().Trim('"');
+            if (string.IsNullOrEmpty(suggestion) || IsRandomToken(suggestion))
+            {
+                return RandomToken;
+            }
+
+            suggestion = Path.GetFileName(suggestion);
+            var catalog = EnumerateVideoCatalog(profileName);
+            if (catalog.Count == 0)
+            {
+                return RandomToken;
+            }
+
+            var exact = catalog.FirstOrDefault(e =>
+                string.Equals(e.FileName, suggestion, StringComparison.OrdinalIgnoreCase));
+            if (exact != null)
+            {
+                return exact.FullPath;
+            }
+
+            var stem = Path.GetFileNameWithoutExtension(suggestion) ?? string.Empty;
+            exact = catalog.FirstOrDefault(e =>
+                string.Equals(Path.GetFileNameWithoutExtension(e.FileName), stem, StringComparison.OrdinalIgnoreCase));
+            if (exact != null)
+            {
+                return exact.FullPath;
+            }
+
+            var partial = catalog.FirstOrDefault(e =>
+                e.FileName.IndexOf(stem, StringComparison.OrdinalIgnoreCase) >= 0
+                || (!string.IsNullOrEmpty(stem)
+                    && stem.IndexOf(Path.GetFileNameWithoutExtension(e.FileName) ?? string.Empty,
+                        StringComparison.OrdinalIgnoreCase) >= 0));
+            if (partial != null)
+            {
+                return partial.FullPath;
+            }
+
+            return RandomToken;
+        }
+
+        private static string DescribeVideoCategory(string fullPath, string profileName)
+        {
+            var path = (fullPath ?? string.Empty).Replace('/', '\\');
+            var nick = ProfileScopedPaths.ResolveProfileName(profileName);
+            var profileBroll = Path.Combine(PhilosophyProfileAssets.GetAssetsRoot(nick), "broll");
+            if (path.IndexOf(profileBroll, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                var rel = path.Substring(profileBroll.Length).TrimStart('\\');
+                var folder = Path.GetDirectoryName(rel);
+                return string.IsNullOrEmpty(folder) ? "profile/broll" : "profile/broll/" + folder;
+            }
+
+            var shared = ProfileScopedPaths.GetSharedBackgroundsDirectory();
+            if (path.IndexOf(shared, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                var rel = path.Substring(shared.Length).TrimStart('\\');
+                var folder = Path.GetDirectoryName(rel);
+                return string.IsNullOrEmpty(folder) ? "shared" : "shared/" + folder;
+            }
+
+            return "assets";
+        }
+
         private static IEnumerable<string> EnumerateVideoPoolDirectories(string profileName)
         {
             var nick = ProfileScopedPaths.ResolveProfileName(profileName);
@@ -273,7 +364,7 @@ namespace tiktok_Omni.Services
                 var trimmed = (value ?? string.Empty).Trim();
                 if (string.IsNullOrEmpty(trimmed))
                 {
-                    return "Chế độ 3: chọn ảnh nền tham chiếu — Gemini dùng ảnh + câu triết lý để viết prompt phân cảnh.";
+                    return "Chế độ 3: chọn ảnh nền tham chiếu — Gemini dùng ảnh + quote để viết prompt phân cảnh.";
                 }
 
                 if (File.Exists(trimmed) && IsImageFile(trimmed))

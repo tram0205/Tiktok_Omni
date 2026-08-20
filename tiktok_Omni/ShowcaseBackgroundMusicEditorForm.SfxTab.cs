@@ -22,6 +22,12 @@ namespace tiktok_Omni
 
         private void BuildSfxTab(TabPage tab)
         {
+            if (_philosophyMode)
+            {
+                BuildPhilosophyAmbientTab(tab);
+                return;
+            }
+
             tab.AutoScroll = false;
             tab.HorizontalScroll.Enabled = false;
             tab.HorizontalScroll.Visible = false;

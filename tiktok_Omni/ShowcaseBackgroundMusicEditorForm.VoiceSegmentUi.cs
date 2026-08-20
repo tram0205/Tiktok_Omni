@@ -39,11 +39,13 @@ namespace tiktok_Omni
             public Control ProsodyHost;
             public Control CustomToneHost;
             public Label FootnoteLabel;
-            public GroupBox Shell;
+            public Control Shell;
             public FlowLayoutPanel NarrationButtonRow;
             public TrackBar TrkNarrationSpeed;
             public Label LblNarrationSpeedValue;
             public Control NarrationSpeedHost;
+            public TableLayoutPanel LeftFieldsPanel;
+            public TableLayoutPanel RightParamsPanel;
         }
 
         private VoiceSegmentUi _hookVoice;
@@ -150,7 +152,22 @@ namespace tiktok_Omni
             }
 
             var tableH = seg.Table.GetPreferredSize(new Size(layoutW, 0)).Height;
-            seg.Shell.Height = tableH + seg.Shell.Padding.Vertical + VoiceSegV(8);
+            var targetH = tableH + seg.Shell.Padding.Vertical + VoiceSegV(8);
+            if (seg.Shell.Height == targetH)
+            {
+                return;
+            }
+
+            _voiceUiLock = true;
+            try
+            {
+                seg.Shell.Height = targetH;
+            }
+            finally
+            {
+                _voiceUiLock = false;
+            }
+
             _voiceColumnsPanel?.PerformLayout();
         }
 
@@ -158,6 +175,12 @@ namespace tiktok_Omni
         {
             if (seg?.Shell == null || seg.Table == null)
             {
+                return;
+            }
+
+            if (_philosophyMode && seg.LeftFieldsPanel != null)
+            {
+                LayoutPhilosophySegmentFromShellClient(seg);
                 return;
             }
 
@@ -621,16 +644,19 @@ namespace tiktok_Omni
                 SyncSegmentShellHeight(seg);
             };
 
-            host.Controls.Add(new Label
+            if (!_philosophyMode)
             {
-                AutoSize = true,
-                ForeColor = Color.FromArgb(140, 148, 162),
-                Font = new Font("Segoe UI", 9.25F),
-                Text = seg.IsHook
-                    ? "Chỉ áp dụng khi Phong cách hook = «⚙ Tùy chỉnh giọng» — kéo 3 số ElevenLabs."
-                    : "Chỉ áp dụng khi Tone giọng = «Tùy chỉnh» — kéo 3 số ElevenLabs.",
-                Margin = new Padding(0, 0, 0, VoiceSegV(4))
-            });
+                host.Controls.Add(new Label
+                {
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(140, 148, 162),
+                    Font = new Font("Segoe UI", 9.25F),
+                    Text = seg.IsHook
+                        ? "Chỉ áp dụng khi Phong cách hook = «⚙ Tùy chỉnh giọng» — kéo 3 số ElevenLabs."
+                        : "Chỉ áp dụng khi Tone giọng = «Tùy chỉnh» — kéo 3 số ElevenLabs.",
+                    Margin = new Padding(0, 0, 0, VoiceSegV(4))
+                });
+            }
 
             host.Controls.Add(BuildEdgeProsodySliderRow(
                 "Stability",
@@ -751,6 +777,7 @@ namespace tiktok_Omni
         private ComboBox CreateVoiceSegmentCombo()
         {
             var combo = CreateDropDownCombo();
+            combo.Dock = DockStyle.None;
             combo.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             combo.Width = 400;
             combo.DropDownWidth = 900;
@@ -1093,7 +1120,7 @@ namespace tiktok_Omni
             ShowcaseVoicePresetDimensions.BuildFromVoiceUi(
                 DefaultSegmentAgeId,
                 SegmentIsEleven(seg)
-                    ? ShowcaseVoicePresetDimensions.Language.ViSouth
+                    ? ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(SelectedDimensionId(seg.CbLanguage))
                     : SelectedDimensionId(seg.CbLanguage),
                 seg.IsHook ? ShowcaseVoicePresetDimensions.Tone.Natural : SelectedDimensionId(seg.CbTone),
                 SegmentIsEdge(seg) ? SelectedDimensionId(seg.CbGender) : null);
@@ -1110,7 +1137,8 @@ namespace tiktok_Omni
                 if (SegmentIsEleven(seg))
                 {
                     _video.ShowcaseVoiceAgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(DefaultSegmentAgeId);
-                    _video.ShowcaseVoiceLanguageId = ShowcaseVoicePresetDimensions.Language.ViSouth;
+                    _video.ShowcaseVoiceLanguageId = ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(
+                        SelectedDimensionId(seg.CbLanguage));
                     _video.ShowcaseHookElevenPersona =
                         ElevenVoicePersonaCatalog.Normalize(SelectedDimensionId(seg.CbElevenPersona));
                 }
@@ -1152,7 +1180,8 @@ namespace tiktok_Omni
             if (SegmentIsEleven(seg))
             {
                 _video.ShowcaseBodyVoiceAgeId = ShowcaseVoicePresetDimensions.NormalizeAgeId(DefaultSegmentAgeId);
-                _video.ShowcaseBodyVoiceLanguageId = ShowcaseVoicePresetDimensions.Language.ViSouth;
+                _video.ShowcaseBodyVoiceLanguageId = ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(
+                    SelectedDimensionId(seg.CbLanguage));
                 _video.ShowcaseBodyElevenPersona =
                     ElevenVoicePersonaCatalog.Normalize(SelectedDimensionId(seg.CbElevenPersona));
             }
@@ -1234,12 +1263,16 @@ namespace tiktok_Omni
                 ShowcaseVoicePresetDimensions.NormalizeGenderId(
                     string.IsNullOrWhiteSpace(genderId) ? dims.GenderId : genderId));
             var resolvedLangId = string.IsNullOrWhiteSpace(langId) ? dims.LanguageId : langId;
-            if (SegmentIsEdge(seg))
+            if (SegmentIsEleven(seg))
             {
-                SelectDimensionCombo(
-                    seg.CbLanguage,
-                    ShowcaseVoicePresetDimensions.NormalizeLanguageId(resolvedLangId));
+                resolvedLangId = ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(resolvedLangId);
             }
+            else
+            {
+                resolvedLangId = ShowcaseVoicePresetDimensions.NormalizeLanguageId(resolvedLangId);
+            }
+
+            RefreshSegmentLanguageComboItems(seg, resolvedLangId);
             SelectDimensionCombo(
                 seg.CbTone,
                 seg.IsHook
@@ -1273,7 +1306,56 @@ namespace tiktok_Omni
 
         internal void ApplyVoiceSegmentLayoutFromTab(int tabInnerWidth)
         {
-            ApplyVoiceSegmentColumnWidths(tabInnerWidth);
+            if (_philosophyMode)
+            {
+                ApplyPhilosophyVoiceSegmentColumnWidths(tabInnerWidth);
+            }
+            else
+            {
+                ApplyVoiceSegmentColumnWidths(tabInnerWidth);
+            }
+        }
+
+        private void RefreshSegmentLanguageComboItems(VoiceSegmentUi seg, string preferredLanguageId = null)
+        {
+            if (seg?.CbLanguage == null)
+            {
+                return;
+            }
+
+            var eleven = SegmentIsEleven(seg);
+            if (_philosophyMode && !seg.IsHook && !eleven)
+            {
+                return;
+            }
+
+            var current = preferredLanguageId;
+            if (string.IsNullOrWhiteSpace(current))
+            {
+                current = SelectedDimensionId(seg.CbLanguage);
+                if (string.IsNullOrWhiteSpace(current))
+                {
+                    current = seg.IsHook ? _video.ShowcaseVoiceLanguageId : _video.ShowcaseBodyVoiceLanguageId;
+                }
+            }
+
+            var options = eleven
+                ? ShowcaseVoicePresetDimensions.ListElevenLanguageOptions()
+                : ShowcaseVoicePresetDimensions.ListLanguageOptions();
+            var normalized = eleven
+                ? ShowcaseVoicePresetDimensions.NormalizeElevenLanguageId(current)
+                : ShowcaseVoicePresetDimensions.NormalizeLanguageId(current);
+
+            _voiceUiLock = true;
+            try
+            {
+                FillDimensionCombo(seg.CbLanguage, options);
+                SelectDimensionCombo(seg.CbLanguage, normalized);
+            }
+            finally
+            {
+                _voiceUiLock = false;
+            }
         }
 
         private void RefreshSegmentStyleComboItems(VoiceSegmentUi seg)
@@ -1453,7 +1535,14 @@ namespace tiktok_Omni
                         RefreshNarrationButtons();
                     }
                 };
-                host.Controls.Add(_btnRenderFullMixedAudio);
+                if (_philosophyMode && _bodyVoice?.NarrationButtonRow != null)
+                {
+                    _bodyVoice.NarrationButtonRow.Controls.Add(_btnRenderFullMixedAudio);
+                }
+                else
+                {
+                    host.Controls.Add(_btnRenderFullMixedAudio);
+                }
             }
 
             if (_listenFullMixedAudioAsync != null)
@@ -1479,7 +1568,10 @@ namespace tiktok_Omni
                         RefreshNarrationButtons();
                     }
                 };
-                host.Controls.Add(_btnListenFullMixedAudio);
+                if (!_philosophyMode)
+                {
+                    host.Controls.Add(_btnListenFullMixedAudio);
+                }
             }
         }
 
@@ -1658,7 +1750,7 @@ namespace tiktok_Omni
             else
             {
                 gen = _btnGenerateBodyNarration;
-                listen = _btnListenBodyNarration;
+                listen = _philosophyMode ? null : _btnListenBodyNarration;
             }
 
             foreach (var btn in new[] { gen, listen })
@@ -1669,6 +1761,11 @@ namespace tiktok_Omni
                 }
 
                 Form1.ResizeAppJellyButton(btn, minWidth: 96);
+            }
+
+            if (_philosophyMode && !seg.IsHook && _btnRenderFullMixedAudio != null && _btnRenderFullMixedAudio.Visible)
+            {
+                Form1.ResizeAppJellyButton(_btnRenderFullMixedAudio, minWidth: 96);
             }
 
             seg.NarrationButtonRow?.PerformLayout();

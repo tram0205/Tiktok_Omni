@@ -1245,10 +1245,17 @@ namespace tiktok_Omni
 
             btnVideoReupOpenMusicFolder = CreateReupJellyButton(
                 "btnVideoReupOpenMusicFolder",
-                "Thư mục nhạc",
+                "🎵 Thư viện nhạc nền",
                 ReupTintFolder,
-                120);
+                168);
             btnVideoReupOpenMusicFolder.Click += btnVideoReupOpenMusicFolder_Click;
+
+            btnVideoReupOpenLogoLibrary = CreateReupJellyButton(
+                "btnVideoReupOpenLogoLibrary",
+                "🏷 Thư viện logo",
+                Color.FromArgb(72, 118, 168),
+                148);
+            btnVideoReupOpenLogoLibrary.Click += btnVideoReupOpenLogoLibrary_Click;
 
             pnlReupGridToolbar = new Panel
             {
@@ -1467,9 +1474,9 @@ namespace tiktok_Omni
             cbVideoReupMusic.SelectedIndexChanged += cbVideoReupMusic_SelectedIndexChanged;
             btnVideoReupOpenHookSfxFolder = CreateReupJellyButton(
                 "btnVideoReupOpenHookSfxFolder",
-                "Thư mục SFX",
+                "🔊 Hiệu ứng âm thanh",
                 ReupTintFolder,
-                148);
+                168);
             btnVideoReupOpenHookSfxFolder.Click += btnVideoReupOpenHookSfxFolder_Click;
             lblVideoReupMusicPathHint = new Label
             {

@@ -46,6 +46,9 @@ namespace tiktok_Omni.Services
             AppSettings settings,
             int minDurationSeconds = 15,
             int maxDurationSeconds = 60,
+            string profileName = null,
+            string contentTemplateId = null,
+            string contentMetadata = null,
             CancellationToken cancellationToken = default)
         {
             if (settings == null || string.IsNullOrWhiteSpace(settings.AiApiKey))
@@ -62,6 +65,10 @@ namespace tiktok_Omni.Services
                 settings.AiModel,
                 minDurationSeconds,
                 maxDurationSeconds,
+                profileName,
+                settings,
+                contentTemplateId,
+                contentMetadata,
                 cancellationToken);
         }
 

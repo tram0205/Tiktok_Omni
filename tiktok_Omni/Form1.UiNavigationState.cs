@@ -8,6 +8,8 @@ namespace tiktok_Omni
     public partial class Form1
     {
         private bool _suppressUiNavigationPersist = true;
+        private bool _applicationClosing;
+        private bool _consoleFastExit;
 
         private void ApplyUiNavigationToSettings(AppSettings settings)
         {

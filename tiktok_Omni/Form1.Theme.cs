@@ -157,7 +157,7 @@ namespace tiktok_Omni
         internal const int AppJellyButtonMinWidth = 72;
 
         /// <summary>Nút primary lớn (Render & Đóng gói, Bắt đầu Render…) — nổi hơn toolbar.</summary>
-        internal const float AppPrimaryActionFontSize = 15F;
+        internal const float AppPrimaryActionFontSize = 19F;
         internal const int AppPrimaryActionHeight = 80;
         internal const int AppPrimaryActionHorizontalPad = 40;
         internal const int AppPrimaryActionMinWidth = 450;

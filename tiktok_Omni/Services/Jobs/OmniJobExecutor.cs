@@ -411,7 +411,7 @@ namespace tiktok_Omni.Services.Jobs
                 throw new InvalidOperationException("Script trống.");
             }
 
-            ui.Log("[Job] Triết lý — nick «" + nick + "»: " +
+            ui.Log("[Job] Quote — nick «" + nick + "»: " +
                    (content.Length > 60 ? content.Substring(0, 60) + "…" : content));
 
             try

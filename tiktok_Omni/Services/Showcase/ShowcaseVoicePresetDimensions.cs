@@ -131,7 +131,7 @@ namespace tiktok_Omni.Services.Showcase
             new VoiceDimensionChoice(Tone.Ethereal, "Thanh — thoát"),
             new VoiceDimensionChoice(Tone.Cheerful, "Vui vẻ — nhanh nhịp"),
             new VoiceDimensionChoice(Tone.Sweet, "Ngọt ngào"),
-            new VoiceDimensionChoice(Tone.Philosophy, "Triết lý — chậm rãi"),
+            new VoiceDimensionChoice(Tone.Philosophy, "Quote — chậm rãi"),
             new VoiceDimensionChoice(Tone.Narrator, "Kể chuyện — trung tính"),
             new VoiceDimensionChoice(Tone.Custom, "⚙ Tùy chỉnh (stability/similarity/style)")
         };

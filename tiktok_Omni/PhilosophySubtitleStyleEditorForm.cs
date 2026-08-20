@@ -27,7 +27,7 @@ namespace tiktok_Omni
             PhilosophySubtitleStyleHelper.EnsureDefaults(_item);
 
             var preview = TrimPreview(_item.Content);
-            Text = "Phụ đề — " + (string.IsNullOrEmpty(preview) ? "Video Triết lý" : preview);
+            Text = "Phụ đề — " + (string.IsNullOrEmpty(preview) ? "Video Quote" : preview);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -131,7 +131,7 @@ namespace tiktok_Omni
             tbl.Controls.Add(_cbColourPreset, 1, 3);
             tbl.SetColumnSpan(_cbColourPreset, 3);
 
-            var btnDefaults = CreateButton("Mặc định Triết lý", Color.FromArgb(70, 78, 96));
+            var btnDefaults = CreateButton("Mặc định Quote", Color.FromArgb(70, 78, 96));
             btnDefaults.Click += (_, __) =>
             {
                 PhilosophySubtitleStyleHelper.ApplyPhilosophyDefaults(_item);

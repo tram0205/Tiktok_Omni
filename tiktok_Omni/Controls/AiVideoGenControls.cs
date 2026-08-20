@@ -672,11 +672,11 @@ namespace tiktok_Omni.Controls
             _showcaseToolTip.SetToolTip(_btnShowcaseRealClipLibrary,
                 "Quản lý kho clip quay tay theo loại SP — thêm clip một lần, dùng cho mọi dòng cùng loại.");
             _showcaseToolTip.SetToolTip(_btnShowcaseMusicLibrary,
-                "Quản lý nhạc nền Assets\\Audio\\Music — Gemini chọn khi «Tạo kịch bản».");
+                "Quản lý nhạc nền Assets\\Audio\\Music — dùng chung mọi tab video.");
             _showcaseToolTip.SetToolTip(_btnShowcaseSfxLibrary,
-                "Quản lý hiệu ứng Assets\\Audio\\Sfx — hook / cảnh / CTA khi «Tạo kịch bản».");
+                "Quản lý hiệu ứng Assets\\Audio\\Sfx — dùng chung mọi tab video.");
             _showcaseToolTip.SetToolTip(_btnShowcaseLogoLibrary,
-                "Quản lý logo Assets\\Logos — chọn trên cột «Logo» khi render video.");
+                "Quản lý logo Assets\\Logos — dùng chung mọi tab video.");
             _showcaseToolTip.SetToolTip(_btnShowcaseMoveVideoRowUp,
                 "Đưa dòng đang chọn lên một vị trí trên lưới.");
             _showcaseToolTip.SetToolTip(_btnShowcaseMoveVideoRowDown,

@@ -1,4 +1,5 @@
 using System;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services
 {
@@ -8,6 +9,15 @@ namespace tiktok_Omni.Services
         public string BRollFolder { get; set; } = string.Empty;
 
         public string MusicFolder { get; set; } = string.Empty;
+
+        /// <summary>Âm lượng nhạc nền (0–100%) khi mix audio.</summary>
+        public int MusicVolumePercent { get; set; } = PhilosophyBatchHelper.DefaultMusicVolumePercent;
+
+        /// <summary>Tốc độ thoại (50–200%) khi mix audio.</summary>
+        public int NarrationSpeedPercent { get; set; } = ShowcaseNarrationSpeedHelper.DefaultManualSpeedPercent;
+
+        /// <summary>TTS/giọng từ popup Âm thanh batch — null = fallback mood + ElevenLabs.</summary>
+        public ShowcaseTtsRenderOptions TtsOptions { get; set; }
 
         /// <summary>Thư mục SFX môi trường (mưa/gió) — tùy chọn.</summary>
         public string AmbientFolder { get; set; } = string.Empty;
@@ -27,6 +37,9 @@ namespace tiktok_Omni.Services
         /// <summary>Mode 3: nội dung câu triết lý dùng để build prefix tên file quy ước.</summary>
         public string QuoteForSceneMatch { get; set; } = string.Empty;
 
+        /// <summary>Ảnh tham chiếu từ popup Nội dung (batch) — ưu tiên cho Veo I2V mode 2.</summary>
+        public string ReferenceImagePath { get; set; } = string.Empty;
+
         /// <summary>Đường dẫn ffmpeg.exe (tùy chọn — nếu trống thì tự resolve từ toolkit).</summary>
         public string FfmpegExe { get; set; } = string.Empty;
 
@@ -37,6 +50,20 @@ namespace tiktok_Omni.Services
 
         /// <summary>Thời lượng video tối đa (giây) — mục tiêu Gemini/TTS khi tạo kịch bản.</summary>
         public int MaxDurationSeconds { get; set; } = 60;
+
+        public bool BrandLogoEnabled { get; set; } = true;
+
+        public string BrandLogoFile { get; set; } = string.Empty;
+
+        public string BrandLogoPositionId { get; set; } = string.Empty;
+
+        public int BrandLogoScaleWidthPercent { get; set; }
+
+        public int BrandLogoMarginX { get; set; }
+
+        public int BrandLogoMarginY { get; set; }
+
+        public int BrandLogoOpacityPercent { get; set; }
 
         /// <summary>Khoảng lặng tối thiểu sau khi đọc hết quote.</summary>
         public const double OutroPadMinSeconds = 3d;

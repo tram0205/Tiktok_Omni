@@ -50,7 +50,7 @@ namespace tiktok_Omni.Services
             return GenerateScriptAsync(prompt, provider, apiKey, model, cancellationToken);
         }
 
-        /// <summary>Sinh kịch bản Triết lý — JSON array [{content, mood}].</summary>
+        /// <summary>Sinh kịch bản Triết lý — JSON array [{content, mood, motion_prompt, broll_video}].</summary>
         public async Task<IReadOnlyList<PhilosophyScriptItem>> GeneratePhilosophyScriptsAsync(
             string topic,
             string mode,
@@ -60,26 +60,58 @@ namespace tiktok_Omni.Services
             string model = "gemini-2.0-flash",
             int minDurationSeconds = 15,
             int maxDurationSeconds = 60,
+            string profileName = null,
+            AppSettings settings = null,
+            string contentTemplateId = null,
+            string contentMetadata = null,
             CancellationToken cancellationToken = default)
         {
-            var subject = (topic ?? string.Empty).Trim();
+            var preset = PhilosophyContentTemplatePresets.Resolve(contentTemplateId);
+            var subject = PhilosophyContentTemplatePresets.BuildTopicWithMetadata(topic, contentMetadata, preset);
             if (string.IsNullOrEmpty(subject))
             {
                 throw new ArgumentException("Chủ đề không được trống.", nameof(topic));
             }
 
-            var normalizedMode = (mode ?? "Quotes").Trim();
+            var normalizedMode = (mode ?? preset.GenerationMode).Trim();
             var isStory = normalizedMode.Equals("Story", StringComparison.OrdinalIgnoreCase)
-                          || normalizedMode.Contains("chuyện", StringComparison.OrdinalIgnoreCase);
+                          || normalizedMode.Contains("chuyện", StringComparison.OrdinalIgnoreCase)
+                          || preset.IsStory;
             var itemCount = isStory ? 1 : Math.Max(1, Math.Min(count, 20));
             var (minSec, maxSec) = PhilosophyRenderOptions.NormalizeDurationBounds(minDurationSeconds, maxDurationSeconds);
 
-            var prompt = isStory
-                ? BuildPhilosophyStoryPrompt(subject, minSec, maxSec)
-                : BuildPhilosophyQuotesPrompt(subject, itemCount, minSec, maxSec);
+            var mascot = PhilosophyGeminiBackgroundContext.BuildMascotContext(profileName, settings);
+            var brollSection = PhilosophyGeminiBackgroundContext.BuildBrollCatalogPromptSection(profileName);
+            var musicSection = PhilosophyGeminiBackgroundContext.BuildMusicCatalogPromptSection(settings);
+            var ambientSection = PhilosophyGeminiBackgroundContext.BuildSharedSfxCatalogPromptSection(settings);
+            var motionRules = PhilosophyGeminiBackgroundContext.BuildMotionPromptRules(mascot);
+            var templateHint = (preset?.PromptHint ?? string.Empty).Trim();
 
-            var raw = await GenerateScriptAsync(prompt, provider, apiKey, model, cancellationToken).ConfigureAwait(false);
-            var parsed = ParsePhilosophyScriptsJson(raw, isStory);
+            var prompt = isStory
+                ? BuildPhilosophyStoryPrompt(subject, minSec, maxSec, motionRules, brollSection, musicSection, ambientSection, templateHint)
+                : BuildPhilosophyQuotesPrompt(subject, itemCount, minSec, maxSec, motionRules, brollSection, musicSection, ambientSection, templateHint);
+
+            var normalizedProvider = (provider ?? string.Empty).Trim().ToLowerInvariant();
+            string raw;
+            if (normalizedProvider.Contains("claude") || normalizedProvider.Contains("anthropic"))
+            {
+                raw = await GenerateScriptAsync(prompt, provider, apiKey, model, cancellationToken).ConfigureAwait(false);
+            }
+            else if (mascot.HasMascotImage)
+            {
+                raw = await SendGeminiJsonWithImageAsync(
+                    prompt,
+                    mascot.MascotImagePath,
+                    model,
+                    apiKey,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                raw = await SendGeminiRequestAsync(prompt, model, apiKey, cancellationToken, jsonResponse: true).ConfigureAwait(false);
+            }
+
+            var parsed = ParsePhilosophyScriptsJson(raw, isStory, profileName, settings);
             if (parsed.Count == 0)
             {
                 throw new InvalidOperationException("Gemini không trả JSON kịch bản hợp lệ.");
@@ -88,11 +120,24 @@ namespace tiktok_Omni.Services
             return parsed;
         }
 
-        private static string BuildPhilosophyQuotesPrompt(string topic, int count, int minSeconds, int maxSeconds)
+        private static string BuildPhilosophyQuotesPrompt(
+            string topic,
+            int count,
+            int minSeconds,
+            int maxSeconds,
+            string motionRules,
+            string brollSection,
+            string musicSection,
+            string ambientSection,
+            string templateHint = null)
         {
             var (minWords, maxWords) = PhilosophyRenderOptions.EstimateSpeechWordCount(minSeconds, maxSeconds);
             var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var styleBlock = string.IsNullOrWhiteSpace(templateHint)
+                ? string.Empty
+                : "LOẠI NỘI DUNG / PHONG CÁCH:\r\n" + templateHint.Trim() + "\r\n\r\n";
             return "Bạn là biên kịch video triết lý TikTok tiếng Việt.\r\n" +
+                   styleBlock +
                    "CHỦ ĐỀ: [" + topic + "]\r\n\r\n" +
                    "THỜI LƯỢNG MỖI VIDEO: " + minSeconds.ToString(inv) + "–" + maxSeconds.ToString(inv) +
                    " giây (giọng đọc chậm, trầm, có khoảng dừng sau câu).\r\n" +
@@ -108,19 +153,39 @@ namespace tiktok_Omni.Services
                    + PhilosophyRenderOptions.OutroPadMaxSeconds.ToString("0", inv)
                    + " giây thở (tùy độ dài video phân cảnh cuối) — căn số từ cho khớp khung "
                    + minSeconds.ToString(inv) + "–" + maxSeconds.ToString(inv) + " giây đọc.\r\n" +
-                   "Mood chỉ được là một trong: calm, melancholic, hopeful, intense, reflective.\r\n" +
-                   "ambient (tiếng đệm) chỉ được là một trong: none, rain, wind, forest, ocean, city, fire, night, thunder, piano.\r\n" +
-                   "Gợi ý ambient theo mood: melancholic→rain, calm→wind, hopeful→forest, intense→thunder, reflective→night.\r\n\r\n" +
-                   "motion_prompt: mô tả ngắn cảnh quay dọc 9:16 cho AI video (tiếng Anh, không chữ trên màn hình).\r\n\r\n" +
+                   "Mood (tâm trạng) — BẮT BUỘC mỗi phần tử có trường \"mood\", chọn ĐÚNG cảm xúc của câu đó:\r\n" +
+                   "  • calm — bình an, nhẹ nhàng, an nhiên\r\n" +
+                   "  • melancholic — buồn, day dứt, hoài niệm\r\n" +
+                   "  • hopeful — hy vọng, lạc quan, hướng về tương lai\r\n" +
+                   "  • intense — mạnh mẽ, thúc đẩy, gay cấn\r\n" +
+                   "  • reflective — suy ngẫm, chiêm nghiệm, trầm lắng (chỉ dùng khi câu mang tone suy tư)\r\n" +
+                   "Không được để tất cả cùng mood. Với nhiều quote, mood phải đa dạng và khớp nội dung từng câu.\r\n\r\n" +
+                   ambientSection + "\r\n\r\n" +
+                   musicSection + "\r\n\r\n" +
+                   motionRules + "\r\n\r\n" +
+                   brollSection + "\r\n\r\n" +
                    "Trả về DUY NHẤT JSON array hợp lệ, không markdown, không giải thích:\r\n" +
-                   "[{\"content\":\"...\",\"mood\":\"reflective\",\"ambient\":\"rain\",\"motion_prompt\":\"slow cinematic drift through misty mountains, vertical 9:16\"}]";
+                   "[{\"content\":\"...\",\"mood\":\"melancholic\",\"ambient_sfx\":\"rain-light.mp3\",\"music_file\":\"sad-piano-bed.mp3\",\"motion_prompt\":\"the profile mascot character standing by a rain-streaked window, same face and outfit as reference, vertical 9:16\",\"broll_video\":\"rain-city-night.mp4\"}," +
+                   "{\"content\":\"...\",\"mood\":\"hopeful\",\"ambient_sfx\":\"none\",\"music_file\":\"hopeful-strings.mp3\",\"motion_prompt\":\"...\",\"broll_video\":\"@random\"}]";
         }
 
-        private static string BuildPhilosophyStoryPrompt(string topic, int minSeconds, int maxSeconds)
+        private static string BuildPhilosophyStoryPrompt(
+            string topic,
+            int minSeconds,
+            int maxSeconds,
+            string motionRules,
+            string brollSection,
+            string musicSection,
+            string ambientSection,
+            string templateHint = null)
         {
             var (minWords, maxWords) = PhilosophyRenderOptions.EstimateSpeechWordCount(minSeconds, maxSeconds);
             var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var styleBlock = string.IsNullOrWhiteSpace(templateHint)
+                ? string.Empty
+                : "LOẠI NỘI DUNG / PHONG CÁCH:\r\n" + templateHint.Trim() + "\r\n\r\n";
             return "Bạn là biên kịch video triết lý TikTok tiếng Việt.\r\n" +
+                   styleBlock +
                    "CHỦ ĐỀ / BÀI HỌC: [" + topic + "]\r\n\r\n" +
                    "THỜI LƯỢNG VIDEO: " + minSeconds.ToString(inv) + "–" + maxSeconds.ToString(inv) +
                    " giây (giọng kể chậm, trầm, có khoảng dừng).\r\n" +
@@ -128,14 +193,26 @@ namespace tiktok_Omni.Services
                    "Tổng BẮT BUỘC " + minWords.ToString(inv) + "–" + maxWords.ToString(inv) +
                    " từ tiếng Việt có dấu — không ít hơn " + minWords.ToString(inv) +
                    " và không quá " + maxWords.ToString(inv) + " từ.\r\n" +
-                   "Mood chỉ được là một trong: calm, melancholic, hopeful, intense, reflective.\r\n" +
-                   "ambient (tiếng đệm) chỉ được là một trong: none, rain, wind, forest, ocean, city, fire, night, thunder, piano.\r\n\r\n" +
-                   "motion_prompt: mô tả ngắn cảnh quay dọc 9:16 cho AI video (tiếng Anh).\r\n\r\n" +
+                   "Mood (tâm trạng) — BẮT BUỘC mỗi phần tử có trường \"mood\", chọn ĐÚNG cảm xúc của câu đó:\r\n" +
+                   "  • calm — bình an, nhẹ nhàng, an nhiên\r\n" +
+                   "  • melancholic — buồn, day dứt, hoài niệm\r\n" +
+                   "  • hopeful — hy vọng, lạc quan, hướng về tương lai\r\n" +
+                   "  • intense — mạnh mẽ, thúc đẩy, gay cấn\r\n" +
+                   "  • reflective — suy ngẫm, chiêm nghiệm, trầm lắng (chỉ dùng khi câu mang tone suy tư)\r\n" +
+                   "Không được để tất cả cùng mood. Với nhiều quote, mood phải đa dạng và khớp nội dung từng câu.\r\n\r\n" +
+                   ambientSection + "\r\n\r\n" +
+                   musicSection + "\r\n\r\n" +
+                   motionRules + "\r\n\r\n" +
+                   brollSection + "\r\n\r\n" +
                    "Trả về DUY NHẤT JSON array 1 phần tử, không markdown:\r\n" +
-                   "[{\"content\":\"...\",\"mood\":\"reflective\",\"ambient\":\"night\",\"motion_prompt\":\"slow cinematic forest path at dusk, vertical 9:16\"}]";
+                   "[{\"content\":\"...\",\"mood\":\"reflective\",\"ambient_sfx\":\"night-crickets.mp3\",\"music_file\":\"calm-ambient.mp3\",\"motion_prompt\":\"...\",\"broll_video\":\"forest-path.mp4\"}]";
         }
 
-        private static List<PhilosophyScriptItem> ParsePhilosophyScriptsJson(string raw, bool isStory)
+        private static List<PhilosophyScriptItem> ParsePhilosophyScriptsJson(
+            string raw,
+            bool isStory,
+            string profileName = null,
+            AppSettings settings = null)
         {
             var text = ExtractJsonArray(raw);
             if (string.IsNullOrWhiteSpace(text))
@@ -156,8 +233,10 @@ namespace tiktok_Omni.Services
                     }
 
                     var mood = NormalizePhilosophyMood((token["mood"] ?? token["tone"])?.ToString());
-                    var ambient = (token["ambient"] ?? token["ambience"] ?? token["sfx"])?.ToString();
+                    var ambientSfx = (token["ambient_sfx"] ?? token["ambientSfx"] ?? token["ambient"] ?? token["ambience"] ?? token["sfx"])?.ToString();
                     var motionPrompt = (token["motion_prompt"] ?? token["motionPrompt"])?.ToString()?.Trim() ?? string.Empty;
+                    var brollVideo = (token["broll_video"] ?? token["brollVideo"] ?? token["broll"])?.ToString()?.Trim() ?? string.Empty;
+                    var musicFile = (token["music_file"] ?? token["musicFile"] ?? token["background_music"])?.ToString()?.Trim() ?? string.Empty;
                     var row = new PhilosophyScriptItem
                     {
                         Content = content,
@@ -165,7 +244,17 @@ namespace tiktok_Omni.Services
                         MotionPrompt = motionPrompt,
                         Status = "Nháp"
                     };
-                    PhilosophyAmbientCatalog.ApplyGeminiAmbient(row, ambient);
+                    if (!string.IsNullOrWhiteSpace(profileName))
+                    {
+                        row.BRollFolder = PhilosophyBRollSelection.ResolveGeminiBrollFileName(profileName, brollVideo);
+                    }
+
+                    if (settings != null)
+                    {
+                        row.MusicFolder = PhilosophyBatchHelper.ResolveGeminiMusicFileName(settings, musicFile, mood);
+                    }
+
+                    PhilosophyAmbientCatalog.ApplyGeminiAmbient(row, ambientSfx, settings);
                     result.Add(row);
                 }
 
@@ -179,6 +268,9 @@ namespace tiktok_Omni.Services
                         Content = merged,
                         Mood = mood,
                         MotionPrompt = result[0].MotionPrompt,
+                        BRollFolder = result[0].BRollFolder,
+                        MusicFolder = result[0].MusicFolder,
+                        AmbientKey = result[0].AmbientKey,
                         Status = "Nháp"
                     };
                     PhilosophyAmbientCatalog.ApplyGeminiAmbient(storyRow, ambient);
@@ -1138,7 +1230,82 @@ namespace tiktok_Omni.Services
             return text;
         }
 
-        private static async Task<string> SendGeminiRequestAsync(string prompt, string model, string apiKey, CancellationToken cancellationToken)
+        private static async Task<string> SendGeminiJsonWithImageAsync(
+            string prompt,
+            string imagePath,
+            string model,
+            string apiKey,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            {
+                return await SendGeminiRequestAsync(prompt, model, apiKey, cancellationToken, jsonResponse: true)
+                    .ConfigureAwait(false);
+            }
+
+            var fileInfo = new FileInfo(imagePath);
+            if (fileInfo.Length > MaxInlineImageBytes)
+            {
+                return await SendGeminiRequestAsync(prompt, model, apiKey, cancellationToken, jsonResponse: true)
+                    .ConfigureAwait(false);
+            }
+
+            await _geminiThrottle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var safeModel = string.IsNullOrWhiteSpace(model) ? "gemini-2.0-flash" : model.Trim();
+                var mime = GuessImageMime(imagePath);
+                var bytes = await ReadAllBytesAsync(imagePath, cancellationToken).ConfigureAwait(false);
+                var b64 = Convert.ToBase64String(bytes);
+
+                var body = new JObject
+                {
+                    ["contents"] = new JArray(
+                        new JObject
+                        {
+                            ["role"] = "user",
+                            ["parts"] = new JArray(
+                                new JObject { ["text"] = prompt },
+                                new JObject
+                                {
+                                    ["inline_data"] = new JObject
+                                    {
+                                        ["mime_type"] = mime,
+                                        ["data"] = b64
+                                    }
+                                })
+                        }),
+                    ["generationConfig"] = new JObject
+                    {
+                        ["responseMimeType"] = "application/json"
+                    }
+                };
+
+                var endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + safeModel + ":generateContent";
+                var apiClient = new ApiClient(endpoint, TimeSpan.FromMinutes(3));
+                var request = new RestRequest(string.Empty, Method.Post);
+                request.AddHeader("Content-Type", "application/json");
+                request.AddQueryParameter("key", apiKey);
+                request.AddStringBody(body.ToString(Newtonsoft.Json.Formatting.None), DataFormat.Json);
+
+                var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                var json = JObject.Parse(response.Content ?? "{}");
+                return json["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.ToString()
+                       ?? string.Empty;
+            }
+            finally
+            {
+                await Task.Delay(4000, CancellationToken.None).ConfigureAwait(false);
+                _geminiThrottle.Release();
+            }
+        }
+
+        private static async Task<string> SendGeminiRequestAsync(
+            string prompt,
+            string model,
+            string apiKey,
+            CancellationToken cancellationToken,
+            bool jsonResponse = false)
         {
             var safeModel = string.IsNullOrWhiteSpace(model) ? "gemini-2.0-flash" : model.Trim();
             var endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/{safeModel}:generateContent";
@@ -1147,20 +1314,44 @@ namespace tiktok_Omni.Services
             var request = new RestRequest(string.Empty, Method.Post);
             request.AddHeader("Content-Type", "application/json");
             request.AddQueryParameter("key", apiKey);
-            request.AddJsonBody(new
+            if (jsonResponse)
             {
-                contents = new[]
+                request.AddJsonBody(new
                 {
-                    new
+                    contents = new[]
                     {
-                        role = "user",
-                        parts = new[]
+                        new
                         {
-                            new { text = prompt }
+                            role = "user",
+                            parts = new[]
+                            {
+                                new { text = prompt }
+                            }
+                        }
+                    },
+                    generationConfig = new
+                    {
+                        responseMimeType = "application/json"
+                    }
+                });
+            }
+            else
+            {
+                request.AddJsonBody(new
+                {
+                    contents = new[]
+                    {
+                        new
+                        {
+                            role = "user",
+                            parts = new[]
+                            {
+                                new { text = prompt }
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
 
             var response = await apiClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
             var json = JObject.Parse(response.Content ?? "{}");

@@ -478,25 +478,42 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (!string.Equals(video.OutputVideoPath, outputPath, StringComparison.OrdinalIgnoreCase))
+            OpenShowcaseFinishedVideoFile(video, outputPath);
+            await Task.CompletedTask;
+        }
+
+        private void OpenShowcaseFinishedVideoFile(ShowcaseVideoItem video, string outputPath)
+        {
+            var path = (outputPath ?? string.Empty).Trim();
+            if (path.Length == 0 || !File.Exists(path))
             {
-                video.OutputVideoPath = outputPath;
-                video.RefreshDisplayFields();
-                NotifyShowcaseDraftDirty();
+                return;
+            }
+
+            var productName = (video?.ProductName ?? string.Empty).Trim();
+            if (video != null)
+            {
+                ActivateShowcaseVideo(video, refreshStoryboard: false);
+                if (!string.Equals(video.OutputVideoPath, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    video.OutputVideoPath = path;
+                    video.RefreshDisplayFields();
+                    NotifyShowcaseDraftDirty();
+                }
             }
 
             try
             {
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = outputPath,
+                    FileName = path,
                     UseShellExecute = true
                 });
-                LogShowcase("[Showcase] Xem video thành phẩm → " + outputPath);
+                LogShowcase("[Showcase] Xem video thành phẩm → " + path);
                 LoadProductionVideoPreview(
-                    outputPath,
-                    ProductionPipeline.ResolveThumbnailPath(outputPath),
-                    productName);
+                    path,
+                    ProductionPipeline.ResolveThumbnailPath(path),
+                    productName.Length > 0 ? productName : Path.GetFileNameWithoutExtension(path));
             }
             catch (Exception ex)
             {
@@ -507,8 +524,24 @@ namespace tiktok_Omni
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
             }
+        }
 
-            await Task.CompletedTask;
+        private void PromptShowcaseRenderCompleteDialog(ShowcaseVideoItem video, string outputPath)
+        {
+            var path = (outputPath ?? string.Empty).Trim();
+            if (path.Length == 0 || !File.Exists(path))
+            {
+                return;
+            }
+
+            var productName = (video?.ProductName ?? string.Empty).Trim();
+            using (var dlg = new ShowcaseRenderCompleteDialog(productName, path))
+            {
+                if (dlg.ShowDialog(ShowcaseActiveDialogOwner ?? this) == DialogResult.OK)
+                {
+                    OpenShowcaseFinishedVideoFile(video, path);
+                }
+            }
         }
 
         private async Task OpenShowcaseOutputFolderForVideoAsync(

@@ -28,10 +28,6 @@ namespace tiktok_Omni
 
     {
 
-        private static readonly Color AiVideoGenProcessedRowBack = Color.FromArgb(210, 240, 220);
-
-        private static readonly Color AiVideoGenProcessedRowFore = Color.FromArgb(24, 48, 32);
-
         private List<ProfileComboEntry> _aiVideoGenProfileComboSource = new List<ProfileComboEntry>();
 
         private const string AiVideoGenDragDropFormat = "tiktok_Omni.AiVideoGenInputItem";
@@ -2055,50 +2051,13 @@ namespace tiktok_Omni
 
             var row = grid.Rows[e.RowIndex];
 
-            if (row?.DataBoundItem is AiVideoGenInputItem item && item.IsProcessed)
-
+            if (row != null)
             {
-
-                row.DefaultCellStyle.BackColor = AiVideoGenProcessedRowBack;
-
-                row.DefaultCellStyle.ForeColor = AiVideoGenProcessedRowFore;
-
-                row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(120, 180, 140);
-
-                row.DefaultCellStyle.SelectionForeColor = Color.White;
-
-            }
-
-            else if (grid == dgvDeepDiveInput &&
-                     row?.DataBoundItem is ShowcaseVideoItem showcaseRow &&
-                     string.Equals(showcaseRow.PipelineStatus, "Xong", StringComparison.OrdinalIgnoreCase))
-
-            {
-
-                row.DefaultCellStyle.BackColor = AiVideoGenProcessedRowBack;
-
-                row.DefaultCellStyle.ForeColor = AiVideoGenProcessedRowFore;
-
-                row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(120, 180, 140);
-
-                row.DefaultCellStyle.SelectionForeColor = Color.White;
-
-            }
-
-            else if (row != null)
-
-            {
-
                 row.DefaultCellStyle.BackColor = Color.FromArgb(20, 22, 28);
-
                 row.DefaultCellStyle.ForeColor = Color.Gainsboro;
-
                 row.DefaultCellStyle.SelectionBackColor = Color.FromArgb(76, 110, 245);
-
                 row.DefaultCellStyle.SelectionForeColor = Color.White;
-
             }
-
         }
 
 

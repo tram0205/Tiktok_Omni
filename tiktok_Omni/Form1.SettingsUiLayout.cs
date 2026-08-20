@@ -481,21 +481,20 @@ namespace tiktok_Omni
 
         private JellyButton CreateSettingsSaveButton(string name, string text)
         {
-            // Nút Lưu nổi bật hơn primary thường.
-            var btn = CreateAppPrimaryJellyButton(
+            var btn = CreateAppJellyButton(
                 name,
                 text,
                 Color.FromArgb(28, 156, 72),
-                minWidth: 300,
-                margin: new Padding(8, 0, 8, 2));
-            btn.JellyFillOpacity = 1f;
+                heightOverride: AppJellyButtonHeight,
+                minWidth: 160,
+                horizontalPad: AppJellyButtonHorizontalPad,
+                margin: new Padding(8, 0, 8, 2),
+                lockSize: true,
+                fontOverride: AppJellyButtonFont,
+                fillOpacity: 1f);
             btn.ForeColor = Color.White;
             btn.Anchor = AnchorStyles.None;
             btn.Cursor = Cursors.Hand;
-            btn.Height = Math.Max(AppPrimaryActionHeight, 72);
-            btn.MinimumSize = new Size(300, btn.Height);
-            btn.MaximumSize = new Size(300, btn.Height);
-            btn.Width = 300;
             return btn;
         }
 
@@ -1750,7 +1749,7 @@ namespace tiktok_Omni
                 "Cặp với «Khóa RapidAPI Veo» ngay bên dưới trong cùng cột.");
 
             var personaHint = "Voice ID ElevenLabs cho giọng «{0}» — dùng chung mọi tab video khi chọn " +
-                               "giọng này (Showcase Audio hook/thân, sau này Triết lý/Reup).";
+                               "giọng này (Showcase Audio hook/thân, sau này Quote/Reup).";
             void SetPersonaTip(TextBox field, string label)
             {
                 if (field != null)

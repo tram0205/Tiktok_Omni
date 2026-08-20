@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Models;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Showcase;
 
@@ -29,6 +30,12 @@ namespace tiktok_Omni
         private readonly Func<bool> _canListenFullMixedAudio;
         private readonly Func<bool> _openScriptEditor;
 
+        private readonly bool _philosophyMode;
+        private string _philosophyAmbientKey;
+        private readonly string _philosophyMusicLibrarySummary;
+        private ComboBox _cbPhilosophyAmbient;
+        private Label _lblPhilosophyAmbientHint;
+
         private JellyButton _btnGenerateHookNarration;
         private JellyButton _btnGenerateBodyNarration;
         private JellyButton _btnListenHookNarration;
@@ -46,8 +53,12 @@ namespace tiktok_Omni
         private ComboBox _cbHookTtsEngine;
         private ComboBox _cbBodyTtsEngine;
         private bool _voiceUiLock;
-        private TabPage _voiceTabPage;
+        private Control _voiceTabHost;
+        private TableLayoutPanel _philosophyVoiceTabLayout;
         private FlowLayoutPanel _voiceTabRoot;
+        private bool _philosophyVoiceLayoutReady;
+        private FlowLayoutPanel _voiceFooterActionsRow;
+        private Panel _voiceFooterActionsHost;
         private Panel _voiceReviewScriptRow;
         private Panel _footerBarPanel;
         private TableLayoutPanel _footerStack;
@@ -66,6 +77,11 @@ namespace tiktok_Omni
         private const int VoiceTabHeightFitBuffer = 56;
         private const int FooterBarMinHeight = 248;
         private const int TabFooterSpacerHeight = 14;
+        private const int PhilosophyDialogClientWidth = 2560;
+        private const int PhilosophyDialogClientHeight = 1607;
+        private const int PhilosophyDialogMinWidth = 1840;
+        private const int PhilosophyDialogMinHeight = 1215;
+        private const float PhilosophyDialogVerticalBias = 0.18f;
         private const float MusicComboWidthScale = 0.64f;
         private const float MusicVolumeSliderWidthScale = 0.5f;
         private const int MusicTabLabelColumnWidth = 256;
@@ -86,8 +102,16 @@ namespace tiktok_Omni
             Func<Task> listenFullMixedAudioAsync = null,
             Func<bool> canRenderFullMixedAudio = null,
             Func<bool> canListenFullMixedAudio = null,
-            Func<bool> openScriptEditor = null)
+            Func<bool> openScriptEditor = null,
+            bool philosophyMode = false,
+            string philosophyAmbientKey = null,
+            string philosophyMusicLibrarySummary = null,
+            PhilosophyBatchItem philosophyBatch = null)
         {
+            _philosophyMode = philosophyMode;
+            _philosophyAmbientKey = PhilosophyAmbientCatalog.NormalizeKey(philosophyAmbientKey);
+            _philosophyMusicLibrarySummary = philosophyMusicLibrarySummary;
+            _philosophyBatch = philosophyBatch;
             _video = video ?? throw new ArgumentNullException(nameof(video));
             _settings = settings ?? new AppSettings();
             _generateHookNarrationAsync = generateHookNarrationAsync;
@@ -115,21 +139,123 @@ namespace tiktok_Omni
             BackColor = Color.FromArgb(31, 34, 42);
             ForeColor = Color.Gainsboro;
             Font = new Font("Segoe UI", 10.5F);
-            ClientSize = new Size(DialogClientWidth, DialogClientHeight);
-            MinimumSize = new Size(DialogClientWidth, DialogClientHeight);
+            if (_philosophyMode)
+            {
+                var philosophySize = ResolvePhilosophyDialogClientSize();
+                ClientSize = philosophySize;
+                MinimumSize = new Size(
+                    Math.Min(PhilosophyDialogMinWidth, philosophySize.Width),
+                    Math.Min(PhilosophyDialogMinHeight, philosophySize.Height));
+            }
+            else
+            {
+                ClientSize = new Size(DialogClientWidth, DialogClientHeight);
+                MinimumSize = new Size(DialogClientWidth, DialogClientHeight);
+            }
             Padding = new Padding(DialogOuterPaddingH, DialogOuterPaddingTop, DialogOuterPaddingH, DialogOuterPaddingBottom);
             BuildUi();
             AppFormTitleBarHelper.ApplyShowcaseAudioDialogTitleBar(this);
             WireAudioPreviewLifecycle();
             LoadFromVideo();
-            RefreshNarrationButtons();
-            Shown += (_, __) => BeginInvoke(new Action(FitDialogClientHeightToVoiceTabContent));
+            if (_philosophyMode)
+            {
+                ApplyPhilosophyModeUi();
+                FinalizePhilosophyDialogLayout();
+            }
+            else
+            {
+                RefreshNarrationButtons();
+            }
+
+            Shown += (_, __) => OnAudioDialogShown();
+        }
+
+        private void FinalizePhilosophyDialogLayout()
+        {
+            if (!_philosophyMode)
+            {
+                return;
+            }
+
+            EnsurePhilosophyQuotesAudioGrid();
+            RefreshPhilosophyQuoteBatchActionLabels();
+        }
+
+        private void OnAudioDialogShown()
+        {
+            if (_philosophyMode)
+            {
+                AppendPhilosophyQuoteSfxComboItems();
+                _philosophyVoiceLayoutReady = true;
+                if (_voiceTabHost != null)
+                {
+                    ApplyVoiceTabLayout(_voiceTabHost);
+                }
+
+                ApplyPhilosophyDialogPlacement();
+                RefreshNarrationButtons();
+                return;
+            }
+
+            FitShowcaseDialogClientHeightToVoiceTabContent();
+        }
+
+        private void ApplyPhilosophyDialogPlacement()
+        {
+            if (!_philosophyMode || IsDisposed)
+            {
+                return;
+            }
+
+            var screen = Owner != null && !Owner.IsDisposed && Owner.Visible
+                ? Screen.FromControl(Owner).WorkingArea
+                : Screen.FromControl(this).WorkingArea;
+
+            Rectangle anchor;
+            if (Owner != null && !Owner.IsDisposed && Owner.Visible)
+            {
+                anchor = Owner.RectangleToScreen(new Rectangle(0, 0, Owner.Width, Owner.Height));
+            }
+            else
+            {
+                anchor = screen;
+            }
+
+            var x = anchor.Left + Math.Max(0, (anchor.Width - Width) / 2);
+            if (x + Width > screen.Right - 12)
+            {
+                x = screen.Right - 12 - Width;
+            }
+
+            if (x < screen.Left + 12)
+            {
+                x = screen.Left + 12;
+            }
+
+            var centeredY = anchor.Top + Math.Max(0, (anchor.Height - Height) / 2);
+            var bias = (int)Math.Round(Math.Max(0, anchor.Height - Height) * PhilosophyDialogVerticalBias);
+            var y = Math.Max(screen.Top + 12, centeredY - bias);
+            if (y + Height > screen.Bottom - 12)
+            {
+                y = Math.Max(screen.Top + 12, screen.Bottom - 12 - Height);
+            }
+
+            StartPosition = FormStartPosition.Manual;
+            Location = new Point(x, y);
+        }
+
+        private static Size ResolvePhilosophyDialogClientSize()
+        {
+            var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 2560, 1440);
+            var width = Math.Min(PhilosophyDialogClientWidth, Math.Max(PhilosophyDialogMinWidth, area.Width - 48));
+            var height = Math.Min(PhilosophyDialogClientHeight, Math.Max(PhilosophyDialogMinHeight, area.Height - 48));
+            return new Size(width, height);
         }
 
         /// <summary>Cập nhật nhãn tạo lại và trạng thái nghe thử hook/thân.</summary>
         public void RefreshNarrationButtons()
         {
-            var hasHook = _canListenHookNarration?.Invoke() ?? false;
+            var hasHook = !_philosophyMode && (_canListenHookNarration?.Invoke() ?? false);
             var hasBody = _canListenBodyNarration?.Invoke() ?? false;
 
             if (_btnGenerateHookNarration != null && !_btnGenerateHookNarration.IsDisposed)
@@ -139,7 +265,14 @@ namespace tiktok_Omni
 
             if (_btnGenerateBodyNarration != null && !_btnGenerateBodyNarration.IsDisposed)
             {
-                _btnGenerateBodyNarration.Text = hasBody ? "Tạo lại thân" : "Tạo audio thân";
+                if (_philosophyMode)
+                {
+                    RefreshPhilosophyQuoteBatchActionLabels();
+                }
+                else
+                {
+                    _btnGenerateBodyNarration.Text = hasBody ? "Tạo lại thân" : "Tạo audio thân";
+                }
             }
 
             if (_btnListenHookNarration != null && !_btnListenHookNarration.IsDisposed)
@@ -147,7 +280,7 @@ namespace tiktok_Omni
                 _btnListenHookNarration.Enabled = hasHook;
             }
 
-            if (_btnListenBodyNarration != null && !_btnListenBodyNarration.IsDisposed)
+            if (_btnListenBodyNarration != null && !_btnListenBodyNarration.IsDisposed && !_philosophyMode)
             {
                 _btnListenBodyNarration.Enabled = hasBody;
             }
@@ -167,7 +300,7 @@ namespace tiktok_Omni
                 _btnRenderFullMixedAudio.Enabled = _canRenderFullMixedAudio?.Invoke() ?? false;
             }
 
-            if (_btnListenFullMixedAudio != null && !_btnListenFullMixedAudio.IsDisposed)
+            if (_btnListenFullMixedAudio != null && !_btnListenFullMixedAudio.IsDisposed && !_philosophyMode)
             {
                 _btnListenFullMixedAudio.Enabled = _canListenFullMixedAudio?.Invoke() ?? false;
             }
@@ -201,7 +334,15 @@ namespace tiktok_Omni
 
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(Apply));
+                if (IsHandleCreated)
+                {
+                    BeginInvoke(new Action(Apply));
+                }
+                else
+                {
+                    Apply();
+                }
+
                 return;
             }
 
@@ -292,7 +433,7 @@ namespace tiktok_Omni
                 BackColor = BackColor,
                 Margin = new Padding(0, 4, 0, 8)
             };
-            AttachVoiceFooterActionButtons(voiceActionsRow);
+            _voiceFooterActionsRow = voiceActionsRow;
 
             var footerRule = new Panel
             {
@@ -309,8 +450,8 @@ namespace tiktok_Omni
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
                 BackColor = BackColor,
-                Padding = new Padding(0, 4, 0, 10),
-                Margin = new Padding(0, 4, 0, 8)
+                Padding = new Padding(0, 4, 0, 6),
+                Margin = new Padding(0, 2, 0, 4)
             };
             flpButtons.Controls.Add(btnCancel);
             flpButtons.Controls.Add(btnOk);
@@ -319,57 +460,84 @@ namespace tiktok_Omni
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 4,
+                RowCount = _philosophyMode ? 3 : 4,
                 BackColor = BackColor,
                 Margin = Padding.Empty,
                 Padding = new Padding(0, 8, 2, 16)
             };
             var footerStack = _footerStack;
             footerStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            footerStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            if (!_philosophyMode)
+            {
+                footerStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            }
+
             footerStack.RowStyles.Add(new RowStyle(SizeType.Absolute, 1));
             footerStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             statusRow.Margin = new Padding(0, 0, 0, 2);
             footerStack.Controls.Add(statusRow, 0, 0);
-            footerStack.Controls.Add(WrapFooterCentered(voiceActionsRow), 0, 1);
-            footerStack.Controls.Add(footerRule, 0, 2);
-            footerStack.Controls.Add(WrapFooterRight(flpButtons), 0, 3);
+
+            if (_philosophyMode)
+            {
+                _voiceTabHost = new Panel
+                {
+                    Dock = DockStyle.Fill,
+                    BackColor = BackColor,
+                    Padding = new Padding(TabPagePaddingH, TabPagePaddingTop, TabPagePaddingH, VoiceTabPaddingBottom)
+                };
+                BuildVoiceTab(_voiceTabHost);
+                AttachVoiceFooterActionButtons(voiceActionsRow);
+                ApplyPhilosophyVoiceActionButtons();
+                Controls.Add(_voiceTabHost);
+
+                footerStack.Controls.Add(footerRule, 0, 1);
+                footerStack.Controls.Add(WrapFooterRight(flpButtons), 0, 2);
+            }
+            else
+            {
+                AttachVoiceFooterActionButtons(voiceActionsRow);
+                _voiceFooterActionsHost = (Panel)WrapFooterCentered(voiceActionsRow);
+                footerStack.Controls.Add(_voiceFooterActionsHost, 0, 1);
+                footerStack.Controls.Add(footerRule, 0, 2);
+                footerStack.Controls.Add(WrapFooterRight(flpButtons), 0, 3);
+
+                var tabs = new TabControl
+                {
+                    Dock = DockStyle.Fill,
+                    Font = new Font("Segoe UI", 10.5F),
+                    Padding = new Point(12, 6),
+                    BackColor = BackColor
+                };
+
+                var tabMusic = new TabPage("Nhạc nền")
+                {
+                    BackColor = BackColor,
+                    Padding = new Padding(TabPagePaddingH, TabPagePaddingTop, TabPagePaddingH, TabPagePaddingBottom)
+                };
+                var tabVoice = new TabPage("Audio thoại")
+                {
+                    BackColor = BackColor,
+                    Padding = new Padding(TabPagePaddingH, TabPagePaddingTop, TabPagePaddingH, VoiceTabPaddingBottom),
+                    AutoScroll = true
+                };
+                var tabSfx = new TabPage("Hiệu ứng âm thanh")
+                {
+                    BackColor = BackColor,
+                    Padding = new Padding(TabPagePaddingH, TabPagePaddingTop, TabPagePaddingH, 13)
+                };
+                _voiceTabHost = tabVoice;
+                BuildVoiceTab(tabVoice);
+                tabs.TabPages.Add(tabVoice);
+                BuildMusicTab(tabMusic);
+                BuildSfxTab(tabSfx);
+                tabs.TabPages.Add(tabMusic);
+                tabs.TabPages.Add(tabSfx);
+                WireAudioEditorTabDraw(tabs, BackColor);
+                Controls.Add(tabs);
+            }
 
             btnBar.Controls.Add(footerStack);
-
-            var tabs = new TabControl
-            {
-                Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 10.5F),
-                Padding = new Point(12, 6)
-            };
-
-            var tabMusic = new TabPage("Nhạc nền")
-            {
-                BackColor = BackColor,
-                Padding = new Padding(TabPagePaddingH, TabPagePaddingTop, TabPagePaddingH, TabPagePaddingBottom)
-            };
-            var tabVoice = new TabPage("Audio thoại")
-            {
-                BackColor = BackColor,
-                Padding = new Padding(TabPagePaddingH, TabPagePaddingTop, TabPagePaddingH, VoiceTabPaddingBottom),
-                AutoScroll = true
-            };
-            var tabSfx = new TabPage("Hiệu ứng âm thanh")
-            {
-                BackColor = BackColor,
-                Padding = new Padding(TabPagePaddingH, TabPagePaddingTop, TabPagePaddingH, 13)
-            };
-            BuildMusicTab(tabMusic);
-            BuildVoiceTab(tabVoice);
-            BuildSfxTab(tabSfx);
-            tabs.TabPages.Add(tabVoice);
-            tabs.TabPages.Add(tabMusic);
-            tabs.TabPages.Add(tabSfx);
-            WireAudioEditorTabDraw(tabs, BackColor);
-
-            Controls.Add(tabs);
 
             var tabFooterSpacer = new Panel
             {
@@ -605,12 +773,14 @@ namespace tiktok_Omni
             return host;
         }
 
-        private void BuildVoiceTab(TabPage tab)
+        private void BuildVoiceTab(Control host)
         {
             _cbTtsEngine = CreateSegmentEngineCombo();
             _cbTtsEngine.Visible = false;
 
-            var columnsPanel = BuildHookBodyVoiceColumnsPanel();
+            var columnsPanel = _philosophyMode
+                ? BuildPhilosophyVoiceColumnsPanel()
+                : BuildHookBodyVoiceColumnsPanel();
 
             _voiceReviewScriptRow = new Panel
             {
@@ -618,49 +788,99 @@ namespace tiktok_Omni
                 BackColor = BackColor,
                 Margin = new Padding(0, 8, 0, 14)
             };
-            AttachVoiceReviewScriptButton(_voiceReviewScriptRow);
-
-            _voiceTabRoot = new FlowLayoutPanel
+            if (_openScriptEditor != null)
             {
-                Dock = DockStyle.Top,
-                FlowDirection = FlowDirection.TopDown,
-                WrapContents = false,
-                AutoSize = true,
-                BackColor = BackColor
-            };
-            _voiceTabRoot.Controls.Add(columnsPanel);
-            _voiceTabRoot.Controls.Add(_voiceReviewScriptRow);
-            _voiceTabPage = tab;
-            tab.Controls.Add(_voiceTabRoot);
-            tab.Resize += (_, __) => ApplyVoiceTabLayout(tab);
-            Load += (_, __) => ApplyVoiceTabLayout(tab);
+                AttachVoiceReviewScriptButton(_voiceReviewScriptRow);
+            }
+
+            _voiceTabHost = host;
+            if (_philosophyMode)
+            {
+                _philosophyVoiceTabLayout = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 1,
+                    RowCount = 2,
+                    BackColor = BackColor,
+                    Margin = Padding.Empty,
+                    Padding = Padding.Empty
+                };
+                _philosophyVoiceTabLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+                _philosophyVoiceTabLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                _philosophyVoiceTabLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+                columnsPanel.Dock = DockStyle.Top;
+                columnsPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                _philosophyVoiceTabLayout.Controls.Add(columnsPanel, 0, 0);
+                _voiceTabRoot = null;
+                host.Controls.Add(_philosophyVoiceTabLayout);
+            }
+            else
+            {
+                _voiceTabRoot = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Top,
+                    FlowDirection = FlowDirection.TopDown,
+                    WrapContents = false,
+                    AutoSize = true,
+                    BackColor = BackColor
+                };
+                _voiceTabRoot.Controls.Add(columnsPanel);
+                if (_openScriptEditor != null)
+                {
+                    _voiceTabRoot.Controls.Add(_voiceReviewScriptRow);
+                }
+
+                host.Controls.Add(_voiceTabRoot);
+            }
+
+            if (_philosophyMode)
+            {
+                host.Resize += (_, __) =>
+                {
+                    if (_philosophyVoiceLayoutReady)
+                    {
+                        ApplyVoiceTabLayout(host);
+                    }
+                };
+            }
+            else
+            {
+                host.Resize += (_, __) => ApplyVoiceTabLayout(host);
+                Load += (_, __) => ApplyVoiceTabLayout(host);
+            }
         }
 
-        private static int VoiceTabInnerWidth(TabPage tab)
+        private static int VoiceTabInnerWidth(Control host)
         {
-            if (tab == null)
+            if (host == null)
             {
                 return 1200;
             }
 
-            return Math.Max(900, tab.ClientSize.Width - tab.Padding.Horizontal);
+            return Math.Max(900, host.ClientSize.Width - host.Padding.Horizontal);
         }
 
-        private void ApplyVoiceTabLayout(TabPage tab)
+        private void ApplyVoiceTabLayout(Control host)
         {
-            if (tab == null)
+            if (host == null || (_philosophyMode && !_philosophyVoiceLayoutReady))
             {
                 return;
             }
 
-            var innerW = VoiceTabInnerWidth(tab);
-            if (_voiceTabRoot != null)
+            var innerW = VoiceTabInnerWidth(host);
+            if (!_philosophyMode && _voiceTabRoot != null)
             {
                 _voiceTabRoot.Width = innerW;
                 _voiceTabRoot.MinimumSize = new Size(innerW, 0);
             }
+            else if (_philosophyMode && _voiceColumnsPanel != null)
+            {
+                _voiceColumnsPanel.MinimumSize = new Size(Math.Max(900, innerW), 0);
+                _voiceColumnsPanel.Dock = DockStyle.Top;
+            }
 
-            if (_voiceReviewScriptRow != null && _btnReviewScript != null && !_btnReviewScript.IsDisposed)
+            if (_voiceReviewScriptRow != null && _voiceReviewScriptRow.Visible
+                && _btnReviewScript != null && !_btnReviewScript.IsDisposed)
             {
                 _voiceReviewScriptRow.Width = innerW;
                 Form1.ResizeAppJellyButton(_btnReviewScript, minWidth: 96);
@@ -669,13 +889,23 @@ namespace tiktok_Omni
                 _btnReviewScript.Top = 0;
             }
 
-            CompactVoiceTabRootHeight(innerW);
-
             ApplyVoiceSegmentLayoutFromTab(innerW);
+            if (_philosophyMode)
+            {
+                ApplyPhilosophyQuotesGridColumnWidths();
+                LayoutPhilosophyQuotesGrid();
+            }
+
+            CompactVoiceTabRootHeight(innerW);
         }
 
         private void CompactVoiceTabRootHeight(int innerW)
         {
+            if (_philosophyMode)
+            {
+                return;
+            }
+
             if (_voiceTabRoot == null)
             {
                 return;
@@ -684,6 +914,24 @@ namespace tiktok_Omni
             _voiceTabRoot.PerformLayout();
             var pref = _voiceTabRoot.GetPreferredSize(new Size(innerW, 0));
             _voiceTabRoot.Size = new Size(innerW, Math.Max(0, pref.Height));
+        }
+
+        private int MeasurePhilosophyDialogNaturalClientHeight(int innerW)
+        {
+            SyncFooterBarHeight();
+
+            var tabHeader = 0;
+
+            var voiceH = 0;
+            if (_voiceColumnsPanel != null)
+            {
+                _voiceColumnsPanel.PerformLayout();
+                voiceH = _voiceColumnsPanel.GetPreferredSize(new Size(innerW, 0)).Height;
+            }
+
+            var gridAreaH = MeasurePhilosophyQuotesGridAreaMinHeight();
+            var tabContentH = voiceH + gridAreaH + (_voiceTabHost?.Padding.Vertical ?? 0);
+            return Padding.Vertical + tabHeader + tabContentH + TabFooterSpacerHeight + _footerBarPanel.Height;
         }
 
         private void SyncFooterBarHeight()
@@ -696,32 +944,34 @@ namespace tiktok_Omni
             _footerStack.PerformLayout();
             var contentW = Math.Max(320, _footerBarPanel.ClientSize.Width);
             var contentH = _footerStack.GetPreferredSize(new Size(contentW, 0)).Height;
-            var target = Math.Max(FooterBarMinHeight, contentH + _footerBarPanel.Padding.Vertical + 4);
+            var target = _philosophyMode
+                ? contentH + _footerBarPanel.Padding.Vertical + 2
+                : Math.Max(FooterBarMinHeight, contentH + _footerBarPanel.Padding.Vertical + 4);
             if (_footerBarPanel.Height != target)
             {
                 _footerBarPanel.Height = target;
             }
         }
 
-        private void FitDialogClientHeightToVoiceTabContent()
+        private void FitShowcaseDialogClientHeightToVoiceTabContent()
         {
-            if (_voiceTabPage == null || _voiceTabRoot == null || _footerBarPanel == null)
+            if (_voiceTabHost == null || _voiceTabRoot == null || _footerBarPanel == null)
             {
                 return;
             }
 
             SyncFooterBarHeight();
 
-            var tabs = _voiceTabPage.Parent as TabControl;
+            var tabs = _voiceTabHost.Parent as TabControl;
             if (tabs == null)
             {
                 return;
             }
 
-            var innerW = VoiceTabInnerWidth(_voiceTabPage);
+            var innerW = VoiceTabInnerWidth(_voiceTabHost);
             CompactVoiceTabRootHeight(innerW);
 
-            var voicePageH = _voiceTabRoot.Height + _voiceTabPage.Padding.Vertical;
+            var voicePageH = _voiceTabRoot.Height + _voiceTabHost.Padding.Vertical;
             var tabContentH = Math.Max(voicePageH + VoiceTabHeightFitBuffer, MinTabContentHeight);
             var tabHeader = tabs.DisplayRectangle.Top;
             if (tabHeader < 20)
@@ -737,19 +987,27 @@ namespace tiktok_Omni
             {
                 ClientSize = new Size(ClientSize.Width, targetClientH);
                 MinimumSize = new Size(DialogClientWidth, targetClientH);
-                ApplyVoiceTabLayout(_voiceTabPage);
+                ApplyVoiceTabLayout(_voiceTabHost);
                 return;
             }
 
             if (ClientSize.Height <= targetClientH + 24)
             {
-                ApplyVoiceTabLayout(_voiceTabPage);
+                ApplyVoiceTabLayout(_voiceTabHost);
                 return;
             }
 
             ClientSize = new Size(ClientSize.Width, targetClientH);
             MinimumSize = new Size(DialogClientWidth, targetClientH);
-            ApplyVoiceTabLayout(_voiceTabPage);
+            ApplyVoiceTabLayout(_voiceTabHost);
+        }
+
+        private void FitDialogClientHeightToVoiceTabContent()
+        {
+            if (!_philosophyMode)
+            {
+                FitShowcaseDialogClientHeightToVoiceTabContent();
+            }
         }
 
         private void PopulateMusicComboItems()
@@ -774,6 +1032,11 @@ namespace tiktok_Omni
 
         private void ReloadMusicList()
         {
+            if (_philosophyMode)
+            {
+                return;
+            }
+
             _musicNames = ShowcaseMusicHelper.ListMusicFileNames(_settings);
             PopulateMusicComboItems();
             LoadFromVideo();
@@ -781,31 +1044,40 @@ namespace tiktok_Omni
 
         private void LoadFromVideo()
         {
-            var pick = (_video.ShowcaseBackgroundMusicFile ?? string.Empty).Trim();
-            if (VideoReupRowItem.IsNoMusicSelection(pick))
+            if (!_philosophyMode && _cbMusic != null)
             {
-                _cbMusic.SelectedIndex = 0;
-            }
-            else if (!string.IsNullOrWhiteSpace(pick))
-            {
-                var idx = _cbMusic.Items.IndexOf(pick);
-                _cbMusic.SelectedIndex = idx >= 0 ? idx : (_cbMusic.Items.Count > 1 ? 1 : 0);
-            }
-            else if (_cbMusic.Items.Count > 1)
-            {
-                _cbMusic.SelectedIndex = 1;
-            }
-            else
-            {
-                _cbMusic.SelectedIndex = 0;
+                var pick = (_video.ShowcaseBackgroundMusicFile ?? string.Empty).Trim();
+                if (VideoReupRowItem.IsNoMusicSelection(pick))
+                {
+                    _cbMusic.SelectedIndex = 0;
+                }
+                else if (!string.IsNullOrWhiteSpace(pick))
+                {
+                    var idx = _cbMusic.Items.IndexOf(pick);
+                    _cbMusic.SelectedIndex = idx >= 0 ? idx : (_cbMusic.Items.Count > 1 ? 1 : 0);
+                }
+                else if (_cbMusic.Items.Count > 1)
+                {
+                    _cbMusic.SelectedIndex = 1;
+                }
+                else
+                {
+                    _cbMusic.SelectedIndex = 0;
+                }
             }
 
-            _trkMusicVolume.Value = Math.Max(0,
+            _trkMusicVolume?.Value = Math.Max(0,
                 Math.Min(100, _video.ShowcaseMusicVolume >= 0 ? _video.ShowcaseMusicVolume : 14));
             UpdateMusicVolumeLabel();
 
             ShowcaseNarrationSpeedHelper.EnsureSegmentSpeedDefaults(_video);
             LoadVoiceControlsFromVideo();
+
+            if (_philosophyMode)
+            {
+                RefreshPreviewButtons();
+                return;
+            }
 
             var dir = ShowcaseMusicHelper.GetMusicLibraryDirectory(_settings);
             var count = _musicNames?.Count ?? 0;
@@ -815,29 +1087,33 @@ namespace tiktok_Omni
                 ? count + " file nhạc (.mp3/.wav/.m4a) — quét:\r\n" + dirSummary
                 : "Chưa thấy file nhạc — copy vào thư mục chính rồi bấm «Làm mới danh sách»:\r\n" + dir;
             LoadSfxGridFromVideo();
+
             RefreshPreviewButtons();
         }
 
         private bool ValidateAndSave()
         {
-            var selected = _cbMusic.SelectedItem?.ToString()?.Trim() ?? VideoReupRowItem.NoMusicSelectionLabel;
-            if (VideoReupRowItem.IsNoMusicSelection(selected))
+            if (!_philosophyMode)
             {
-                _video.ShowcaseBackgroundMusicFile = VideoReupRowItem.NoMusicSelectionLabel;
-            }
-            else if (_musicNames != null && _musicNames.Count > 0 &&
-                     !_musicNames.Any(x => string.Equals(x, selected, StringComparison.OrdinalIgnoreCase)))
-            {
-                MessageBox.Show(this,
-                    "Hãy chọn một file nhạc trong danh sách hoặc «(Không có nhạc)».",
-                    "Âm thanh",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return false;
-            }
-            else
-            {
-                _video.ShowcaseBackgroundMusicFile = selected;
+                var selected = _cbMusic.SelectedItem?.ToString()?.Trim() ?? VideoReupRowItem.NoMusicSelectionLabel;
+                if (VideoReupRowItem.IsNoMusicSelection(selected))
+                {
+                    _video.ShowcaseBackgroundMusicFile = VideoReupRowItem.NoMusicSelectionLabel;
+                }
+                else if (_musicNames != null && _musicNames.Count > 0 &&
+                         !_musicNames.Any(x => string.Equals(x, selected, StringComparison.OrdinalIgnoreCase)))
+                {
+                    MessageBox.Show(this,
+                        "Hãy chọn một file nhạc trong danh sách hoặc «(Không có nhạc)».",
+                        "Âm thanh",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return false;
+                }
+                else
+                {
+                    _video.ShowcaseBackgroundMusicFile = selected;
+                }
             }
 
             _video.ShowcaseMusicVolume = MusicVolumePercent;
@@ -856,7 +1132,8 @@ namespace tiktok_Omni
 
             var hookLang = _video.ShowcaseVoiceLanguageId;
             var bodyLang = _video.ShowcaseBodyVoiceLanguageId;
-            if (string.Equals(_video.ShowcaseHookTtsEngine, ShowcaseTtsHelper.EngineEdgeTts, StringComparison.OrdinalIgnoreCase)
+            if (!_philosophyMode
+                && string.Equals(_video.ShowcaseHookTtsEngine, ShowcaseTtsHelper.EngineEdgeTts, StringComparison.OrdinalIgnoreCase)
                 && !ShowcaseVoicePresetDimensions.SupportsEdgeTts(hookLang))
             {
                 MessageBox.Show(this,
@@ -878,7 +1155,8 @@ namespace tiktok_Omni
                 return false;
             }
 
-            if (string.Equals(_video.ShowcaseHookTtsEngine, ShowcaseTtsHelper.EngineElevenLabs, StringComparison.OrdinalIgnoreCase)
+            if ((!_philosophyMode
+                 && string.Equals(_video.ShowcaseHookTtsEngine, ShowcaseTtsHelper.EngineElevenLabs, StringComparison.OrdinalIgnoreCase))
                 || string.Equals(_video.ShowcaseBodyTtsEngine, ShowcaseTtsHelper.EngineElevenLabs, StringComparison.OrdinalIgnoreCase))
             {
                 if (!TtsAvailabilityHelper.IsElevenLabsConfigured(_settings))
@@ -893,7 +1171,11 @@ namespace tiktok_Omni
             }
 
             ShowcaseMusicHelper.RefreshMusicLabel(_video);
-            if (!SaveSfxFromGrid())
+            if (_philosophyMode)
+            {
+                CommitPhilosophyQuotesGridEdits();
+            }
+            else if (!SaveSfxFromGrid())
             {
                 return false;
             }
@@ -925,14 +1207,20 @@ namespace tiktok_Omni
             }
 
             ApplyVoiceDimensionFieldsForEngine();
-            ApplyVoiceSegmentLayoutFromTab(VoiceTabInnerWidth(_voiceTabPage));
+            if (!_philosophyMode || _philosophyVoiceLayoutReady)
+            {
+                ApplyVoiceSegmentLayoutFromTab(VoiceTabInnerWidth(_voiceTabHost));
+            }
         }
 
         private void ApplyVoiceDimensionFieldsForEngine()
         {
             ApplySegmentColumnVisibility(_hookVoice);
             ApplySegmentColumnVisibility(_bodyVoice);
-            ApplyVoiceSegmentLayoutFromTab(VoiceTabInnerWidth(_voiceTabPage));
+            if (!_philosophyMode || _philosophyVoiceLayoutReady)
+            {
+                ApplyVoiceSegmentLayoutFromTab(VoiceTabInnerWidth(_voiceTabHost));
+            }
         }
 
         private void ApplySegmentColumnVisibility(VoiceSegmentUi seg)
@@ -944,6 +1232,12 @@ namespace tiktok_Omni
 
             var eleven = SegmentIsEleven(seg);
             var edge = SegmentIsEdge(seg);
+            if (_philosophyMode && !seg.IsHook)
+            {
+                ApplyPhilosophyBodySegmentColumnVisibility(seg, eleven, edge);
+                return;
+            }
+
             SetSegmentTableRowVisible(seg, 1, eleven || edge);
             if (seg.LblElevenPersona != null)
             {
@@ -983,6 +1277,7 @@ namespace tiktok_Omni
             }
 
             RefreshSegmentStyleComboItems(seg);
+            RefreshSegmentLanguageComboItems(seg);
 
             var rate = seg.IsHook ? _video.ShowcaseEdgeRateOffsetPercent : _video.ShowcaseBodyEdgeRateOffsetPercent;
             var pitch = seg.IsHook ? _video.ShowcaseEdgePitchOffsetHz : _video.ShowcaseBodyEdgePitchOffsetHz;
@@ -992,6 +1287,28 @@ namespace tiktok_Omni
             var similarity = seg.IsHook ? _video.ShowcaseElevenCustomSimilarityPercent : _video.ShowcaseBodyElevenCustomSimilarityPercent;
             var style = seg.IsHook ? _video.ShowcaseElevenCustomStylePercent : _video.ShowcaseBodyElevenCustomStylePercent;
             ApplySegmentCustomToneUi(seg, stability, similarity, style);
+            SyncSegmentShellHeight(seg);
+        }
+
+        private void ApplyPhilosophyBodySegmentColumnVisibility(VoiceSegmentUi seg, bool eleven, bool edge)
+        {
+            ApplyPhilosophyEngineFieldVisibility(seg, eleven, edge);
+
+            var philosophyCustomTone = eleven
+                && ShowcaseElevenToneHelper.IsCustomTone(SelectedDimensionId(seg.CbTone));
+            SetSegmentRightRowVisible(seg, ResolveSegmentCustomToneRightRow(seg), philosophyCustomTone);
+            RefreshSegmentStyleComboItems(seg);
+            if (eleven)
+            {
+                RefreshSegmentLanguageComboItems(seg);
+            }
+
+            ApplySegmentEdgeProsodyUi(seg, _video.ShowcaseBodyEdgeRateOffsetPercent, _video.ShowcaseBodyEdgePitchOffsetHz);
+            ApplySegmentCustomToneUi(
+                seg,
+                _video.ShowcaseBodyElevenCustomStabilityPercent,
+                _video.ShowcaseBodyElevenCustomSimilarityPercent,
+                _video.ShowcaseBodyElevenCustomStylePercent);
             SyncSegmentShellHeight(seg);
         }
 
@@ -1015,14 +1332,6 @@ namespace tiktok_Omni
             }
 
             if (_hookVoice != null)
-            {
-                SaveVoiceSegmentToVideo(_hookVoice);
-            }
-
-            if (_bodyVoice != null)
-            {
-                SaveVoiceSegmentToVideo(_bodyVoice);
-            }
             {
                 SaveVoiceSegmentToVideo(_hookVoice);
             }
@@ -1163,7 +1472,9 @@ namespace tiktok_Omni
         }
 
         private int MusicVolumePercent =>
-            _trkMusicVolume != null && !_trkMusicVolume.IsDisposed ? _trkMusicVolume.Value : 14;
+            _trkMusicVolume != null && !_trkMusicVolume.IsDisposed
+                ? _trkMusicVolume.Value
+                : Math.Max(0, Math.Min(100, _video?.ShowcaseMusicVolume >= 0 ? _video.ShowcaseMusicVolume : PhilosophyBatchHelper.DefaultMusicVolumePercent));
 
         private void UpdateMusicVolumeLabel()
         {
@@ -1256,6 +1567,7 @@ namespace tiktok_Omni
         {
             Dock = DockStyle.Top,
             DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
             BackColor = Color.FromArgb(45, 49, 60),
             ForeColor = Color.WhiteSmoke,
             Font = new Font("Segoe UI", 10.5F),
@@ -1471,16 +1783,17 @@ namespace tiktok_Omni
             {
                 Text = text,
                 AutoSize = true,
-                MinimumSize = new Size(264, 72),
+                MinimumSize = new Size(108, 44),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = back,
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
-                Margin = new Padding(16, 0, 0, 0),
-                Padding = new Padding(22, 10, 22, 14),
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Margin = new Padding(10, 0, 0, 0),
+                Padding = new Padding(16, 6, 16, 8),
                 UseCompatibleTextRendering = true
             };
             btn.FlatAppearance.BorderSize = 0;
+            btn.UseVisualStyleBackColor = false;
             return btn;
         }
     }

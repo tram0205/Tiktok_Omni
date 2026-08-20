@@ -18,13 +18,19 @@ namespace tiktok_Omni.Models
         /// <summary>Nền B-Roll: @random, đường dẫn file .mp4, hoặc thư mục (legacy).</summary>
         public string BRollFolder { get; set; } = string.Empty;
 
-        /// <summary>Tên file hoặc đường dẫn nhạc nền; trống = dùng nhạc profile / mood.</summary>
+        /// <summary>Tên file hoặc đường dẫn nhạc nền (per-quote — lưới Âm thanh).</summary>
         public string MusicFolder { get; set; } = string.Empty;
 
-        /// <summary>Loại tiếng đệm: none, rain, wind, forest, ocean, city, fire, night, thunder, piano.</summary>
+        /// <summary>Âm lượng nhạc nền per-quote (0–100%).</summary>
+        public int MusicVolumePercent { get; set; } = 20;
+
+        /// <summary>Tốc độ thoại per-quote (50–200%).</summary>
+        public int NarrationSpeedPercent { get; set; } = 100;
+
+        /// <summary>Tiếng đệm per-quote (lưới Âm thanh).</summary>
         public string AmbientKey { get; set; } = string.Empty;
 
-        /// <summary>Nhãn tóm tắt phụ đề hiển thị trên lưới.</summary>
+        /// <summary>Legacy — không dùng khi quote thuộc batch; đọc từ <see cref="PhilosophyBatchItem"/>.</summary>
         public string SubtitleStyleLabel { get; set; } = string.Empty;
 
         public string SubtitlePosition { get; set; } = string.Empty;
@@ -45,9 +51,21 @@ namespace tiktok_Omni.Models
 
         public string SubtitleSecondaryColourAss { get; set; } = string.Empty;
 
+        public bool SubtitleEnabled { get; set; } = true;
+
+        public string SubtitleLookPreset { get; set; } = string.Empty;
+
+        public string SubtitleDecorPreset { get; set; } = string.Empty;
+
+        public string SubtitleHighlightColourAss { get; set; } = string.Empty;
+
+        public string SubtitleDisplayQuote { get; set; } = string.Empty;
+
+        public string SubtitleDisplayAnimation { get; set; } = string.Empty;
+
         public string Status { get; set; } = "Nháp";
 
-        /// <summary>Profile TikTok / branding cho dòng này.</summary>
+        /// <summary>Legacy — không persist; profile lấy từ <see cref="PhilosophyBatchItem.ProfileName"/>.</summary>
         public string ProfileName { get; set; } = string.Empty;
 
         /// <summary>0 = B-Roll, 1 = Veo T2V, 2 = Veo I2V.</summary>

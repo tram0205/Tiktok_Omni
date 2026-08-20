@@ -349,9 +349,17 @@ namespace tiktok_Omni
                 ApplyReupCommandBarButtonMetrics(btnVideoReupOpenMusicFolder);
             }
 
+            var grpLogo = CreateReupToolGroup(string.Empty, barColor);
+            ReparentReupControl(btnVideoReupOpenLogoLibrary, grpLogo);
+            if (btnVideoReupOpenLogoLibrary != null)
+            {
+                ApplyReupCommandBarButtonMetrics(btnVideoReupOpenLogoLibrary);
+            }
+
             flpHookRoot.Controls.Add(grpNarration);
             flpHookRoot.Controls.Add(grpSfx);
             flpHookRoot.Controls.Add(grpMusic);
+            flpHookRoot.Controls.Add(grpLogo);
 
             EnsureReupGeminiButtonTooltips();
             EnsureReupNarrationScriptTooltips();

@@ -9,13 +9,26 @@ namespace tiktok_Omni
     public static class AppGridSttColumn
     {
         public const string ColumnName = "colAppGridStt";
+
+        /// <summary>Rộng chuẩn trên lưới chính (tab, hub, v.v.).</summary>
         public const int ColumnWidth = 100;
+
+        /// <summary>Rộng gọn trong popup/dialog có nhiều cột.</summary>
+        public const int CompactColumnWidth = 56;
+
+        private static readonly ConditionalWeakTable<DataGridView, SttGridOptions> GridOptions =
+            new ConditionalWeakTable<DataGridView, SttGridOptions>();
 
         private static readonly ConditionalWeakTable<DataGridView, object> HookedGrids =
             new ConditionalWeakTable<DataGridView, object>();
 
+        private sealed class SttGridOptions
+        {
+            public int Width { get; set; } = ColumnWidth;
+        }
+
         /// <summary>Thêm hoặc ghim cột STT ở vị trí đầu tiên. An toàn gọi nhiều lần.</summary>
-        public static void EnsureFirstColumn(DataGridView grid)
+        public static void EnsureFirstColumn(DataGridView grid, bool compact = false, int? width = null)
         {
             if (grid == null || grid.IsDisposed)
             {
@@ -26,6 +39,8 @@ namespace tiktok_Omni
             {
                 return;
             }
+
+            SetGridWidth(grid, width ?? (compact ? CompactColumnWidth : ColumnWidth));
 
             var existing = FindExistingSttColumn(grid);
             if (existing == null)
@@ -44,6 +59,7 @@ namespace tiktok_Omni
             }
             else
             {
+                existing.Name = ColumnName;
                 ApplySttColumnChrome(existing, grid);
             }
 
@@ -52,24 +68,32 @@ namespace tiktok_Omni
                 existing.DisplayIndex = 0;
             }
 
-            ApplyColumnWidth(existing);
-
+            ApplyColumnWidth(grid, existing);
             EnsureGridHooks(grid);
         }
 
-        /// <summary>Cố định rộng 100px — số canh giữa.</summary>
+        /// <summary>Cố định rộng theo profile lưới — số canh giữa.</summary>
         public static void ApplyColumnWidth(DataGridViewColumn column)
+        {
+            ApplyColumnWidth(null, column);
+        }
+
+        public static void ApplyColumnWidth(DataGridView grid, DataGridViewColumn column)
         {
             if (column == null)
             {
                 return;
             }
 
+            var width = ResolveColumnWidth(grid);
             column.AutoSizeMode = DataGridViewAutoSizeColumnMode.None;
-            column.Width = ColumnWidth;
-            column.MinimumWidth = ColumnWidth;
-            column.FillWeight = ColumnWidth;
+            column.Width = width;
+            column.MinimumWidth = width;
+            column.FillWeight = width;
             column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            column.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
+            column.HeaderCell.Style.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            column.HeaderCell.Style.Padding = Padding.Empty;
         }
 
         /// <summary>Giữ tương thích gọi từ Theme (bỏ qua tham số đo).</summary>
@@ -80,7 +104,7 @@ namespace tiktok_Omni
             Font headerFont,
             Padding headerPadding)
         {
-            ApplyColumnWidth(column);
+            ApplyColumnWidth(grid, column);
         }
 
         public static bool IsSttColumn(DataGridViewColumn column)
@@ -97,6 +121,32 @@ namespace tiktok_Omni
             }
 
             return string.Equals((column.HeaderText ?? string.Empty).Trim(), "STT", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static int ResolveColumnWidth(DataGridView grid)
+        {
+            if (grid != null && GridOptions.TryGetValue(grid, out var opts) && opts != null)
+            {
+                return opts.Width;
+            }
+
+            return ColumnWidth;
+        }
+
+        private static void SetGridWidth(DataGridView grid, int width)
+        {
+            if (grid == null)
+            {
+                return;
+            }
+
+            if (GridOptions.TryGetValue(grid, out var opts) && opts != null)
+            {
+                opts.Width = width;
+                return;
+            }
+
+            GridOptions.Add(grid, new SttGridOptions { Width = width });
         }
 
         private static DataGridViewColumn FindExistingSttColumn(DataGridView grid)
@@ -130,14 +180,13 @@ namespace tiktok_Omni
 
         private static DataGridViewTextBoxColumn CreateSttColumn()
         {
-            var column = new DataGridViewTextBoxColumn
+            return new DataGridViewTextBoxColumn
             {
                 Name = ColumnName,
                 HeaderText = "STT",
                 ReadOnly = true,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             };
-            return column;
         }
 
         private static void ApplySttColumnChrome(DataGridViewColumn column, DataGridView grid)
@@ -156,7 +205,7 @@ namespace tiktok_Omni
                 column.DefaultCellStyle.Font = grid.DefaultCellStyle.Font;
             }
 
-            ApplyColumnWidth(column);
+            ApplyColumnWidth(grid, column);
         }
 
         private static void EnsureGridHooks(DataGridView grid)
@@ -182,7 +231,7 @@ namespace tiktok_Omni
             }
 
             var column = grid.Columns[e.ColumnIndex];
-            if (!string.Equals(column?.Name, ColumnName, StringComparison.Ordinal))
+            if (!IsSttColumn(column))
             {
                 return;
             }
@@ -203,12 +252,18 @@ namespace tiktok_Omni
         private static void Grid_RefreshStt(object sender, EventArgs e)
         {
             var grid = sender as DataGridView;
-            if (grid == null || grid.IsDisposed || !grid.Columns.Contains(ColumnName))
+            if (grid == null || grid.IsDisposed)
             {
                 return;
             }
 
-            grid.InvalidateColumn(grid.Columns[ColumnName].Index);
+            var sttColumn = FindExistingSttColumn(grid);
+            if (sttColumn == null)
+            {
+                return;
+            }
+
+            grid.InvalidateColumn(sttColumn.Index);
         }
     }
 }

@@ -62,8 +62,8 @@ namespace tiktok_Omni
                 Padding = new Padding(16, 14, 16, 0),
                 ForeColor = Color.FromArgb(170, 178, 192),
                 Text = kind == LibraryKind.BackgroundMusic
-                    ? "File nhạc nền dùng chung — Gemini chọn background_music_id khi «Tạo kịch bản»."
-                    : "File hiệu ứng ngắn — Gemini chọn sfx_id / hook_sfx / cta_sfx khi «Tạo kịch bản»."
+                    ? "File nhạc nền dùng chung toàn app (Showcase, Quote, Reup, Slideshow…) — Gemini chọn background_music_id khi «Tạo kịch bản»."
+                    : "File hiệu ứng ngắn dùng chung toàn app — Gemini chọn sfx_id / hook_sfx / cta_sfx khi «Tạo kịch bản»."
             };
 
             _lvFiles = new ListView

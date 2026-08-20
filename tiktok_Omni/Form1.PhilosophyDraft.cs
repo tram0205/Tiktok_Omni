@@ -36,18 +36,14 @@ namespace tiktok_Omni
 
         private void FlushPhilosophyDraftToDisk()
         {
-            if (_philosophyScriptBindingList == null)
+            if (_philosophyBatchBindingList == null)
             {
                 return;
             }
 
             var doc = new PhilosophyDraftDocument
             {
-                Scripts = _philosophyScriptBindingList.ToList(),
-                Topic = txtPhilosophyTopic?.Text?.Trim() ?? string.Empty,
-                MinDurationSeconds = (int)(numPhilosophyDurationMin?.Value ?? 15),
-                MaxDurationSeconds = (int)(numPhilosophyDurationMax?.Value ?? 60),
-                PreRenderedVideoFolder = GetPhilosophyVideoInputFolder()
+                Batches = _philosophyBatchBindingList.ToList()
             };
             _philosophyDraftStore.Save(doc);
             _philosophyDraftDirty = false;
@@ -55,60 +51,43 @@ namespace tiktok_Omni
 
         private void LoadPhilosophyDraftIntoGrid()
         {
-            if (_philosophyScriptBindingList != null && _philosophyScriptBindingList.Count > 0)
+            if (_philosophyBatchBindingList != null && _philosophyBatchBindingList.Count > 0)
             {
                 return;
             }
 
             var doc = _philosophyDraftStore.Load();
-            if (doc.Scripts == null || doc.Scripts.Count == 0)
+            if (doc.Batches == null || doc.Batches.Count == 0)
             {
                 return;
             }
 
-            _philosophyScriptBindingList = new BindingList<PhilosophyScriptItem>(doc.Scripts);
-            foreach (var script in _philosophyScriptBindingList)
+            _philosophyBatchBindingList = new BindingList<PhilosophyBatchItem>(doc.Batches);
+            foreach (var batch in _philosophyBatchBindingList)
             {
-                PhilosophySubtitleStyleHelper.EnsureDefaults(script);
-                PhilosophyAmbientCatalog.EnsureRowDefault(script);
+                if (batch?.Quotes == null)
+                {
+                    continue;
+                }
+
+                foreach (var script in batch.Quotes)
+                {
+                    PhilosophySubtitleStyleHelper.EnsureDefaults(script);
+                    PhilosophyAmbientCatalog.EnsureRowDefault(script);
+                }
+
+                PhilosophyBatchHelper.EnsureBatchDefaults(batch);
+                batch.RefreshDerivedFields();
             }
 
             if (dgvPhilosophyScripts != null && !dgvPhilosophyScripts.IsDisposed)
             {
-                dgvPhilosophyScripts.DataSource = _philosophyScriptBindingList;
+                dgvPhilosophyScripts.DataSource = _philosophyBatchBindingList;
             }
 
-            if (!string.IsNullOrWhiteSpace(doc.Topic) && txtPhilosophyTopic != null)
-            {
-                txtPhilosophyTopic.Text = doc.Topic;
-            }
-
-            if (numPhilosophyDurationMin != null)
-            {
-                numPhilosophyDurationMin.Value = Math.Max(numPhilosophyDurationMin.Minimum,
-                    Math.Min(numPhilosophyDurationMin.Maximum, doc.MinDurationSeconds));
-            }
-
-            if (numPhilosophyDurationMax != null)
-            {
-                numPhilosophyDurationMax.Value = Math.Max(numPhilosophyDurationMax.Minimum,
-                    Math.Min(numPhilosophyDurationMax.Maximum, doc.MaxDurationSeconds));
-            }
-
-            if (!string.IsNullOrWhiteSpace(doc.PreRenderedVideoFolder)
-                && txtPhilosophyVideoInputFolder != null
-                && !txtPhilosophyVideoInputFolder.IsDisposed)
-            {
-                txtPhilosophyVideoInputFolder.Text = doc.PreRenderedVideoFolder.Trim();
-            }
-            else
-            {
-                EnsurePhilosophyVideoInputFolderDefault();
-            }
-
-            RefreshPhilosophyFolderOptions();
             _philosophyDraftDirty = false;
-            LogPhilosophy("Đã khôi phục " + doc.Scripts.Count + " dòng từ draft_philosophy.json.");
+            var quoteCount = doc.Batches.Sum(b => b?.Quotes?.Count ?? 0);
+            LogPhilosophy("Đã khôi phục " + doc.Batches.Count + " batch (" + quoteCount + " câu) từ draft_philosophy.json.");
         }
 
         private void NotifyPhilosophyDraftDirty()

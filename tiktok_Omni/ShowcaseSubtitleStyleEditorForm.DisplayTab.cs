@@ -284,6 +284,34 @@ namespace tiktok_Omni
 
             _dgvDisplay.Rows.Clear();
 
+            if (_philosophyMode)
+            {
+                var quoteScenes = (_video.Scenes ?? Enumerable.Empty<AiVideoGenInputItem>())
+                    .Where(s => s != null && !s.ShowcaseSceneSilent && !string.IsNullOrWhiteSpace(s.SceneVoiceover))
+                    .ToList();
+                var quoteIndex = 0;
+                foreach (var scene in quoteScenes)
+                {
+                    quoteIndex++;
+                    var title = (scene.SceneTitle ?? string.Empty).Trim();
+                    if (title.Length == 0)
+                    {
+                        title = "Câu " + quoteIndex;
+                    }
+
+                    AddDisplayGridRow(
+                        title,
+                        string.Empty,
+                        DisplayGridRowRole.Scene,
+                        scene,
+                        scene.SceneVoiceover.Trim(),
+                        ShowcaseDisplayLineEffectKind.Body);
+                }
+
+                ConfigureDisplayGridColumnWidths();
+                return;
+            }
+
             _hookSourceSpeech = ShowcaseSubtitleDisplayHelper.ResolveHookSpeechSource(_video);
             AddDisplayGridRow(
                 "Hook (mở đầu)",
@@ -856,7 +884,7 @@ namespace tiktok_Omni
                 return false;
             }
 
-            var hookRow = FindDisplayRow(DisplayGridRowRole.Hook);
+            var hookRow = _philosophyMode ? null : FindDisplayRow(DisplayGridRowRole.Hook);
             if (hookRow != null)
             {
                 _video.ShowcaseHookSubtitleEnabled = ReadBoolCell(hookRow.Cells["colStyleEnabled"]);

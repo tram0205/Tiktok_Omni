@@ -209,7 +209,7 @@ namespace tiktok_Omni
             cbCaptionStyle.Items.AddRange(new object[]
             {
                 "Kiến thức",
-                "Triết lý",
+                "Quote",
                 "Hài hước",
                 "Câu hỏi / Tranh cãi"
             });

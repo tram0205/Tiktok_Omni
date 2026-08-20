@@ -106,7 +106,7 @@ namespace tiktok_Omni
             btnModeSlideshow = CreateAiVideoGenModeNavButton("Slideshow", AiVideoGenMode.Slideshow);
             btnModeAffiliateDeep = CreateAiVideoGenModeNavButton("Showcase SP", AiVideoGenMode.AffiliateDeep);
             btnModeMascot = CreateAiVideoGenModeNavButton("Mascot", AiVideoGenMode.Mascot);
-            btnModePhilosophy = CreateAiVideoGenModeNavButton("Triết lý", AiVideoGenMode.Philosophy);
+            btnModePhilosophy = CreateAiVideoGenModeNavButton("Quote", AiVideoGenMode.Philosophy);
             btnModeVideoReup = CreateAiVideoGenModeNavButton("Reup", AiVideoGenMode.VideoReup);
         }
 
@@ -214,8 +214,8 @@ namespace tiktok_Omni
                     accent = Color.FromArgb(160, 90, 210);
                     return;
                 case AiVideoGenMode.Philosophy:
-                    title = "Triết lý";
-                    hint = "Video quote / triết lý sống";
+                    title = "Quote";
+                    hint = "Video quote — thoại ngắn, TTS + nền";
                     accent = Color.FromArgb(210, 170, 80);
                     return;
                 case AiVideoGenMode.VideoReup:
@@ -424,7 +424,7 @@ namespace tiktok_Omni
                 case AiVideoGenMode.Mascot:
                     return "Mascot";
                 case AiVideoGenMode.Philosophy:
-                    return "Triết lý";
+                    return "Quote";
                 case AiVideoGenMode.VideoReup:
                     return "Reup";
                 default:

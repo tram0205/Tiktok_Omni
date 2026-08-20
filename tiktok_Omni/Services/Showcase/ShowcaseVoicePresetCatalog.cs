@@ -118,7 +118,7 @@ namespace tiktok_Omni.Services.Showcase
                 P("warm_deep", "Trầm — ấm", "vi_VN-vivos-x_low.onnx", vivos, 1.1f, 0.48f, 0.65f, "calm", false, true),
                 P("ethereal", "Thanh — thoát", "vi_VN-vais1000-medium.onnx", vais, 0.98f, 0.66f, 0.82f, "calm", false, true),
                 P("cheerful", "Vui vẻ — nhanh", "vi_VN-vais1000-medium.onnx", vais, 0.92f, 0.7f, 0.8f, "intense"),
-                P("philosophy", "Triết lý — chậm rãi", "vi_VN-25hours_single-low.onnx", h25, 1.07f, 0.52f, 0.68f, "calm", false, true),
+                P("philosophy", "Quote — chậm rãi", "vi_VN-25hours_single-low.onnx", h25, 1.07f, 0.52f, 0.68f, "calm", false, true),
                 P("sweet", "Ngọt ngào", "vi_VN-vais1000-medium.onnx", vais, 0.96f, 0.68f, 0.8f, "calm"),
                 P("neutral_narrator", "Kể chuyện — trung tính", "vi_VN-25hours_single-low.onnx", h25, 1.0f, 0.62f, 0.75f, "default", false, false),
                 P("en_us_narrator", "English (US)", "en_US-lessac-medium.onnx", enUs, 1.0f, 0.667f, 0.8f, "default", false, false, "en"),

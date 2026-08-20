@@ -296,11 +296,6 @@ namespace tiktok_Omni
         {
             if (dgvPhilosophyQueue?.CurrentRow?.DataBoundItem is ProductionQueueRowItem row)
             {
-                if (txtPhilosophyTopic != null)
-                {
-                    txtPhilosophyTopic.Text = row.ScriptPreview ?? row.Title ?? string.Empty;
-                }
-
                 LoadProductionVideoPreview(row.OutputVideoPath, row.ThumbnailPath, row.Title);
             }
         }

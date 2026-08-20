@@ -185,7 +185,7 @@ namespace tiktok_Omni
                 case AiVideoGenMode.Mascot:
                     return _mascotPreviewSceneScripts?.Count ?? 0;
                 case AiVideoGenMode.Philosophy:
-                    return string.IsNullOrWhiteSpace(txtPhilosophyTopic?.Text) ? 0 : 1;
+                    return _philosophyBatchBindingList?.Count ?? 0;
                 case AiVideoGenMode.VideoReup:
                     return _videoReupBindingList?.Count ?? 0;
                 default:
@@ -222,12 +222,9 @@ namespace tiktok_Omni
                     Log("[Grid] Đã làm sạch preview Mascot.");
                     break;
                 case AiVideoGenMode.Philosophy:
-                    if (txtPhilosophyTopic != null)
-                    {
-                        txtPhilosophyTopic.Clear();
-                    }
-
-                    Log("[Grid] Đã làm sạch nội dung Triết lý.");
+                    _philosophyBatchBindingList?.Clear();
+                    NotifyPhilosophyDraftDirty();
+                    Log("[Grid] Đã làm sạch lưới Video Quote.");
                     break;
                 case AiVideoGenMode.VideoReup:
                     _videoReupBindingList?.Clear();

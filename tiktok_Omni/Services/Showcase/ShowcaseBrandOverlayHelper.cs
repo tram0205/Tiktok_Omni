@@ -1,4 +1,7 @@
 using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -232,17 +235,235 @@ namespace tiktok_Omni.Services.Showcase
                 ? renderSettings.BrandLogoResolvedPath.Trim()
                 : ResolveEffectiveLogoPath(renderSettings.BrandLogoFile, renderSettings.ProfileName, null);
 
+            return BuildPreviewPlan(
+                renderSettings.BrandLogoEnabled,
+                path,
+                renderSettings.BrandLogoPositionId,
+                renderSettings.BrandLogoScaleWidthPercent,
+                renderSettings.BrandLogoMarginX,
+                renderSettings.BrandLogoMarginY,
+                renderSettings.BrandLogoOpacityPercent,
+                canvasWidth);
+        }
+
+        public static ShowcaseBrandLogoRenderPlan BuildPreviewPlan(
+            bool enabled,
+            string logoFile,
+            string profileName,
+            AppSettings settings,
+            string positionId,
+            int scaleWidthPercent,
+            int marginX,
+            int marginY,
+            int opacityPercent,
+            int canvasWidth = 1080)
+        {
+            if (!enabled)
+            {
+                return new ShowcaseBrandLogoRenderPlan { CanvasWidth = canvasWidth > 0 ? canvasWidth : 1080 };
+            }
+
+            var path = ResolveEffectiveLogoPath(logoFile, profileName, settings);
+            return BuildPreviewPlan(
+                true,
+                path,
+                positionId,
+                scaleWidthPercent,
+                marginX,
+                marginY,
+                opacityPercent,
+                canvasWidth);
+        }
+
+        public static ShowcaseBrandLogoRenderPlan BuildPreviewPlan(
+            bool enabled,
+            string resolvedLogoPath,
+            string positionId,
+            int scaleWidthPercent,
+            int marginX,
+            int marginY,
+            int opacityPercent,
+            int canvasWidth = 1080)
+        {
+            if (!enabled)
+            {
+                return new ShowcaseBrandLogoRenderPlan { CanvasWidth = canvasWidth > 0 ? canvasWidth : 1080 };
+            }
+
             return new ShowcaseBrandLogoRenderPlan
             {
                 Enabled = true,
-                LogoPath = path ?? string.Empty,
-                PositionId = ShowcaseBrandLogoPositionCatalog.ResolveId(renderSettings.BrandLogoPositionId),
-                ScaleWidthPercent = ClampScaleWidthPercent(renderSettings.BrandLogoScaleWidthPercent),
-                MarginX = ClampMargin(renderSettings.BrandLogoMarginX),
-                MarginY = ClampMargin(renderSettings.BrandLogoMarginY),
-                OpacityPercent = ClampOpacityPercent(renderSettings.BrandLogoOpacityPercent),
+                LogoPath = resolvedLogoPath ?? string.Empty,
+                PositionId = ShowcaseBrandLogoPositionCatalog.ResolveId(positionId),
+                ScaleWidthPercent = ClampScaleWidthPercent(
+                    scaleWidthPercent > 0 ? scaleWidthPercent : DefaultScaleWidthPercent),
+                MarginX = ClampMargin(marginX),
+                MarginY = ClampMargin(marginY),
+                OpacityPercent = ClampOpacityPercent(
+                    opacityPercent > 0 ? opacityPercent : DefaultOpacityPercent),
                 CanvasWidth = canvasWidth > 0 ? canvasWidth : 1080
             };
+        }
+
+        public static Rectangle ComputeLogoDrawRectangle(
+            int canvasWidth,
+            int canvasHeight,
+            int logoSourceWidth,
+            int logoSourceHeight,
+            string positionId,
+            int scaleWidthPercent,
+            int marginX,
+            int marginY)
+        {
+            var canvasW = Math.Max(1, canvasWidth);
+            var canvasH = Math.Max(1, canvasHeight);
+            var sourceW = Math.Max(1, logoSourceWidth);
+            var sourceH = Math.Max(1, logoSourceHeight);
+            var targetW = Math.Max(8, canvasW * ClampScaleWidthPercent(scaleWidthPercent) / 100);
+            var targetH = Math.Max(8, (int)Math.Round(sourceH * (targetW / (double)sourceW)));
+            var mx = ClampMargin(marginX);
+            var my = ClampMargin(marginY);
+
+            switch (ShowcaseBrandLogoPositionCatalog.ResolveId(positionId))
+            {
+                case ShowcaseBrandLogoPositionCatalog.BottomLeft:
+                    return new Rectangle(mx, canvasH - targetH - my, targetW, targetH);
+                case ShowcaseBrandLogoPositionCatalog.TopRight:
+                    return new Rectangle(canvasW - targetW - mx, my, targetW, targetH);
+                case ShowcaseBrandLogoPositionCatalog.TopLeft:
+                    return new Rectangle(mx, my, targetW, targetH);
+                case ShowcaseBrandLogoPositionCatalog.Center:
+                    return new Rectangle((canvasW - targetW) / 2, (canvasH - targetH) / 2, targetW, targetH);
+                default:
+                    return new Rectangle(canvasW - targetW - mx, canvasH - targetH - my, targetW, targetH);
+            }
+        }
+
+        public static Bitmap RenderLogoPreviewBitmap(
+            ShowcaseBrandLogoRenderPlan plan,
+            string statusMessage,
+            int outputWidth = 288)
+        {
+            const int canvasW = 1080;
+            const int canvasH = 1920;
+            var outputHeight = Math.Max(120, (int)Math.Round(outputWidth * (canvasH / (double)canvasW)));
+
+            var frame = new Bitmap(canvasW, canvasH);
+            using (var graphics = Graphics.FromImage(frame))
+            {
+                graphics.SmoothingMode = SmoothingMode.HighQuality;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                DrawMockVideoBackground(graphics, canvasW, canvasH);
+
+                if (plan != null && plan.IsActive)
+                {
+                    try
+                    {
+                        using (var logo = Image.FromFile(plan.LogoPath))
+                        {
+                            var rect = ComputeLogoDrawRectangle(
+                                canvasW,
+                                canvasH,
+                                logo.Width,
+                                logo.Height,
+                                plan.PositionId,
+                                plan.ScaleWidthPercent,
+                                plan.MarginX,
+                                plan.MarginY);
+                            DrawLogoWithOpacity(graphics, logo, rect, ClampOpacityPercent(plan.OpacityPercent));
+                        }
+                    }
+                    catch
+                    {
+                        DrawPreviewMessage(graphics, canvasW, canvasH, "Không mở được file logo");
+                    }
+                }
+                else
+                {
+                    DrawPreviewMessage(
+                        graphics,
+                        canvasW,
+                        canvasH,
+                        string.IsNullOrWhiteSpace(statusMessage) ? "Logo tắt hoặc chưa chọn file" : statusMessage);
+                }
+            }
+
+            var scaled = new Bitmap(outputWidth, outputHeight);
+            using (var graphics = Graphics.FromImage(scaled))
+            {
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.DrawImage(frame, new Rectangle(0, 0, outputWidth, outputHeight));
+            }
+
+            frame.Dispose();
+            return scaled;
+        }
+
+        private static void DrawMockVideoBackground(Graphics graphics, int width, int height)
+        {
+            using (var brush = new LinearGradientBrush(
+                       new Rectangle(0, 0, width, height),
+                       Color.FromArgb(26, 26, 46),
+                       Color.FromArgb(22, 33, 62),
+                       LinearGradientMode.Vertical))
+            {
+                graphics.FillRectangle(brush, 0, 0, width, height);
+            }
+
+            using (var pen = new Pen(Color.FromArgb(40, 255, 255, 255), 2f))
+            {
+                graphics.DrawRectangle(pen, 24, 24, width - 48, height - 48);
+            }
+        }
+
+        private static void DrawPreviewMessage(Graphics graphics, int width, int height, string message)
+        {
+            var text = (message ?? string.Empty).Trim();
+            if (text.Length == 0)
+            {
+                return;
+            }
+
+            using (var font = new Font("Segoe UI", 34f, FontStyle.Regular, GraphicsUnit.Pixel))
+            using (var brush = new SolidBrush(Color.FromArgb(170, 220, 220, 230)))
+            {
+                var size = graphics.MeasureString(text, font, width - 120);
+                graphics.DrawString(
+                    text,
+                    font,
+                    brush,
+                    (width - size.Width) / 2f,
+                    (height - size.Height) / 2f);
+            }
+        }
+
+        private static void DrawLogoWithOpacity(Graphics graphics, Image logo, Rectangle dest, int opacityPercent)
+        {
+            var alpha = ClampOpacityPercent(opacityPercent) / 100f;
+            if (alpha >= 0.995f)
+            {
+                graphics.DrawImage(logo, dest);
+                return;
+            }
+
+            var colorMatrix = new ColorMatrix
+            {
+                Matrix33 = alpha
+            };
+            using (var attributes = new ImageAttributes())
+            {
+                attributes.SetColorMatrix(colorMatrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+                graphics.DrawImage(
+                    logo,
+                    dest,
+                    0,
+                    0,
+                    logo.Width,
+                    logo.Height,
+                    GraphicsUnit.Pixel,
+                    attributes);
+            }
         }
 
         public static string BuildLogoFilterComplex(

@@ -17,7 +17,7 @@ namespace tiktok_Omni
             _item = item ?? throw new ArgumentNullException(nameof(item));
 
             var preview = TrimPreview(_item.Content);
-            Text = "Prompt video — " + (string.IsNullOrEmpty(preview) ? "Video Triết lý" : preview);
+            Text = "Prompt video — " + (string.IsNullOrEmpty(preview) ? "Video Quote" : preview);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
@@ -67,17 +67,12 @@ namespace tiktok_Omni
                 {
                     BackColor = Color.FromArgb(45, 49, 60),
                     ForeColor = Color.WhiteSmoke,
-                    Font = new Font("Segoe UI", 9F, FontStyle.Bold)
+                    Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                    Alignment = DataGridViewContentAlignment.MiddleCenter,
+                    Padding = Padding.Empty
                 }
             };
 
-            grid.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "colStt",
-                HeaderText = "STT",
-                FillWeight = 6,
-                MinimumWidth = 40
-            });
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "colScene",
@@ -110,11 +105,12 @@ namespace tiktok_Omni
             foreach (var scene in scenes.OrderBy(s => s.SceneIndex))
             {
                 grid.Rows.Add(
-                    scene.SceneIndex,
                     scene.SceneText ?? string.Empty,
                     scene.ImagePromptEn ?? string.Empty,
                     scene.ConventionFileName ?? string.Empty);
             }
+
+            AppGridSttColumn.EnsureFirstColumn(grid, compact: true);
 
             var footer = new FlowLayoutPanel
             {
@@ -150,7 +146,7 @@ namespace tiktok_Omni
             var parts = new System.Collections.Generic.List<string>();
             if (!string.IsNullOrEmpty(quote))
             {
-                parts.Add("Câu triết lý: " + TrimPreview(quote, 80));
+                parts.Add("Quote: " + TrimPreview(quote, 80));
             }
 
             if (PhilosophyVisualModes.Normalize(_item.VisualMode) == PhilosophyVisualModes.PreRendered

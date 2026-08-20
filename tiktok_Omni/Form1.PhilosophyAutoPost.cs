@@ -77,7 +77,7 @@ namespace tiktok_Omni
                 MessageBox.Show(
                     this,
                     "Không đẩy được dòng nào. Các dòng cần đã render xong (Status «Xong») và có file MP4.",
-                    "Đẩy sang Đăng tự động",
+                    "Đăng tự động",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 return;
@@ -104,7 +104,7 @@ namespace tiktok_Omni
             var source = (item.OutputPath ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(source) || !File.Exists(source))
             {
-                error = "«" + TrimPhilosophyPreviewN(item.Content, 40) + "»: chưa có video — bấm «Bắt đầu Render» trước.";
+                error = "«" + TrimPhilosophyPreviewN(item.Content, 40) + "»: chưa có video — bấm «Render video» trước.";
                 return string.Empty;
             }
 

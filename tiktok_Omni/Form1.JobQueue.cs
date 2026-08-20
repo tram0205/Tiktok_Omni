@@ -156,7 +156,7 @@ namespace tiktok_Omni
                 }
                 else if (job.Kind == OmniJobKind.PhilosophyVideo)
                 {
-                    LogPhilosophy("[JobQueue] Triết lý job thất bại: " + job.LastError);
+                    LogPhilosophy("[JobQueue] Quote job thất bại: " + job.LastError);
                     SetPhilosophyProgress("lỗi — xem log", 0);
                 }
                 else if (job.Kind == OmniJobKind.MascotStory)
@@ -790,10 +790,15 @@ namespace tiktok_Omni
                 return;
             }
 
+            if (!ShouldAllowInteractivePrompts())
+            {
+                return;
+            }
+
             if (success && result != null && !string.IsNullOrWhiteSpace(result.OutputPath))
             {
                 var profile = ProfileScopedPaths.ResolveProfileName(result.ProfileName);
-                LogPhilosophy($"Triết lý: xong → {result.OutputPath} (≈{result.DurationSeconds:0.##}s) @ {profile}.");
+                LogPhilosophy($"Quote: xong → {result.OutputPath} (≈{result.DurationSeconds:0.##}s) @ {profile}.");
                 LogPhilosophy("Quote: " + result.Quote);
                 SetPhilosophyProgress("Xong — đã đưa vào hàng duyệt", 100);
 
@@ -807,7 +812,7 @@ namespace tiktok_Omni
                 await EnqueueProductionApprovalAsync(
                     ApprovalJobType.PhilosophyVideo,
                     profile,
-                    "Triết lý/Quote — " + profile,
+                    "Quote/Quote — " + profile,
                     result.OutputPath,
                     quoteRisk.Score,
                     string.Join("; ", quoteRisk.Reasons),
@@ -835,10 +840,17 @@ namespace tiktok_Omni
                 LogPhilosophy("[APPROVAL] Đã đưa video vào hàng duyệt (Pending) — nick «" + profile + "».");
 
                 LogPhilosophy("[APPROVAL] Video trong hàng duyệt — AutoRun nếu score ≥ 85 và bật AutoRunApprovedQueue.");
+
+                var previewCaption = TrimPhilosophyPreviewN(result.Quote ?? string.Empty, 48);
+                LoadProductionVideoPreview(
+                    result.OutputPath,
+                    ProductionPipeline.ResolveThumbnailPath(result.OutputPath),
+                    previewCaption.Length > 0 ? previewCaption : profile);
+                PromptPhilosophyRenderCompleteDialog(result.Quote ?? string.Empty, result.OutputPath);
             }
             else if (!success)
             {
-                LogPhilosophy("[JobQueue] Triết lý thất bại: " + error);
+                LogPhilosophy("[JobQueue] Quote thất bại: " + error);
                 SetPhilosophyProgress("lỗi — xem log", 0);
             }
         }
@@ -1009,6 +1021,8 @@ namespace tiktok_Omni
                         ProductionPipeline.ResolveThumbnailPath(outputPath),
                         video?.ProductName ?? scenes.FirstOrDefault()?.ProductName);
                 }
+
+                PromptShowcaseRenderCompleteDialog(video, outputPath);
 
                 SyncBuffersToGrids();
                 NotifyShowcaseDraftDirty();

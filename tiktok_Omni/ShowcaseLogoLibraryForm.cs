@@ -70,7 +70,7 @@ namespace tiktok_Omni
                 Height = 52,
                 Padding = new Padding(16, 14, 16, 0),
                 ForeColor = Color.FromArgb(170, 178, 192),
-                Text = "Logo dùng chung — chọn trên cột «Logo» từng dòng video khi render."
+                Text = "Logo dùng chung toàn app (Showcase, Quote, Reup…) — chọn trên cột «Logo» hoặc popup Âm thanh khi render."
             };
 
             _lvFiles = new ListView

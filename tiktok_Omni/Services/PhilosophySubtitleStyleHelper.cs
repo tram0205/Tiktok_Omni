@@ -1,5 +1,6 @@
 using System;
 using tiktok_Omni.Models;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services
 {
@@ -72,8 +73,28 @@ namespace tiktok_Omni.Services
             item.SubtitleStyleLabel = FormatStyleSummary(item);
         }
 
-        public static AssSubtitleGeneratorOptions BuildOptions(PhilosophyScriptItem item)
+        public static AssSubtitleGeneratorOptions BuildOptions(PhilosophyBatchItem batch, AppSettings settings = null)
         {
+            if (batch == null)
+            {
+                throw new ArgumentNullException(nameof(batch));
+            }
+
+            var profile = PhilosophyBatchHelper.ResolveBatchProfileName(batch);
+            var video = PhilosophyBatchShowcaseSubtitleAdapter.ToShowcaseVideo(batch, profile);
+            ShowcaseSubtitleStyleHelper.EnsureVideoDefaults(video, settings);
+            return ShowcaseSubtitleStyleHelper.BuildBodyOptions(video, settings);
+        }
+
+        public static AssSubtitleGeneratorOptions BuildOptions(PhilosophyScriptItem item, AppSettings settings = null)
+        {
+            if (item != null && settings != null && UsesShowcaseStyleFields(item))
+            {
+                var video = PhilosophyBatchShowcaseSubtitleAdapter.ToShowcaseVideoFromQuote(item);
+                ShowcaseSubtitleStyleHelper.EnsureVideoDefaults(video, settings);
+                return ShowcaseSubtitleStyleHelper.BuildBodyOptions(video, settings);
+            }
+
             EnsureDefaults(item);
             var position = ReupSubtitleStyleHelper.ParsePosition(item.SubtitlePosition);
             var animation = ReupSubtitleStyleHelper.ParseAnimation(item.SubtitleAnimation);
@@ -119,6 +140,20 @@ namespace tiktok_Omni.Services
             }
 
             return position + " · " + font + " " + size + " · " + anim + " · " + traits;
+        }
+
+        private static bool UsesShowcaseStyleFields(PhilosophyScriptItem item)
+        {
+            if (item == null)
+            {
+                return false;
+            }
+
+            return !string.IsNullOrWhiteSpace(item.SubtitleLookPreset)
+                   || !string.IsNullOrWhiteSpace(item.SubtitleDecorPreset)
+                   || !string.IsNullOrWhiteSpace(item.SubtitleHighlightColourAss)
+                   || !string.IsNullOrWhiteSpace(item.SubtitleDisplayQuote)
+                   || !string.IsNullOrWhiteSpace(item.SubtitleDisplayAnimation);
         }
 
         public static int ResolvePhilosophyMarginV(ReupSubtitleVerticalPosition position)

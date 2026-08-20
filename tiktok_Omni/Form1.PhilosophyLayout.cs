@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Controls;
 using tiktok_Omni.Helpers;
 using tiktok_Omni.Models;
 using tiktok_Omni.Services;
@@ -17,7 +19,6 @@ namespace tiktok_Omni
     public partial class Form1
     {
         private static readonly Font PhilosophyUiFont = AppLabelFont;
-        private static readonly Font PhilosophyPrimaryActionFont = AppPrimaryActionFont;
         private static readonly Font PhilosophyCommandFont = AppJellyButtonFont;
         private static readonly Color PhilosophyPanelBack = Color.FromArgb(31, 34, 42);
         private static readonly Color PhilosophyChromeBack = Color.FromArgb(36, 39, 48);
@@ -27,60 +28,73 @@ namespace tiktok_Omni
         private static readonly Color PhilosophyTintSecondary = Color.FromArgb(88, 94, 112);
         private static readonly Color PhilosophyTintStop = Color.FromArgb(170, 72, 72);
         private static readonly Color PhilosophyTintResume = Color.FromArgb(68, 118, 178);
+        private static readonly Color PhilosophyTintAddRow = Color.FromArgb(52, 92, 158);
+        private static readonly Color PhilosophyTintNeutral = Color.FromArgb(68, 72, 86);
+        private static readonly Color PhilosophyTintLinkSession = Color.FromArgb(56, 96, 128);
+        private static readonly Color PhilosophyTintDanger = Color.FromArgb(168, 52, 52);
+        private static readonly Color PhilosophyTintTrash = Color.FromArgb(88, 92, 72);
+        private static readonly Color PhilosophyTintBrollLibrary = Color.FromArgb(56, 108, 88);
+        private static readonly Color PhilosophyTintMascotLibrary = Color.FromArgb(100, 72, 190);
+        private static readonly Color PhilosophyTintMusicLibrary = Color.FromArgb(138, 58, 118);
+        private static readonly Color PhilosophyTintSfxLibrary = Color.FromArgb(168, 118, 42);
+        private static readonly Color PhilosophyTintLogoLibrary = Color.FromArgb(72, 118, 168);
+        private static readonly Padding PhilosophySolidButtonMargin = new Padding(4, 2, 4, 2);
         private static readonly Padding PhilosophyFlowItemMargin = new Padding(4, 4, 10, 6);
         private static readonly Padding PhilosophyFlowSectionMargin = new Padding(0, 0, 18, 4);
         private const int PhilosophyCommandButtonHeight = AppJellyButtonHeight;
-        private const int PhilosophyPrimaryActionHeight = AppPrimaryActionHeight;
         private const int PhilosophyCommandHorizontalPad = AppJellyButtonHorizontalPad;
+        private const int PhilosophyStatusPanelHeight = 276;
+        private const int PhilosophyStatusPanelMinHeight = 236;
+        private const float PhilosophyLogFontSize = 10F;
+        private const int PhilosophyLogLineSpacing = 6;
+        private const int PhilosophyLogHeaderRowHeight = 64;
+        private const int PhilosophyClearLogButtonWidth = 160;
+        private const int PhilosophyPrereqLabelRowHeight = 56;
+        private const int PhilosophyRenderBarHeight = AppPrimaryActionHeight + 24;
 
         private Panel pnlPhilosophyTopChrome;
+        private Panel pnlPhilosophyTabTitleHost;
+        private ShowcaseTabTitleLabel lblPhilosophyTabTitle;
         private Panel pnlPhilosophyCommandBar;
-        private Panel pnlPhilosophyConfigToolbar;
+        private FlowLayoutPanel flpPhilosophyLibraryCenter;
+        private FlowLayoutPanel flpPhilosophyRowManage;
         private Panel pnlPhilosophyMainFill;
         private Panel pnlPhilosophyGridWrap;
         private Panel pnlPhilosophyRenderHost;
+        private FlowLayoutPanel flpPhilosophyRenderCenter;
+        private Panel pnlPhilosophyRenderStopHost;
+        private FlowLayoutPanel flpPhilosophyRenderStopRight;
         private Panel pnlPhilosophyStatus;
-        private RadioButton rbPhilosophyModeQuotes;
-        private RadioButton rbPhilosophyModeStory;
-        private TextBox txtPhilosophyTopic;
-        private NumericUpDown numPhilosophyCount;
-        private Button btnPhilosophyGenerateScript;
         private Button btnPhilosophyAddRow;
+        private Button btnPhilosophyCopyRow;
+        private Button btnPhilosophyRestoreSessions;
         private Button btnPhilosophyDeleteRow;
+        private Button btnPhilosophyTrash;
+        private Button btnPhilosophyMoveRowUp;
+        private Button btnPhilosophyMoveRowDown;
+        private Button btnPhilosophyBrollLibrary;
+        private Button btnPhilosophyMascotImageLibrary;
+        private Button btnPhilosophyMusicLibrary;
+        private Button btnPhilosophySfxLibrary;
+        private Button btnPhilosophyLogoLibrary;
         private DataGridView dgvPhilosophyScripts;
-        private BindingList<PhilosophyScriptItem> _philosophyScriptBindingList;
-        private DataGridViewComboBoxColumn _colPhilosophyMusic;
-        private DataGridViewComboBoxColumn _colPhilosophyAmbient;
+        private BindingList<PhilosophyBatchItem> _philosophyBatchBindingList;
         private DataGridViewComboBoxColumn _colPhilosophyProfile;
-        private DataGridViewComboBoxColumn _colPhilosophyVisualMode;
-        private DataGridViewButtonColumn _colPhilosophyMusicBrowse;
-        private DataGridViewButtonColumn _colPhilosophySceneVideoBrowse;
+        private Button btnPhilosophyGenerateContent;
         private Button btnPhilosophyStartRender;
         private Button btnPhilosophyStopRender;
-        private Button btnGenerateScenePrompts;
-        private Button btnExportExcelPrompts;
         private Button btnPhilosophyStopAll;
-        private TextBox txtPhilosophyVideoInputFolder;
-        private Button btnBrowseVideoInput;
-        private Button btnOpenPhilosophyVideoFolder;
         private CancellationTokenSource _philosophyScriptGenCts;
         private CancellationTokenSource _philosophyScenePromptCts;
         private bool _philosophyScriptGenRunning;
         private bool _philosophyScenePromptRunning;
-        private NumericUpDown numPhilosophyDurationMin;
-        private NumericUpDown numPhilosophyDurationMax;
         private CancellationTokenSource _philosophyRenderCts;
         private bool _philosophyRenderRunning;
         private bool _philosophyRenderPaused;
-        private List<PhilosophyScriptItem> _philosophyRenderPending;
+        private List<PhilosophyRenderQueueEntry> _philosophyRenderPending;
         private ContextMenuStrip _cmsPhilosophyGrid;
-        private ContextMenuStrip _cmsPhilosophyBRollPicker;
-        private PhilosophyScriptItem _philosophyBRollPickerItem;
-        private int _philosophyBRollPickerRowIndex = -1;
-        private ToolStripMenuItem _miPhilosophyBRollRandom;
-        private ToolStripMenuItem _miPhilosophyBRollBrowse;
 
-        /// <summary>Tab Video Triết lý — layout giống Video reup (Top toolbar / Fill grid / Bottom actions + log).</summary>
+        /// <summary>Tab Video Quote — layout giống Video reup (Top toolbar / Fill grid / Bottom actions + log).</summary>
         public void InitializePhilosophyControls(Panel modePage, Panel progressBand)
         {
             if (modePage == null)
@@ -95,8 +109,23 @@ namespace tiktok_Omni
             BuildPhilosophyStatusPanel();
             WirePhilosophyTabLayout(modePage, progressBand);
             InitializePhilosophyDraftAutoSave();
-            RefreshPhilosophyFolderOptions();
-            EnsurePhilosophyVideoInputFolderDefault();
+            InitializePhilosophyTrashMaintenance();
+            _ = LoadPhilosophyProfileComboAsync();
+        }
+
+        private async Task LoadPhilosophyProfileComboAsync()
+        {
+            try
+            {
+                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+                _philosophySettingsSnap = settings;
+                PhilosophyVideoPipelineService.EnsureFinishedProductLayout(settings);
+                RefreshPhilosophyProfileCombo(settings);
+            }
+            catch
+            {
+                RefreshPhilosophyProfileCombo(new AppSettings());
+            }
         }
 
         private void WirePhilosophyTabLayout(Panel modePage, Panel progressBand)
@@ -150,15 +179,17 @@ namespace tiktok_Omni
                 return;
             }
 
-            _philosophyScriptBindingList ??= new BindingList<PhilosophyScriptItem>();
+            _philosophyBatchBindingList ??= new BindingList<PhilosophyBatchItem>();
             dgvPhilosophyScripts = new DataGridView
             {
                 Name = "dgvPhilosophyScripts",
-                DataSource = _philosophyScriptBindingList,
+                DataSource = _philosophyBatchBindingList,
                 AutoGenerateColumns = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
+                ReadOnly = false,
+                EditMode = DataGridViewEditMode.EditOnEnter,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = true,
@@ -182,10 +213,9 @@ namespace tiktok_Omni
                     Alignment = DataGridViewContentAlignment.MiddleCenter
                 }
             };
-            ConfigurePhilosophyScriptGrid();
-            WirePhilosophyGridEvents();
+            ConfigurePhilosophyBatchGrid();
+            WirePhilosophyBatchGridEvents();
             ApplyGridProfileComboColumn(dgvPhilosophyScripts, "colPhilosophyProfile");
-            // Có nhiều ComboBox trong ô — dùng chiều cao combo chuẩn.
             ApplyAppComboGridRowHeight(dgvPhilosophyScripts);
             ApplyAppGridChrome(dgvPhilosophyScripts);
         }
@@ -206,15 +236,17 @@ namespace tiktok_Omni
                     Name = "lblPhilosophyPrereq",
                     Text = "Đang kiểm tra cấu hình…",
                     AutoSize = false,
-                    Height = 28,
+                    Height = PhilosophyPrereqLabelRowHeight,
                     ForeColor = Color.FromArgb(255, 180, 120),
                     Font = PhilosophyUiFont,
-                    Padding = new Padding(4, 4, 4, 2)
+                    Padding = new Padding(4, 6, 4, 4),
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    UseCompatibleTextRendering = true
                 };
             }
 
             lblPhilosophyPrereq.AutoSize = false;
-            lblPhilosophyPrereq.Height = 28;
+            lblPhilosophyPrereq.Height = PhilosophyPrereqLabelRowHeight;
             dgvPhilosophyScripts.Margin = Padding.Empty;
             dgvPhilosophyScripts.MinimumSize = new Size(120, 80);
             dgvPhilosophyScripts.Dock = DockStyle.Fill;
@@ -226,7 +258,7 @@ namespace tiktok_Omni
         private void BuildPhilosophyTopChrome()
         {
             BuildPhilosophyCommandBar();
-            BuildPhilosophyConfigToolbar();
+            BuildPhilosophyTabTitleRow();
 
             pnlPhilosophyTopChrome = new Panel
             {
@@ -239,43 +271,90 @@ namespace tiktok_Omni
                 BackColor = PhilosophyChromeBack
             };
 
-            pnlPhilosophyConfigToolbar.Dock = DockStyle.Top;
             pnlPhilosophyCommandBar.Dock = DockStyle.Top;
-            pnlPhilosophyTopChrome.Controls.Add(pnlPhilosophyConfigToolbar);
+            pnlPhilosophyTabTitleHost.Dock = DockStyle.Top;
             pnlPhilosophyTopChrome.Controls.Add(pnlPhilosophyCommandBar);
+            pnlPhilosophyTopChrome.Controls.Add(pnlPhilosophyTabTitleHost);
+        }
+
+        private void BuildPhilosophyTabTitleRow()
+        {
+            pnlPhilosophyTabTitleHost = new Panel
+            {
+                Name = "pnlPhilosophyTabTitleHost",
+                AutoSize = false,
+                Height = 64,
+                Margin = new Padding(0, 0, 0, 8),
+                Padding = Padding.Empty,
+                BackColor = PhilosophyPanelBack
+            };
+
+            var accent = new Panel
+            {
+                Name = "pnlPhilosophyTitleAccent",
+                Dock = DockStyle.Left,
+                Width = 5,
+                BackColor = Color.FromArgb(210, 158, 32)
+            };
+
+            lblPhilosophyTabTitle = new ShowcaseTabTitleLabel
+            {
+                Name = "lblPhilosophyTabTitle",
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty,
+                TitleText = "VIDEO QUOTE"
+            };
+
+            pnlPhilosophyTabTitleHost.Controls.Add(accent);
+            pnlPhilosophyTabTitleHost.Controls.Add(lblPhilosophyTabTitle);
         }
 
         private void BuildPhilosophyCommandBar()
         {
-            pnlPhilosophyCommandBar = CreatePhilosophyAutoSizeBar("pnlPhilosophyCommandBar", PhilosophyChromeBack);
-            var flp = CreatePhilosophyWrapFlowPanel("flpPhilosophyCommand", PhilosophyChromeBack);
+            pnlPhilosophyCommandBar = new Panel
+            {
+                Name = "pnlPhilosophyCommandBar",
+                Dock = DockStyle.Top,
+                AutoSize = false,
+                MinimumSize = new Size(0, AppJellyButtonHeight * 2 + 18),
+                Height = AppJellyButtonHeight * 2 + 18,
+                Padding = Padding.Empty,
+                Margin = Padding.Empty,
+                BackColor = PhilosophyChromeBack
+            };
+            pnlPhilosophyCommandBar.Resize += (_, __) => LayoutPhilosophyCommandBar();
 
-            btnPhilosophyAddRow = CreatePhilosophyCommandButton("btnPhilosophyAddRow", "+ Thêm hàng", Color.FromArgb(55, 95, 160));
+            flpPhilosophyLibraryCenter = CreatePhilosophyToolbarFlowPanel("flpPhilosophyLibraryCenter");
+            flpPhilosophyRowManage = CreatePhilosophyToolbarFlowPanel("flpPhilosophyRowManage");
+
+            btnPhilosophyAddRow = CreatePhilosophySolidRectButton("btnPhilosophyAddRow", "+ Thêm batch", PhilosophyTintAddRow, 128);
             btnPhilosophyAddRow.Click -= btnPhilosophyAddRow_Click;
             btnPhilosophyAddRow.Click += btnPhilosophyAddRow_Click;
-            btnPhilosophyDeleteRow = CreatePhilosophyCommandButton("btnPhilosophyDeleteRow", "Xóa hàng", PhilosophyTintSecondary);
+
+            btnPhilosophyCopyRow = CreatePhilosophySolidRectButton("btnPhilosophyCopyRow", "📋 Copy batch", PhilosophyTintNeutral, 128);
+            btnPhilosophyCopyRow.Click -= btnPhilosophyCopyRow_Click;
+            btnPhilosophyCopyRow.Click += btnPhilosophyCopyRow_Click;
+
+            btnPhilosophyRestoreSessions = CreatePhilosophySolidRectButton(
+                "btnPhilosophyRestoreSessions", "🔗 Gắn phiên", PhilosophyTintLinkSession, 118);
+            btnPhilosophyRestoreSessions.Click -= btnPhilosophyRestoreSessions_Click;
+            btnPhilosophyRestoreSessions.Click += btnPhilosophyRestoreSessions_Click;
+
+            btnPhilosophyDeleteRow = CreatePhilosophySolidRectButton("btnPhilosophyDeleteRow", "🗑 Xoá batch", PhilosophyTintDanger, 118);
             btnPhilosophyDeleteRow.Click -= btnPhilosophyDeleteRow_Click;
             btnPhilosophyDeleteRow.Click += btnPhilosophyDeleteRow_Click;
 
-            // Nút Tạo Prompt Phân Cảnh
-            if (btnGenerateScenePrompts == null || btnGenerateScenePrompts.IsDisposed)
-            {
-                btnGenerateScenePrompts = CreatePhilosophyCommandButton(
-                    "btnGenerateScenePrompts", "Tạo Prompt Phân Cảnh", Color.FromArgb(100, 72, 190));
-            }
+            btnPhilosophyTrash = CreatePhilosophySolidRectButton("btnPhilosophyTrash", "♻ Thùng rác", PhilosophyTintTrash, 118);
+            btnPhilosophyTrash.Click -= btnPhilosophyTrash_Click;
+            btnPhilosophyTrash.Click += btnPhilosophyTrash_Click;
 
-            btnGenerateScenePrompts.Click -= BtnGenerateScenePrompts_Click;
-            btnGenerateScenePrompts.Click += BtnGenerateScenePrompts_Click;
+            btnPhilosophyMoveRowUp = CreatePhilosophyArrowButton("btnPhilosophyMoveRowUp", "↑");
+            btnPhilosophyMoveRowUp.Click -= btnPhilosophyMoveRowUp_Click;
+            btnPhilosophyMoveRowUp.Click += btnPhilosophyMoveRowUp_Click;
 
-            // Nút Xuất Excel / CSV
-            if (btnExportExcelPrompts == null || btnExportExcelPrompts.IsDisposed)
-            {
-                btnExportExcelPrompts = CreatePhilosophyCommandButton(
-                    "btnExportExcelPrompts", "Tải Excel Prompt", PhilosophyTintSecondary);
-            }
-
-            btnExportExcelPrompts.Click -= BtnExportExcelPrompts_Click;
-            btnExportExcelPrompts.Click += BtnExportExcelPrompts_Click;
+            btnPhilosophyMoveRowDown = CreatePhilosophyArrowButton("btnPhilosophyMoveRowDown", "↓");
+            btnPhilosophyMoveRowDown.Click -= btnPhilosophyMoveRowDown_Click;
+            btnPhilosophyMoveRowDown.Click += btnPhilosophyMoveRowDown_Click;
 
             if (btnPhilosophyStopAll == null || btnPhilosophyStopAll.IsDisposed)
             {
@@ -287,297 +366,127 @@ namespace tiktok_Omni
             btnPhilosophyStopAll.Click -= BtnPhilosophyStopAll_Click;
             btnPhilosophyStopAll.Click += BtnPhilosophyStopAll_Click;
 
-            flp.Controls.Add(btnPhilosophyAddRow);
-            flp.Controls.Add(btnPhilosophyDeleteRow);
+            btnPhilosophyBrollLibrary = CreatePhilosophyJellyButton(
+                "btnPhilosophyBrollLibrary",
+                "📁 Thư viện B-roll",
+                PhilosophyTintBrollLibrary,
+                200);
+            btnPhilosophyBrollLibrary.Click -= btnPhilosophyBrollLibrary_Click;
+            btnPhilosophyBrollLibrary.Click += btnPhilosophyBrollLibrary_Click;
 
-            // Separator
-            flp.Controls.Add(new Label
+            btnPhilosophyMascotImageLibrary = CreatePhilosophyJellyButton(
+                "btnPhilosophyMascotImageLibrary",
+                "🖼 Thư viện Ảnh mascot",
+                PhilosophyTintMascotLibrary,
+                220);
+            btnPhilosophyMascotImageLibrary.Click -= btnPhilosophyMascotImageLibrary_Click;
+            btnPhilosophyMascotImageLibrary.Click += btnPhilosophyMascotImageLibrary_Click;
+
+            btnPhilosophyMusicLibrary = CreatePhilosophyJellyButton(
+                "btnPhilosophyMusicLibrary",
+                "🎵 Thư viện nhạc nền",
+                PhilosophyTintMusicLibrary,
+                200);
+            btnPhilosophyMusicLibrary.Click -= btnPhilosophyMusicLibrary_Click;
+            btnPhilosophyMusicLibrary.Click += btnPhilosophyMusicLibrary_Click;
+
+            btnPhilosophySfxLibrary = CreatePhilosophyJellyButton(
+                "btnPhilosophySfxLibrary",
+                "🔊 Hiệu ứng âm thanh",
+                PhilosophyTintSfxLibrary,
+                200);
+            btnPhilosophySfxLibrary.Click -= btnPhilosophySfxLibrary_Click;
+            btnPhilosophySfxLibrary.Click += btnPhilosophySfxLibrary_Click;
+
+            btnPhilosophyLogoLibrary = CreatePhilosophyJellyButton(
+                "btnPhilosophyLogoLibrary",
+                "🏷 Thư viện logo",
+                PhilosophyTintLogoLibrary,
+                180);
+            btnPhilosophyLogoLibrary.Click -= btnPhilosophyLogoLibrary_Click;
+            btnPhilosophyLogoLibrary.Click += btnPhilosophyLogoLibrary_Click;
+
+            flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyBrollLibrary);
+            flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyMascotImageLibrary);
+            flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyMusicLibrary);
+            flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophySfxLibrary);
+            flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyLogoLibrary);
+            flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyStopAll);
+
+            flpPhilosophyRowManage.Controls.Add(btnPhilosophyAddRow);
+            flpPhilosophyRowManage.Controls.Add(btnPhilosophyCopyRow);
+            flpPhilosophyRowManage.Controls.Add(btnPhilosophyRestoreSessions);
+            flpPhilosophyRowManage.Controls.Add(btnPhilosophyDeleteRow);
+            flpPhilosophyRowManage.Controls.Add(btnPhilosophyTrash);
+            flpPhilosophyRowManage.Controls.Add(btnPhilosophyMoveRowUp);
+            flpPhilosophyRowManage.Controls.Add(btnPhilosophyMoveRowDown);
+
+            pnlPhilosophyCommandBar.Controls.Add(flpPhilosophyLibraryCenter);
+            pnlPhilosophyCommandBar.Controls.Add(flpPhilosophyRowManage);
+            LayoutPhilosophyCommandBar();
+        }
+
+        private void LayoutPhilosophyCommandBar()
+        {
+            if (pnlPhilosophyCommandBar == null
+                || flpPhilosophyLibraryCenter == null
+                || flpPhilosophyRowManage == null)
             {
-                Text = "|",
+                return;
+            }
+
+            if (pnlPhilosophyCommandBar.Width <= 0 || pnlPhilosophyCommandBar.Height <= 0)
+            {
+                return;
+            }
+
+            var rowHeight = AppJellyButtonHeight + 6;
+
+            flpPhilosophyLibraryCenter.PerformLayout();
+            var libraryX = Math.Max(0, (pnlPhilosophyCommandBar.ClientSize.Width - flpPhilosophyLibraryCenter.Width) / 2);
+            flpPhilosophyLibraryCenter.Location = new Point(libraryX, 0);
+            flpPhilosophyLibraryCenter.BringToFront();
+
+            flpPhilosophyRowManage.PerformLayout();
+            flpPhilosophyRowManage.Location = new Point(0, rowHeight);
+            flpPhilosophyRowManage.BringToFront();
+        }
+
+        private static FlowLayoutPanel CreatePhilosophyToolbarFlowPanel(string name)
+        {
+            return new FlowLayoutPanel
+            {
+                Name = name,
                 AutoSize = true,
-                ForeColor = Color.FromArgb(70, 75, 90),
-                Margin = new Padding(4, 10, 4, 0)
-            });
-
-            flp.Controls.Add(btnGenerateScenePrompts);
-            flp.Controls.Add(btnExportExcelPrompts);
-            flp.Controls.Add(btnPhilosophyStopAll);
-
-            // Thư mục video phân cảnh tự làm (mode 3)
-            flp.Controls.Add(new Label
-            {
-                Text = "Thư mục video:",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(160, 168, 182),
-                Margin = new Padding(12, 10, 4, 0)
-            });
-
-            if (txtPhilosophyVideoInputFolder == null || txtPhilosophyVideoInputFolder.IsDisposed)
-            {
-                txtPhilosophyVideoInputFolder = new TextBox
-                {
-                    Name = "txtPhilosophyVideoInputFolder",
-                    Text = string.Empty,
-                    Width = 200,
-                    Height = 26,
-                    BackColor = Color.FromArgb(45, 49, 60),
-                    ForeColor = Color.WhiteSmoke,
-                    Font = PhilosophyUiFont
-                };
-            }
-
-            ApplyPhilosophyFlowMargin(txtPhilosophyVideoInputFolder, top: 8);
-
-            if (btnBrowseVideoInput == null || btnBrowseVideoInput.IsDisposed)
-            {
-                btnBrowseVideoInput = CreatePhilosophyCommandButton(
-                    "btnBrowseVideoInput", "Chọn thư mục Video", PhilosophyTintSecondary);
-                btnBrowseVideoInput.Width = 140;
-            }
-
-            btnBrowseVideoInput.Click -= BtnBrowseVideoInput_Click;
-            btnBrowseVideoInput.Click += BtnBrowseVideoInput_Click;
-
-            if (btnOpenPhilosophyVideoFolder == null || btnOpenPhilosophyVideoFolder.IsDisposed)
-            {
-                btnOpenPhilosophyVideoFolder = CreatePhilosophyCommandButton(
-                    "btnOpenPhilosophyVideoFolder", "Mở thư mục", Color.FromArgb(55, 95, 160));
-                btnOpenPhilosophyVideoFolder.Width = 110;
-            }
-
-            btnOpenPhilosophyVideoFolder.Click -= BtnOpenPhilosophyVideoFolder_Click;
-            btnOpenPhilosophyVideoFolder.Click += BtnOpenPhilosophyVideoFolder_Click;
-
-            flp.Controls.Add(txtPhilosophyVideoInputFolder);
-            flp.Controls.Add(btnBrowseVideoInput);
-            flp.Controls.Add(btnOpenPhilosophyVideoFolder);
-
-            pnlPhilosophyCommandBar.Controls.Add(flp);
-        }
-
-        private void BtnBrowseVideoInput_Click(object sender, EventArgs e)
-        {
-            var defaultDir = ResolvePhilosophyPreRenderedScenesDirectory();
-            using (var dlg = new FolderBrowserDialog
-            {
-                Description = "Chọn thư mục chứa video phân cảnh (mode 3).\r\nMặc định: Assets\\{profile}\\philosophy-scenes\\",
-                SelectedPath = Directory.Exists(defaultDir) ? defaultDir : string.Empty,
-                ShowNewFolderButton = true
-            })
-            {
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    if (txtPhilosophyVideoInputFolder != null && !txtPhilosophyVideoInputFolder.IsDisposed)
-                    {
-                        txtPhilosophyVideoInputFolder.Text = dlg.SelectedPath;
-                        NotifyPhilosophyDraftDirty();
-                    }
-                }
-            }
-        }
-
-        private void BtnOpenPhilosophyVideoFolder_Click(object sender, EventArgs e)
-        {
-            var dir = ResolvePhilosophyPreRenderedScenesDirectory();
-            try
-            {
-                Directory.CreateDirectory(dir);
-                if (txtPhilosophyVideoInputFolder != null && !txtPhilosophyVideoInputFolder.IsDisposed)
-                {
-                    txtPhilosophyVideoInputFolder.Text = dir;
-                    NotifyPhilosophyDraftDirty();
-                }
-
-                System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\"");
-                LogPhilosophy("Thư mục video phân cảnh: " + dir);
-                LogPhilosophy("Copy file .mp4 vào đây — tên theo cột «Prompt video» (vd: tam-bat-bien-giua-dong-01.mp4).");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, "Không mở được thư mục:\r\n" + ex.Message, "Video Triết lý",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-
-        /// <summary>Assets\{profile}\philosophy-scenes\ — tạo nếu chưa có.</summary>
-        private string ResolvePhilosophyPreRenderedScenesDirectory()
-        {
-            var profile = GetSelectedPhilosophyProfileName();
-            return PhilosophyProfileAssets.EnsurePreRenderedScenesDirectory(profile);
-        }
-
-        private void EnsurePhilosophyVideoInputFolderDefault()
-        {
-            if (txtPhilosophyVideoInputFolder == null || txtPhilosophyVideoInputFolder.IsDisposed)
-            {
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(txtPhilosophyVideoInputFolder.Text))
-            {
-                return;
-            }
-
-            txtPhilosophyVideoInputFolder.Text = ResolvePhilosophyPreRenderedScenesDirectory();
-        }
-
-        private void UpdatePhilosophyGenerateScriptButtonState()
-        {
-            if (btnPhilosophyGenerateScript == null || btnPhilosophyGenerateScript.IsDisposed)
-            {
-                return;
-            }
-
-            btnPhilosophyGenerateScript.Enabled = IsPhilosophyScriptGenerationReady();
-        }
-
-        private void BuildPhilosophyConfigToolbar()
-        {
-            pnlPhilosophyConfigToolbar = CreatePhilosophyAutoSizeBar("pnlPhilosophyConfigToolbar", PhilosophyConfigBarBack);
-            var flpRoot = CreatePhilosophyWrapFlowPanel("flpPhilosophyConfigRoot", PhilosophyConfigBarBack);
-
-            var grpTopic = CreatePhilosophyToolGroup("Chủ đề:", PhilosophyConfigBarBack);
-            txtPhilosophyTopic = new TextBox
-            {
-                Name = "txtPhilosophyTopic",
-                Text = "Sự cố gắng",
-                Width = 168,
-                Height = 26,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Font = PhilosophyUiFont
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                Dock = DockStyle.None,
+                Padding = new Padding(4, 2, 4, 2),
+                Margin = Padding.Empty,
+                BackColor = Color.Transparent
             };
-            ApplyPhilosophyFlowMargin(txtPhilosophyTopic, top: 8);
-            grpTopic.Controls.Add(txtPhilosophyTopic);
-
-            rbPhilosophyModeQuotes = CreatePhilosophyRadio("Quotes", true);
-            rbPhilosophyModeStory = CreatePhilosophyRadio("Story", false);
-            rbPhilosophyModeQuotes.CheckedChanged += PhilosophyModeRadio_CheckedChanged;
-            rbPhilosophyModeStory.CheckedChanged += PhilosophyModeRadio_CheckedChanged;
-            ApplyPhilosophyFlowMargin(rbPhilosophyModeQuotes, top: 10);
-            ApplyPhilosophyFlowMargin(rbPhilosophyModeStory, top: 10);
-            grpTopic.Controls.Add(rbPhilosophyModeQuotes);
-            grpTopic.Controls.Add(rbPhilosophyModeStory);
-
-            numPhilosophyCount = new NumericUpDown
-            {
-                Name = "numPhilosophyCount",
-                Minimum = 1,
-                Maximum = 20,
-                Value = 5,
-                Width = 48,
-                Height = 26,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Font = PhilosophyUiFont
-            };
-            ApplyPhilosophyFlowMargin(numPhilosophyCount, top: 8);
-            grpTopic.Controls.Add(new Label
-            {
-                Text = "SL:",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(160, 168, 182),
-                Margin = new Padding(0, 10, 4, 0)
-            });
-            grpTopic.Controls.Add(numPhilosophyCount);
-
-            var grpProfile = CreatePhilosophyToolGroup("Profile:", PhilosophyConfigBarBack);
-            if (cbPhilosophyProfile == null || cbPhilosophyProfile.IsDisposed)
-            {
-                cbPhilosophyProfile = new ComboBox
-                {
-                    Name = "cbPhilosophyProfile",
-                    Width = 120,
-                    Height = 26,
-                    DropDownStyle = ComboBoxStyle.DropDownList,
-                    BackColor = Color.FromArgb(45, 49, 60),
-                    ForeColor = Color.WhiteSmoke,
-                    Font = PhilosophyUiFont
-                };
-                cbPhilosophyProfile.Items.Add("default");
-                cbPhilosophyProfile.SelectedIndex = 0;
-            }
-
-            cbPhilosophyProfile.SelectedIndexChanged -= PhilosophyProfile_SelectedIndexChanged;
-            cbPhilosophyProfile.SelectedIndexChanged += PhilosophyProfile_SelectedIndexChanged;
-            ApplyPhilosophyFlowMargin(cbPhilosophyProfile, top: 8);
-            grpProfile.Controls.Add(cbPhilosophyProfile);
-
-            if (numPhilosophyDurationMin == null || numPhilosophyDurationMin.IsDisposed)
-            {
-                numPhilosophyDurationMin = CreatePhilosophyDurationSpinner("numPhilosophyDurationMin", 15);
-            }
-
-            if (numPhilosophyDurationMax == null || numPhilosophyDurationMax.IsDisposed)
-            {
-                numPhilosophyDurationMax = CreatePhilosophyDurationSpinner("numPhilosophyDurationMax", 60);
-            }
-
-            grpProfile.Controls.Add(new Label
-            {
-                Name = "lblPhilosophyDuration",
-                Text = "Thời lượng Gemini:",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(160, 168, 182),
-                Margin = new Padding(12, 10, 4, 0)
-            });
-            ApplyPhilosophyFlowMargin(numPhilosophyDurationMin, top: 8);
-            grpProfile.Controls.Add(numPhilosophyDurationMin);
-            grpProfile.Controls.Add(new Label
-            {
-                Name = "lblPhilosophyDurationTo",
-                Text = "đến",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(160, 168, 182),
-                Margin = new Padding(0, 10, 4, 0)
-            });
-            ApplyPhilosophyFlowMargin(numPhilosophyDurationMax, top: 8);
-            grpProfile.Controls.Add(numPhilosophyDurationMax);
-            grpProfile.Controls.Add(new Label
-            {
-                Name = "lblPhilosophyDurationUnit",
-                Text = "giây",
-                AutoSize = true,
-                ForeColor = Color.FromArgb(160, 168, 182),
-                Margin = new Padding(0, 10, 12, 0)
-            });
-
-            if (btnPhilosophyGenerateScript == null || btnPhilosophyGenerateScript.IsDisposed)
-            {
-                btnPhilosophyGenerateScript = CreatePhilosophyCommandButton(
-                    "btnPhilosophyGenerateScript",
-                    "Tạo câu triết lý",
-                    PhilosophyTintGenerate);
-            }
-
-            btnPhilosophyGenerateScript.Text = "Tạo câu triết lý";
-            btnPhilosophyGenerateScript.Click -= btnPhilosophyGenerateScript_Click;
-            btnPhilosophyGenerateScript.Click += btnPhilosophyGenerateScript_Click;
-            ApplyPhilosophyCommandButtonMetrics(btnPhilosophyGenerateScript);
-            ApplyPhilosophyFlowMargin(btnPhilosophyGenerateScript, top: 8);
-            grpProfile.Controls.Add(btnPhilosophyGenerateScript);
-            UpdatePhilosophyGenerateScriptButtonState();
-
-            flpRoot.Controls.Add(grpTopic);
-            flpRoot.Controls.Add(grpProfile);
-            pnlPhilosophyConfigToolbar.Controls.Add(flpRoot);
         }
 
         private void BuildPhilosophyRenderActionBar()
         {
-            if (btnPhilosophyOpenAssets == null || btnPhilosophyOpenAssets.IsDisposed)
+            if (btnPhilosophyGenerateContent == null || btnPhilosophyGenerateContent.IsDisposed)
             {
-                btnPhilosophyOpenAssets = CreatePhilosophyCommandButton("btnPhilosophyOpenAssets", "Mở Assets", PhilosophyTintSecondary);
+                btnPhilosophyGenerateContent = CreatePhilosophyJellyButton(
+                    "btnPhilosophyGenerateContent",
+                    "Tạo nội dung Gemini",
+                    PhilosophyTintGenerate,
+                    200);
             }
 
-            btnPhilosophyOpenAssets.Click -= btnPhilosophyOpenAssets_Click;
-            btnPhilosophyOpenAssets.Click += btnPhilosophyOpenAssets_Click;
+            btnPhilosophyGenerateContent.Click -= btnPhilosophyGenerateScript_Click;
+            btnPhilosophyGenerateContent.Click += btnPhilosophyGenerateScript_Click;
+            btnPhilosophyGenerateContent.Margin = new Padding(0, 8, 10, 0);
 
             if (btnPhilosophyStartRender == null || btnPhilosophyStartRender.IsDisposed)
             {
                 btnPhilosophyStartRender = CreateAppPrimaryJellyButton(
                     "btnPhilosophyStartRender",
-                    "Bắt đầu Render",
+                    "Render video",
                     PhilosophyTintRender);
             }
 
@@ -586,7 +495,10 @@ namespace tiktok_Omni
 
             if (btnPhilosophyStopRender == null || btnPhilosophyStopRender.IsDisposed)
             {
-                btnPhilosophyStopRender = CreatePhilosophyCommandButton("btnPhilosophyStopRender", "Dừng render", PhilosophyTintStop);
+                btnPhilosophyStopRender = CreatePhilosophyCommandButton(
+                    "btnPhilosophyStopRender",
+                    "Dừng lại",
+                    PhilosophyTintStop);
             }
 
             btnPhilosophyStopRender.Click -= btnPhilosophyStopRender_Click;
@@ -596,88 +508,100 @@ namespace tiktok_Omni
             {
                 btnPhilosophyPushToAutoPost = CreatePhilosophyCommandButton(
                     "btnPhilosophyPushToAutoPost",
-                    "Đẩy sang Đăng tự động",
+                    "Đăng tự động",
                     Color.FromArgb(68, 130, 105));
             }
 
             btnPhilosophyPushToAutoPost.Click -= btnPhilosophyPushToAutoPost_Click;
             btnPhilosophyPushToAutoPost.Click += btnPhilosophyPushToAutoPost_Click;
 
-            ApplyPhilosophyCommandButtonMetrics(btnPhilosophyOpenAssets);
-            ApplyPhilosophyCommandButtonMetrics(btnPhilosophyStopRender);
             ApplyPhilosophyCommandButtonMetrics(btnPhilosophyPushToAutoPost);
-            btnPhilosophyPushToAutoPost.Width = 196;
-            btnPhilosophyPushToAutoPost.MaximumSize = new Size(196, PhilosophyCommandButtonHeight);
 
-            ResizeAppJellyButton(
-                btnPhilosophyStartRender,
-                PhilosophyPrimaryActionHeight,
-                AppPrimaryActionMinWidth,
-                AppPrimaryActionHorizontalPad);
-            btnPhilosophyStartRender.Font = PhilosophyPrimaryActionFont;
-            btnPhilosophyStartRender.Margin = new Padding(0, 8, 6, 0);
+            ApplyPhilosophyPrimaryRenderButtonMetrics(btnPhilosophyStartRender);
+            if (btnPhilosophyStartRender is JellyButton startRenderJelly)
+            {
+                startRenderJelly.JellyTint = PhilosophyTintRender;
+            }
 
-            btnPhilosophyOpenAssets.Margin = new Padding(0, 8, 10, 0);
+            btnPhilosophyStartRender.Margin = new Padding(0, 8, 10, 0);
+            btnPhilosophyPushToAutoPost.Margin = new Padding(0, 8, 0, 0);
 
-            btnPhilosophyStopRender.Text = "Dừng";
-            ResizeAppJellyButton(
-                btnPhilosophyStopRender,
-                PhilosophyPrimaryActionHeight,
-                140,
-                AppPrimaryActionHorizontalPad);
-            btnPhilosophyStopRender.Font = PhilosophyPrimaryActionFont;
-            btnPhilosophyStopRender.Margin = new Padding(0, 8, 0, 0);
             btnPhilosophyStopRender.Visible = true;
-            btnPhilosophyStopRender.Enabled = false;
+            ApplyPhilosophyStopRenderButtonUi(resumeMode: false, enabled: false);
+            btnPhilosophyStopRender.Margin = new Padding(0, 8, 0, 0);
 
             var barColor = Color.FromArgb(28, 30, 38);
             pnlPhilosophyRenderHost = new Panel
             {
                 Name = "pnlPhilosophyRenderHost",
                 Dock = DockStyle.Bottom,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Height = PhilosophyRenderBarHeight,
+                MinimumSize = new Size(0, PhilosophyRenderBarHeight),
                 Padding = new Padding(8),
                 BackColor = barColor
             };
+            pnlPhilosophyRenderHost.Resize += (_, __) => LayoutPhilosophyRenderRow();
 
-            var flpPhilosophyRenderActions = new FlowLayoutPanel
+            var tblRenderCenter = new TableLayoutPanel
             {
-                Name = "flpPhilosophyRenderActions",
+                Name = "tblPhilosophyRenderCenter",
                 Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                RowCount = 1,
                 BackColor = barColor,
                 Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
+            tblRenderCenter.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            tblRenderCenter.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            tblRenderCenter.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            tblRenderCenter.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-            flpPhilosophyRenderActions.Controls.Add(btnPhilosophyOpenAssets);
-            flpPhilosophyRenderActions.Controls.Add(btnPhilosophyStartRender);
-            flpPhilosophyRenderActions.Controls.Add(btnPhilosophyStopRender);
-            flpPhilosophyRenderActions.Controls.Add(btnPhilosophyPushToAutoPost);
+            flpPhilosophyRenderCenter = CreatePhilosophyToolbarFlowPanel("flpPhilosophyRenderCenter");
+            flpPhilosophyRenderCenter.Dock = DockStyle.None;
+            flpPhilosophyRenderCenter.WrapContents = false;
+            flpPhilosophyRenderCenter.Controls.Add(btnPhilosophyGenerateContent);
+            flpPhilosophyRenderCenter.Controls.Add(btnPhilosophyStartRender);
+            flpPhilosophyRenderCenter.Controls.Add(btnPhilosophyPushToAutoPost);
 
-            pnlPhilosophyRenderHost.Controls.Add(flpPhilosophyRenderActions);
+            pnlPhilosophyRenderStopHost = new Panel
+            {
+                Name = "pnlPhilosophyRenderStopHost",
+                Dock = DockStyle.Fill,
+                BackColor = barColor,
+                Margin = Padding.Empty
+            };
+
+            flpPhilosophyRenderStopRight = CreatePhilosophyToolbarFlowPanel("flpPhilosophyRenderStopRight");
+            flpPhilosophyRenderStopRight.Dock = DockStyle.None;
+            flpPhilosophyRenderStopRight.WrapContents = false;
+            flpPhilosophyRenderStopRight.Controls.Add(btnPhilosophyStopRender);
+            pnlPhilosophyRenderStopHost.Controls.Add(flpPhilosophyRenderStopRight);
+
+            tblRenderCenter.Controls.Add(flpPhilosophyRenderCenter, 1, 0);
+            tblRenderCenter.Controls.Add(pnlPhilosophyRenderStopHost, 2, 0);
+            pnlPhilosophyRenderHost.Controls.Add(tblRenderCenter);
+            LayoutPhilosophyRenderRow();
             UpdatePhilosophyRenderControlStates();
         }
 
-        private static NumericUpDown CreatePhilosophyDurationSpinner(string name, int defaultValue)
+        private void LayoutPhilosophyRenderRow()
         {
-            return new NumericUpDown
+            if (pnlPhilosophyRenderStopHost == null || flpPhilosophyRenderStopRight == null)
             {
-                Name = name,
-                Minimum = 5,
-                Maximum = 180,
-                Value = Math.Max(5, Math.Min(180, defaultValue)),
-                Width = 52,
-                Height = 26,
-                BackColor = Color.FromArgb(45, 49, 60),
-                ForeColor = Color.WhiteSmoke,
-                Font = PhilosophyUiFont,
-                Margin = new Padding(0, 8, 4, 0)
-            };
+                return;
+            }
+
+            if (pnlPhilosophyRenderStopHost.Width <= 0 || pnlPhilosophyRenderStopHost.Height <= 0)
+            {
+                return;
+            }
+
+            flpPhilosophyRenderStopRight.PerformLayout();
+            var stopX = Math.Max(0, pnlPhilosophyRenderStopHost.ClientSize.Width - flpPhilosophyRenderStopRight.Width);
+            var stopY = Math.Max(0, (pnlPhilosophyRenderStopHost.ClientSize.Height - flpPhilosophyRenderStopRight.Height) / 2);
+            flpPhilosophyRenderStopRight.Location = new Point(stopX, stopY);
+            flpPhilosophyRenderStopRight.BringToFront();
         }
 
         private void BuildPhilosophyStatusPanel()
@@ -688,7 +612,7 @@ namespace tiktok_Omni
                 {
                     Name = "btnPhilosophyClearLog",
                     Text = "Xóa log",
-                    Size = new Size(72, 24),
+                    Size = new Size(PhilosophyClearLogButtonWidth, 24),
                     BackColor = Color.FromArgb(60, 64, 77),
                     FlatStyle = FlatStyle.Flat,
                     ForeColor = Color.WhiteSmoke
@@ -702,61 +626,21 @@ namespace tiktok_Omni
             if (rtbPhilosophyLog == null || rtbPhilosophyLog.IsDisposed)
             {
                 rtbPhilosophyLog = CreateAiModeLogTextBox("rtbPhilosophyLog");
-                ApplyAiModeLogLineSpacing(rtbPhilosophyLog);
             }
 
+            ConfigurePhilosophyLogTextBox(rtbPhilosophyLog);
             rtbPhilosophyLog.Dock = DockStyle.Fill;
-            rtbPhilosophyLog.Font = new Font("Consolas", 8.25F);
-
-            EnsurePhilosophyProgressControls();
 
             pnlPhilosophyStatus = new Panel
             {
                 Name = "pnlPhilosophyStatus",
                 Dock = DockStyle.Bottom,
-                Height = 140,
-                MinimumSize = new Size(0, 120),
+                Height = PhilosophyStatusPanelHeight,
+                MinimumSize = new Size(0, PhilosophyStatusPanelMinHeight),
                 BackColor = Color.FromArgb(24, 26, 32),
                 BorderStyle = BorderStyle.FixedSingle,
                 Padding = new Padding(8, 6, 8, 6)
             };
-
-            var pnlPhilosophyProgressHost = new Panel
-            {
-                Name = "pnlPhilosophyProgressHost",
-                Dock = DockStyle.Bottom,
-                Height = 36,
-                MinimumSize = new Size(0, 30),
-                Padding = new Padding(0, 2, 0, 0),
-                BackColor = pnlPhilosophyStatus.BackColor
-            };
-
-            var tblProgress = new TableLayoutPanel
-            {
-                Name = "tblPhilosophyProgress",
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                Margin = Padding.Empty,
-                Padding = Padding.Empty
-            };
-            tblProgress.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
-            tblProgress.RowStyles.Add(new RowStyle(SizeType.Absolute, 14F));
-
-            lblPhilosophyProgress.Dock = DockStyle.Fill;
-            lblPhilosophyProgress.Margin = Padding.Empty;
-            lblPhilosophyProgress.Height = 20;
-            lblPhilosophyProgress.AutoSize = false;
-            lblPhilosophyProgress.TextAlign = ContentAlignment.MiddleLeft;
-            lblPhilosophyProgress.ForeColor = Color.FromArgb(200, 204, 214);
-
-            pbPhilosophyProgress.Dock = DockStyle.Fill;
-            pbPhilosophyProgress.Margin = new Padding(0, 2, 0, 0);
-            pbPhilosophyProgress.Height = 14;
-
-            tblProgress.Controls.Add(lblPhilosophyProgress, 0, 0);
-            tblProgress.Controls.Add(pbPhilosophyProgress, 0, 1);
-            pnlPhilosophyProgressHost.Controls.Add(tblProgress);
 
             var tblLog = new TableLayoutPanel
             {
@@ -766,21 +650,25 @@ namespace tiktok_Omni
                 RowCount = 2,
                 Margin = Padding.Empty
             };
-            tblLog.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+            tblLog.RowStyles.Add(new RowStyle(SizeType.Absolute, PhilosophyLogHeaderRowHeight));
             tblLog.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-            var header = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 4, 0) };
+            var header = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 4, 4, 4) };
             var lblLog = new Label
             {
                 Text = "Nhật ký",
                 Dock = DockStyle.Fill,
+                AutoSize = false,
+                AutoEllipsis = true,
                 ForeColor = Color.FromArgb(200, 204, 214),
                 TextAlign = ContentAlignment.MiddleLeft,
-                Font = PhilosophyUiFont
+                Font = PhilosophyUiFont,
+                UseCompatibleTextRendering = true,
+                Padding = new Padding(0, 2, 0, 2)
             };
             btnPhilosophyClearLog.Dock = DockStyle.Right;
-            btnPhilosophyClearLog.Width = 80;
-            btnPhilosophyClearLog.MinimumSize = new Size(80, 26);
+            btnPhilosophyClearLog.Width = PhilosophyClearLogButtonWidth;
+            btnPhilosophyClearLog.MinimumSize = new Size(PhilosophyClearLogButtonWidth, 36);
             btnPhilosophyClearLog.Margin = new Padding(4, 0, 0, 0);
             header.Controls.Add(lblLog);
             header.Controls.Add(btnPhilosophyClearLog);
@@ -788,35 +676,33 @@ namespace tiktok_Omni
             tblLog.Controls.Add(header, 0, 0);
             tblLog.Controls.Add(rtbPhilosophyLog, 0, 1);
 
-            pnlPhilosophyStatus.Controls.Add(pnlPhilosophyProgressHost);
             pnlPhilosophyStatus.Controls.Add(tblLog);
         }
 
-        private void EnsurePhilosophyProgressControls()
+        private static void ConfigurePhilosophyLogTextBox(RichTextBox rtb)
         {
-            if (lblPhilosophyProgress == null || lblPhilosophyProgress.IsDisposed)
+            if (rtb == null || rtb.IsDisposed)
             {
-                lblPhilosophyProgress = new Label
-                {
-                    Name = "lblPhilosophyProgress",
-                    Text = "Tiến trình: sẵn sàng"
-                };
+                return;
             }
 
-            if (pbPhilosophyProgress == null || pbPhilosophyProgress.IsDisposed)
+            rtb.Font = new Font("Segoe UI", PhilosophyLogFontSize, FontStyle.Regular, GraphicsUnit.Point);
+            rtb.Margin = new Padding(0, 4, 0, 8);
+            rtb.Padding = new Padding(2, 4, 2, 4);
+            rtb.ScrollBars = RichTextBoxScrollBars.Vertical;
+            ApplyPhilosophyLogLineSpacing(rtb);
+        }
+
+        private static void ApplyPhilosophyLogLineSpacing(RichTextBox rtb)
+        {
+            if (rtb == null || rtb.IsDisposed)
             {
-                pbPhilosophyProgress = new ProgressBar { Name = "pbPhilosophyProgress" };
+                return;
             }
 
-            if (lblPhilosophyProgress.Parent != null)
-            {
-                lblPhilosophyProgress.Parent.Controls.Remove(lblPhilosophyProgress);
-            }
-
-            if (pbPhilosophyProgress.Parent != null)
-            {
-                pbPhilosophyProgress.Parent.Controls.Remove(pbPhilosophyProgress);
-            }
+            rtb.SelectAll();
+            rtb.SelectionCharOffset = PhilosophyLogLineSpacing;
+            rtb.SelectionLength = 0;
         }
 
         private static Panel CreatePhilosophyAutoSizeBar(string name, Color backColor)
@@ -888,6 +774,89 @@ namespace tiktok_Omni
             control.Margin = new Padding(PhilosophyFlowItemMargin.Left, top, PhilosophyFlowItemMargin.Right, PhilosophyFlowItemMargin.Bottom);
         }
 
+        private static Button CreatePhilosophyJellyButton(string name, string text, Color tint, int minWidth)
+        {
+            var btn = CreateAppJellyButton(
+                name,
+                text,
+                tint,
+                heightOverride: PhilosophyCommandButtonHeight,
+                minWidth: minWidth,
+                horizontalPad: PhilosophyCommandHorizontalPad,
+                margin: PhilosophySolidButtonMargin);
+            ApplyPhilosophyJellyChrome(btn);
+            return btn;
+        }
+
+        private static Button CreatePhilosophySolidRectButton(string name, string text, Color back, int minWidth)
+        {
+            var height = PhilosophyCommandButtonHeight;
+            var textW = TextRenderer.MeasureText(
+                text,
+                PhilosophyCommandFont,
+                new Size(int.MaxValue, height),
+                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width;
+            var width = Math.Max(minWidth, textW + 28);
+            var border = ControlPaint.Dark(back);
+            var btn = new ShowcaseSolidRectButton
+            {
+                Name = name,
+                Text = text,
+                Font = PhilosophyCommandFont,
+                NormalBackColor = back,
+                ForeColor = Color.FromArgb(245, 247, 250),
+                AutoSize = false,
+                Height = height,
+                Width = width,
+                MinimumSize = new Size(width, height),
+                MaximumSize = new Size(width, height),
+                Margin = PhilosophySolidButtonMargin,
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderSize = 1;
+            btn.FlatAppearance.BorderColor = border;
+            btn.FlatAppearance.MouseOverBackColor = BlendPhilosophyColor(back, Color.White, 0.12f);
+            btn.FlatAppearance.MouseDownBackColor = ControlPaint.DarkDark(back);
+            return btn;
+        }
+
+        private static Button CreatePhilosophyArrowButton(string name, string arrow)
+        {
+            const int width = 34;
+            var height = PhilosophyCommandButtonHeight;
+            var btn = new Button
+            {
+                Name = name,
+                Text = arrow,
+                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(31, 34, 42),
+                ForeColor = Color.FromArgb(210, 214, 222),
+                AutoSize = false,
+                Height = height,
+                Width = width,
+                MinimumSize = new Size(width, height),
+                MaximumSize = new Size(width, height),
+                Margin = new Padding(1, 2, 1, 2),
+                Cursor = Cursors.Hand,
+                TextAlign = ContentAlignment.MiddleCenter,
+                UseVisualStyleBackColor = false
+            };
+            btn.FlatAppearance.BorderSize = 0;
+            btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(52, 56, 68);
+            btn.FlatAppearance.MouseDownBackColor = Color.FromArgb(68, 72, 86);
+            return btn;
+        }
+
+        private static Color BlendPhilosophyColor(Color baseColor, Color overlay, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            var r = (int)(baseColor.R + (overlay.R - baseColor.R) * amount);
+            var g = (int)(baseColor.G + (overlay.G - baseColor.G) * amount);
+            var b = (int)(baseColor.B + (overlay.B - baseColor.B) * amount);
+            return Color.FromArgb(baseColor.A, r, g, b);
+        }
+
         private static Button CreatePhilosophyCommandButton(string name, string text, Color tint)
         {
             return CreateAppJellyButton(
@@ -900,647 +869,37 @@ namespace tiktok_Omni
                 margin: PhilosophyFlowItemMargin);
         }
 
-        private static void ApplyPhilosophyCommandButtonMetrics(Button btn)
+        private static void ApplyPhilosophyCommandButtonMetrics(Button btn, int minWidth = 96)
         {
             if (btn == null)
             {
                 return;
             }
 
-            ResizeAppJellyButton(btn, PhilosophyCommandButtonHeight, 96, PhilosophyCommandHorizontalPad);
+            ResizeAppJellyButton(btn, PhilosophyCommandButtonHeight, minWidth, PhilosophyCommandHorizontalPad);
             btn.Margin = PhilosophyFlowItemMargin;
+            ApplyPhilosophyJellyChrome(btn);
         }
 
-        private static RadioButton CreatePhilosophyRadio(string text, bool isChecked)
+        private static void ApplyPhilosophyPrimaryRenderButtonMetrics(Button btn, int minWidth = AppPrimaryActionMinWidth)
         {
-            return new RadioButton
+            if (btn == null)
             {
-                Text = text,
-                AutoSize = true,
-                Checked = isChecked,
-                ForeColor = Color.Gainsboro,
-                Font = PhilosophyUiFont,
-                Margin = new Padding(0, 0, 10, 0)
-            };
+                return;
+            }
+
+            ResizeAppJellyButton(btn, AppPrimaryActionHeight, minWidth, AppPrimaryActionHorizontalPad);
+            ApplyPhilosophyJellyChrome(btn);
         }
 
-        private void PhilosophyProfile_SelectedIndexChanged(object sender, EventArgs e)
+        private static void ApplyPhilosophyJellyChrome(Button btn)
         {
-            RefreshPhilosophyPrereqLabel(null);
-            RefreshPhilosophyFolderOptions();
-        }
-
-        private void WirePhilosophyGridEvents()
-        {
-            dgvPhilosophyScripts.CellFormatting += DgvPhilosophyScripts_CellFormatting;
-            dgvPhilosophyScripts.CellContentClick += DgvPhilosophyScripts_CellContentClick;
-            dgvPhilosophyScripts.CellClick += DgvPhilosophyScripts_CellClick;
-            dgvPhilosophyScripts.CellDoubleClick += DgvPhilosophyScripts_CellDoubleClick;
-            dgvPhilosophyScripts.CellToolTipTextNeeded += DgvPhilosophyScripts_CellToolTipTextNeeded;
-            dgvPhilosophyScripts.DataError += DgvPhilosophyScripts_DataError;
-            dgvPhilosophyScripts.CellValueChanged += DgvPhilosophyScripts_CellValueChanged;
-
-            _cmsPhilosophyGrid = new ContextMenuStrip { Font = PhilosophyUiFont };
-            var miAdd = new ToolStripMenuItem("Thêm hàng");
-            miAdd.Click += (_, __) => PhilosophyAddRow();
-            var miDelete = new ToolStripMenuItem("Xóa hàng đã chọn");
-            miDelete.Click += (_, __) => PhilosophyDeleteSelectedRows();
-            _cmsPhilosophyGrid.Items.AddRange(new ToolStripItem[] { miAdd, miDelete });
-            dgvPhilosophyScripts.ContextMenuStrip = _cmsPhilosophyGrid;
-            EnsurePhilosophyBRollPickerMenu();
-        }
-
-        private void EnsurePhilosophyBRollPickerMenu()
-        {
-            if (_cmsPhilosophyBRollPicker != null && !_cmsPhilosophyBRollPicker.IsDisposed)
+            if (btn is JellyButton jelly)
             {
-                return;
-            }
-
-            _cmsPhilosophyBRollPicker = new ContextMenuStrip
-            {
-                Font = PhilosophyUiFont,
-                ShowCheckMargin = false,
-                ShowImageMargin = false
-            };
-
-            var miRandom = new ToolStripMenuItem("Ngẫu nhiên")
-            {
-                ToolTipText = "App tự chọn video ngẫu nhiên từ kho Assets"
-            };
-            _miPhilosophyBRollRandom = miRandom;
-            miRandom.Click += (_, __) =>
-            {
-                var item = _philosophyBRollPickerItem;
-                var row = _philosophyBRollPickerRowIndex;
-                if (item == null)
-                {
-                    return;
-                }
-
-                item.BRollFolder = PhilosophyBRollSelection.RandomToken;
-                _philosophyScriptBindingList?.ResetBindings();
-                if (dgvPhilosophyScripts != null && row >= 0 && row < dgvPhilosophyScripts.Rows.Count)
-                {
-                    dgvPhilosophyScripts.InvalidateRow(row);
-                }
-
-                NotifyPhilosophyDraftDirty();
-            };
-
-            var miBrowse = new ToolStripMenuItem("Duyệt thư mục")
-            {
-                ToolTipText = "Mở thư mục chứa video nền trong Assets để chọn file"
-            };
-            _miPhilosophyBRollBrowse = miBrowse;
-            miBrowse.Click += (_, __) =>
-            {
-                var item = _philosophyBRollPickerItem;
-                var row = _philosophyBRollPickerRowIndex;
-                if (item != null)
-                {
-                    PhilosophyPickBackgroundFile(row, item);
-                }
-            };
-
-            _cmsPhilosophyBRollPicker.Items.Add(miRandom);
-            _cmsPhilosophyBRollPicker.Items.Add(new ToolStripSeparator());
-            _cmsPhilosophyBRollPicker.Items.Add(miBrowse);
-        }
-
-        private void DgvPhilosophyScripts_CellValueChanged(object sender, DataGridViewCellEventArgs e)
-        {
-            if (dgvPhilosophyScripts != null && e.RowIndex >= 0 && e.ColumnIndex >= 0
-                && dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyVisualMode")
-            {
-                dgvPhilosophyScripts.InvalidateRow(e.RowIndex);
-            }
-
-            NotifyPhilosophyDraftDirty();
-        }
-
-        private static int GetDefaultPhilosophyVisualModeForNewRow(BindingList<PhilosophyScriptItem> rows)
-        {
-            if (rows == null || rows.Count == 0)
-            {
-                return PhilosophyVisualModes.Broll;
-            }
-
-            return PhilosophyVisualModes.Normalize(rows[rows.Count - 1].VisualMode);
-        }
-
-        private void ConfigurePhilosophyScriptGrid()
-        {
-            dgvPhilosophyScripts.Columns.Clear();
-
-            _colPhilosophyProfile = new DataGridViewComboBoxColumn
-            {
-                Name = "colPhilosophyProfile",
-                HeaderText = "Profile",
-                DataPropertyName = nameof(PhilosophyScriptItem.ProfileName),
-                FlatStyle = FlatStyle.Flat,
-                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
-                FillWeight = 12,
-                MinimumWidth = 72,
-                ToolTipText = "Profile cho dòng này — dòng Gemini lấy từ combo Profile trên thanh công cụ."
-            };
-            dgvPhilosophyScripts.Columns.Add(_colPhilosophyProfile);
-
-            dgvPhilosophyScripts.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "colPhilosophyContent",
-                HeaderText = "Content",
-                DataPropertyName = nameof(PhilosophyScriptItem.Content),
-                FillWeight = 36,
-                MinimumWidth = 100
-            });
-
-            _colPhilosophyVisualMode = new DataGridViewComboBoxColumn
-            {
-                Name = "colPhilosophyVisualMode",
-                HeaderText = "Chế độ nền",
-                DataPropertyName = nameof(PhilosophyScriptItem.VisualModeLabel),
-                FlatStyle = FlatStyle.Flat,
-                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
-                FillWeight = 16,
-                MinimumWidth = 108,
-                ToolTipText = "B-Roll = bấm cột «Nền» để chọn video. AI = cần Veo API trong Cài đặt."
-            };
-            foreach (var label in PhilosophyVisualModes.ComboLabels)
-            {
-                _colPhilosophyVisualMode.Items.Add(label);
-            }
-
-            dgvPhilosophyScripts.Columns.Add(_colPhilosophyVisualMode);
-
-            dgvPhilosophyScripts.Columns.Add(new DataGridViewButtonColumn
-            {
-                Name = "colPhilosophyBRoll",
-                HeaderText = "Nền",
-                Text = "Chọn nền…",
-                UseColumnTextForButtonValue = false,
-                FillWeight = 14,
-                MinimumWidth = 96,
-                ToolTipText = "B-Roll/AI: chọn video. Chế độ 3: chọn ảnh nền tham chiếu cho Gemini.",
-                DefaultCellStyle =
-                {
-                    ForeColor = Color.FromArgb(130, 175, 255),
-                    SelectionForeColor = Color.White,
-                    Alignment = DataGridViewContentAlignment.MiddleLeft
-                }
-            });
-
-            dgvPhilosophyScripts.Columns.Add(new DataGridViewButtonColumn
-            {
-                Name = "colPhilosophyScenePrompt",
-                HeaderText = "Prompt video",
-                Text = "Xem prompt…",
-                UseColumnTextForButtonValue = false,
-                FillWeight = 14,
-                MinimumWidth = 96,
-                ToolTipText = "Bấm để xem toàn bộ kịch bản phân cảnh và prompt AI.",
-                DefaultCellStyle =
-                {
-                    ForeColor = Color.FromArgb(130, 175, 255),
-                    SelectionForeColor = Color.White,
-                    Alignment = DataGridViewContentAlignment.MiddleLeft
-                }
-            });
-
-            dgvPhilosophyScripts.Columns.Add(new DataGridViewButtonColumn
-            {
-                Name = "colPhilosophySceneVideo",
-                HeaderText = "Thư mục video",
-                Text = "Chọn thư mục…",
-                UseColumnTextForButtonValue = false,
-                FillWeight = 16,
-                MinimumWidth = 108,
-                ToolTipText = "Chế độ 3: thư mục chứa file .mp4 phân cảnh. Trống = dùng «Thư mục video» trên thanh công cụ.",
-                DefaultCellStyle =
-                {
-                    ForeColor = Color.FromArgb(130, 175, 255),
-                    SelectionForeColor = Color.White,
-                    Alignment = DataGridViewContentAlignment.MiddleLeft
-                }
-            });
-            _colPhilosophySceneVideoBrowse = new DataGridViewButtonColumn
-            {
-                Name = "colPhilosophySceneVideoBrowse",
-                HeaderText = string.Empty,
-                Text = "…",
-                ToolTipText = "Duyệt thư mục video phân cảnh (mode 3)",
-                UseColumnTextForButtonValue = true,
-                FillWeight = 4,
-                MinimumWidth = 30
-            };
-            dgvPhilosophyScripts.Columns.Add(_colPhilosophySceneVideoBrowse);
-
-            var moodCol = new DataGridViewComboBoxColumn
-            {
-                Name = "colPhilosophyMood",
-                HeaderText = "Mood",
-                DataPropertyName = nameof(PhilosophyScriptItem.Mood),
-                FlatStyle = FlatStyle.Flat,
-                FillWeight = 12,
-                MinimumWidth = 72
-            };
-            moodCol.Items.AddRange("calm", "melancholic", "hopeful", "intense", "reflective");
-            dgvPhilosophyScripts.Columns.Add(moodCol);
-
-            _colPhilosophyAmbient = new DataGridViewComboBoxColumn
-            {
-                Name = "colPhilosophyAmbient",
-                HeaderText = "Tiếng đệm",
-                DataPropertyName = nameof(PhilosophyScriptItem.AmbientKey),
-                FlatStyle = FlatStyle.Flat,
-                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
-                FillWeight = 14,
-                MinimumWidth = 96
-            };
-            foreach (var key in PhilosophyAmbientCatalog.AllKeys)
-            {
-                _colPhilosophyAmbient.Items.Add(key);
-            }
-
-            dgvPhilosophyScripts.Columns.Add(_colPhilosophyAmbient);
-
-            _colPhilosophyMusic = new DataGridViewComboBoxColumn
-            {
-                Name = "colPhilosophyMusic",
-                HeaderText = "Nhạc",
-                DataPropertyName = nameof(PhilosophyScriptItem.MusicFolder),
-                FlatStyle = FlatStyle.Flat,
-                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
-                FillWeight = 16,
-                MinimumWidth = 88
-            };
-            dgvPhilosophyScripts.Columns.Add(_colPhilosophyMusic);
-            _colPhilosophyMusicBrowse = new DataGridViewButtonColumn
-            {
-                Name = "colPhilosophyMusicBrowse",
-                HeaderText = string.Empty,
-                Text = "…",
-                ToolTipText = "Duyệt file nhạc (.mp3/.wav/.m4a)",
-                UseColumnTextForButtonValue = true,
-                FillWeight = 4,
-                MinimumWidth = 30
-            };
-            dgvPhilosophyScripts.Columns.Add(_colPhilosophyMusicBrowse);
-
-            dgvPhilosophyScripts.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "colPhilosophySubtitle",
-                HeaderText = "Phụ đề",
-                DataPropertyName = nameof(PhilosophyScriptItem.SubtitleStyleLabel),
-                FillWeight = 22,
-                MinimumWidth = 120,
-                ReadOnly = true,
-                DefaultCellStyle =
-                {
-                    ForeColor = Color.FromArgb(130, 175, 255),
-                    SelectionForeColor = Color.White
-                }
-            });
-
-            dgvPhilosophyScripts.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = "colPhilosophyStatus",
-                HeaderText = "Status",
-                DataPropertyName = nameof(PhilosophyScriptItem.Status),
-                FillWeight = 12,
-                MinimumWidth = 72,
-                ReadOnly = true
-            });
-
-            dgvPhilosophyScripts.Columns.Add(new DataGridViewButtonColumn
-            {
-                Name = "colPhilosophyOutput",
-                HeaderText = "Kết quả",
-                Text = "▶ Xem",
-                ToolTipText = "Bấm để mở video sau khi render xong",
-                UseColumnTextForButtonValue = true,
-                FillWeight = 10,
-                MinimumWidth = 64
-            });
-        }
-
-        private void DgvPhilosophyScripts_CellFormatting(object sender, DataGridViewCellFormattingEventArgs e)
-        {
-            if (dgvPhilosophyScripts == null || e.RowIndex < 0)
-            {
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyStatus")
-            {
-                var status = (e.Value?.ToString() ?? "Nháp").Trim();
-                Color fore;
-                string glyph;
-                if (status.IndexOf("lỗi", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    fore = Color.FromArgb(255, 110, 110);
-                    glyph = "✕ ";
-                }
-                else if (status.IndexOf("xong", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    fore = Color.FromArgb(100, 210, 130);
-                    glyph = "✓ ";
-                }
-                else if (status.IndexOf("render", StringComparison.OrdinalIgnoreCase) >= 0
-                         || status.IndexOf("đang", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    fore = Color.FromArgb(255, 196, 90);
-                    glyph = "◐ ";
-                }
-                else if (status.IndexOf("dừng", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    fore = Color.FromArgb(255, 150, 110);
-                    glyph = "■ ";
-                }
-                else
-                {
-                    fore = Color.FromArgb(150, 158, 172);
-                    glyph = "● ";
-                }
-
-                e.Value = glyph + status;
-                e.CellStyle.ForeColor = fore;
-                e.FormattingApplied = true;
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyBRoll"
-                || dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyMusic"
-                || dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyScenePrompt"
-                || dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophySceneVideo")
-            {
-                if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyBRoll"
-                    && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem brollRow)
-                {
-                    e.Value = PhilosophyBRollSelection.GetBackgroundDisplayLabel(
-                        brollRow.BRollFolder,
-                        PhilosophyVisualModes.Normalize(brollRow.VisualMode));
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyScenePrompt"
-                         && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem sceneRow)
-                {
-                    e.Value = PhilosophySceneHelper.GetScenePromptDisplayLabel(sceneRow);
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophySceneVideo"
-                         && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem videoRow)
-                {
-                    e.Value = FormatPhilosophySceneVideoFolderCell(videoRow);
-                    var isPreRendered = PhilosophyVisualModes.Normalize(videoRow.VisualMode) == PhilosophyVisualModes.PreRendered;
-                    e.CellStyle.ForeColor = isPreRendered
-                        ? Color.FromArgb(130, 175, 255)
-                        : Color.FromArgb(120, 126, 138);
-                }
-                else
-                {
-                    e.Value = FormatPhilosophyFolderCell(e.Value?.ToString());
-                }
-
-                e.FormattingApplied = true;
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyOutput"
-                && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem outputItem)
-            {
-                var hasOutput = !string.IsNullOrWhiteSpace(outputItem.OutputPath)
-                                && System.IO.File.Exists(outputItem.OutputPath);
-                e.Value = hasOutput ? "▶ Xem" : "—";
-                e.CellStyle.ForeColor = hasOutput
-                    ? Color.FromArgb(130, 175, 255)
-                    : Color.FromArgb(120, 126, 138);
-                e.FormattingApplied = true;
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyAmbient")
-            {
-                e.Value = PhilosophyAmbientCatalog.GetLabel(e.Value?.ToString());
-                e.FormattingApplied = true;
-            }
-        }
-
-        private void DgvPhilosophyScripts_CellToolTipTextNeeded(object sender, DataGridViewCellToolTipTextNeededEventArgs e)
-        {
-            if (dgvPhilosophyScripts == null || e.RowIndex < 0)
-            {
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyContent"
-                && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem item)
-            {
-                e.ToolTipText = item.Content ?? string.Empty;
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem rowItem)
-            {
-                if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyBRoll")
-                {
-                    var profile = ResolvePhilosophyRowProfile(rowItem);
-                    e.ToolTipText = PhilosophyBRollSelection.DescribeBackgroundTooltip(
-                        rowItem.BRollFolder,
-                        profile,
-                        PhilosophyVisualModes.Normalize(rowItem.VisualMode));
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyScenePrompt")
-                {
-                    var count = rowItem.Scenes?.Count ?? 0;
-                    e.ToolTipText = count > 0
-                        ? "Bấm để xem " + count + " phân cảnh và prompt AI"
-                        : "Chưa có prompt — bấm «Tạo Prompt Phân Cảnh»";
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophySceneVideo"
-                         || dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophySceneVideoBrowse")
-                {
-                    e.ToolTipText = DescribePhilosophySceneVideoFolderTooltip(rowItem);
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyMusic")
-                {
-                    e.ToolTipText = DescribePhilosophyFolderTooltip(rowItem.MusicFolder, "nhạc");
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyVisualMode")
-                {
-                    e.ToolTipText = rowItem.VisualModeLabel;
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyOutput")
-                {
-                    e.ToolTipText = string.IsNullOrWhiteSpace(rowItem.OutputPath)
-                        ? "Chưa có video — render trước"
-                        : rowItem.OutputPath;
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyAmbient")
-                {
-                    var folder = PhilosophyAmbientCatalog.ResolveAmbientFolder(
-                        rowItem.AmbientKey,
-                        GetSelectedPhilosophyProfileName());
-                    e.ToolTipText = PhilosophyAmbientCatalog.GetLabel(rowItem.AmbientKey) +
-                                    (string.IsNullOrEmpty(folder) || rowItem.AmbientKey == PhilosophyAmbientCatalog.NoneKey
-                                        ? string.Empty
-                                        : "\r\n" + folder);
-                }
-                else if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophySubtitle")
-                {
-                    e.ToolTipText = string.IsNullOrWhiteSpace(rowItem.SubtitleStyleLabel)
-                        ? "Bấm để chỉnh phụ đề (vị trí, font, karaoke…)"
-                        : rowItem.SubtitleStyleLabel;
-                }
-            }
-        }
-
-        private void DgvPhilosophyScripts_DataError(object sender, DataGridViewDataErrorEventArgs e)
-        {
-            e.ThrowException = false;
-            if (dgvPhilosophyScripts == null || e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-
-            var colName = dgvPhilosophyScripts.Columns[e.ColumnIndex].Name;
-            if (colName != "colPhilosophyMusic"
-                && colName != "colPhilosophyAmbient" && colName != "colPhilosophyVisualMode"
-                && colName != "colPhilosophyProfile")
-            {
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem item)
-            {
-                if (colName == "colPhilosophyMusic")
-                {
-                    EnsurePhilosophyMusicInCombo(item.MusicFolder);
-                }
-                else if (colName == "colPhilosophyVisualMode")
-                {
-                    item.VisualMode = PhilosophyVisualModes.FromLabel(item.VisualModeLabel);
-                }
-                else if (colName == "colPhilosophyProfile")
-                {
-                    item.ProfileName = ProfileScopedPaths.ResolveProfileName(item.ProfileName);
-                }
-                else
-                {
-                    item.AmbientKey = PhilosophyAmbientCatalog.NormalizeKey(item.AmbientKey);
-                    EnsurePhilosophyAmbientInCombo(item.AmbientKey);
-                }
-            }
-        }
-
-        private void DgvPhilosophyScripts_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (dgvPhilosophyScripts == null || e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name != "colPhilosophyContent")
-            {
-                return;
-            }
-
-            if (!(dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem item))
-            {
-                return;
-            }
-
-            ShowAffiliateLongTextPeekDialog("Content", item.Content ?? string.Empty);
-        }
-
-        private void DgvPhilosophyScripts_CellContentClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (dgvPhilosophyScripts == null || e.RowIndex < 0)
-            {
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyMusicBrowse")
-            {
-                PhilosophyBrowseRowFolder(e.RowIndex, isMusic: true);
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophySceneVideoBrowse"
-                || dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophySceneVideo")
-            {
-                if (dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem videoFolderItem)
-                {
-                    PhilosophyBrowseRowSceneVideoFolder(e.RowIndex, videoFolderItem);
-                }
-
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyBRoll"
-                && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem brollItem)
-            {
-                ShowPhilosophyBRollPicker(brollItem, e.RowIndex);
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyScenePrompt"
-                && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem sceneItem)
-            {
-                ShowPhilosophyScenePromptViewer(sceneItem, e.RowIndex);
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophyOutput"
-                && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem outputRow)
-            {
-                OpenPhilosophyOutputVideo(outputRow);
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name == "colPhilosophySubtitle"
-                && dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem subtitleItem)
-            {
-                ShowPhilosophySubtitleStyleEditor(subtitleItem, e.RowIndex);
-            }
-        }
-
-        private void DgvPhilosophyScripts_CellClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (dgvPhilosophyScripts == null || e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Columns[e.ColumnIndex].Name != "colPhilosophySubtitle")
-            {
-                return;
-            }
-
-            if (dgvPhilosophyScripts.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem item)
-            {
-                ShowPhilosophySubtitleStyleEditor(item, e.RowIndex);
-            }
-        }
-
-        private void ShowPhilosophySubtitleStyleEditor(PhilosophyScriptItem item, int gridRowIndex)
-        {
-            if (item == null)
-            {
-                return;
-            }
-
-            PhilosophySubtitleStyleHelper.EnsureDefaults(item);
-            using (var dlg = new PhilosophySubtitleStyleEditorForm(item))
-            {
-                if (dlg.ShowDialog(this) != DialogResult.OK)
-                {
-                    return;
-                }
-            }
-
-            _philosophyScriptBindingList?.ResetBindings();
-            if (dgvPhilosophyScripts != null && gridRowIndex >= 0 && gridRowIndex < dgvPhilosophyScripts.Rows.Count)
-            {
-                dgvPhilosophyScripts.InvalidateRow(gridRowIndex);
+                jelly.JellyFillOpacity = 1f - JellyButton.DefaultTransparency;
+                jelly.ForeColor = AppJellyButtonForeColor;
+                jelly.Tag = JellyButton.ChromeTag;
+                jelly.AccessibleName = JellyButton.ChromeTag;
             }
         }
 
@@ -1549,465 +908,106 @@ namespace tiktok_Omni
             PhilosophyAddRow();
         }
 
+        private void btnPhilosophyCopyRow_Click(object sender, EventArgs e)
+        {
+            PhilosophyCopySelectedBatches();
+        }
+
+        private void btnPhilosophyRestoreSessions_Click(object sender, EventArgs e)
+        {
+            PhilosophyRestoreSessionsFromDisk();
+        }
+
         private void btnPhilosophyDeleteRow_Click(object sender, EventArgs e)
         {
             PhilosophyDeleteSelectedRows();
         }
 
+        private void btnPhilosophyTrash_Click(object sender, EventArgs e)
+        {
+            PhilosophyOpenTrash();
+        }
+
+        private void btnPhilosophyMoveRowUp_Click(object sender, EventArgs e)
+        {
+            PhilosophyMoveSelectedBatch(-1);
+        }
+
+        private void btnPhilosophyMoveRowDown_Click(object sender, EventArgs e)
+        {
+            PhilosophyMoveSelectedBatch(1);
+        }
+
+        private void btnPhilosophyBrollLibrary_Click(object sender, EventArgs e)
+        {
+            OpenPhilosophyAssetLibraryFolder(
+                PhilosophyProfileAssets.EnsureBrollLibraryDirectory(GetSelectedPhilosophyProfileName()),
+                "Thư viện B-roll",
+                "Copy file .mp4 vào đây — dùng cột «Nền» hoặc chế độ B-Roll trên lưới.");
+        }
+
+        private void btnPhilosophyMascotImageLibrary_Click(object sender, EventArgs e)
+        {
+            OpenPhilosophyAssetLibraryFolder(
+                PhilosophyProfileAssets.EnsureMascotImageLibraryDirectory(GetSelectedPhilosophyProfileName()),
+                "Thư viện Ảnh mascot",
+                "Copy ảnh .jpg/.png/.webp — dùng cho chế độ AI I2V / ảnh tham chiếu phân cảnh.");
+        }
+
+        private void btnPhilosophyMusicLibrary_Click(object sender, EventArgs e)
+        {
+            OpenShowcaseAudioLibraryAsync(ShowcaseAudioLibraryForm.LibraryKind.BackgroundMusic);
+        }
+
+        private void btnPhilosophySfxLibrary_Click(object sender, EventArgs e)
+        {
+            OpenShowcaseAudioLibraryAsync(ShowcaseAudioLibraryForm.LibraryKind.SoundEffects);
+        }
+
+        private void btnPhilosophyLogoLibrary_Click(object sender, EventArgs e)
+        {
+            OpenShowcaseLogoLibraryAsync();
+        }
+
+        private void OpenPhilosophyAssetLibraryFolder(string folder, string title, string hint)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(folder)
+                {
+                    UseShellExecute = true
+                });
+                LogPhilosophy("Đã mở " + title + ": " + folder);
+                if (!string.IsNullOrWhiteSpace(hint))
+                {
+                    LogPhilosophy(hint);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    "Không mở được thư mục:\r\n" + ex.Message,
+                    title,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
         private void PhilosophyAddRow()
         {
-            var row = new PhilosophyScriptItem
-            {
-                Content = string.Empty,
-                Mood = "reflective",
-                ProfileName = GetSelectedPhilosophyProfileName(),
-                VisualMode = GetDefaultPhilosophyVisualModeForNewRow(_philosophyScriptBindingList),
-                BRollFolder = PhilosophyBRollSelection.RandomToken,
-                Status = "Nháp"
-            };
-            PhilosophySubtitleStyleHelper.ApplyPhilosophyDefaults(row);
-            PhilosophyAmbientCatalog.EnsureRowDefault(row);
-            _philosophyScriptBindingList?.Add(row);
-            NotifyPhilosophyDraftDirty();
+            PhilosophyAddBatch();
         }
 
         private List<PhilosophyScriptItem> GetPhilosophyTargetRowsFromGrid()
         {
-            if (dgvPhilosophyScripts == null)
-            {
-                return new List<PhilosophyScriptItem>();
-            }
-
-            var rows = dgvPhilosophyScripts.SelectedRows
-                .Cast<DataGridViewRow>()
-                .Where(r => r.DataBoundItem is PhilosophyScriptItem)
-                .Select(r => (PhilosophyScriptItem)r.DataBoundItem)
-                .ToList();
-
-            if (rows.Count == 0
-                && dgvPhilosophyScripts.CurrentRow?.DataBoundItem is PhilosophyScriptItem current)
-            {
-                rows.Add(current);
-            }
-
-            if (_philosophyScriptBindingList == null || _philosophyScriptBindingList.Count == 0)
-            {
-                return rows;
-            }
-
-            return rows
-                .OrderBy(item => _philosophyScriptBindingList.IndexOf(item))
-                .ThenBy(item => item?.Content ?? string.Empty, StringComparer.Ordinal)
-                .ToList();
+            return GetPhilosophyTargetQuotesFromSelectedBatches();
         }
 
         private void PhilosophyDeleteSelectedRows()
         {
-            if (_philosophyScriptBindingList == null || dgvPhilosophyScripts == null)
-            {
-                return;
-            }
-
-            var toRemove = GetPhilosophyTargetRowsFromGrid();
-            if (toRemove.Count == 0)
-            {
-                return;
-            }
-
-            if (!UiConfirmHelper.ConfirmDeleteRows(this, toRemove.Count))
-            {
-                return;
-            }
-
-            foreach (var item in toRemove)
-            {
-                _philosophyScriptBindingList.Remove(item);
-            }
-
-            if (toRemove.Count > 0)
-            {
-                NotifyPhilosophyDraftDirty();
-            }
-        }
-
-        private void PhilosophyModeRadio_CheckedChanged(object sender, EventArgs e)
-        {
-            if (numPhilosophyCount == null)
-            {
-                return;
-            }
-
-            var story = rbPhilosophyModeStory != null && rbPhilosophyModeStory.Checked;
-            numPhilosophyCount.Enabled = !story;
-            if (story)
-            {
-                numPhilosophyCount.Value = 1;
-            }
-        }
-
-        private void ShowPhilosophyBRollPicker(PhilosophyScriptItem item, int gridRowIndex)
-        {
-            if (item == null || dgvPhilosophyScripts == null)
-            {
-                return;
-            }
-
-            EnsurePhilosophyBRollPickerMenu();
-            _philosophyBRollPickerItem = item;
-            _philosophyBRollPickerRowIndex = gridRowIndex;
-
-            var isPreRendered = PhilosophyVisualModes.Normalize(item.VisualMode) == PhilosophyVisualModes.PreRendered;
-            if (_miPhilosophyBRollRandom != null)
-            {
-                _miPhilosophyBRollRandom.Visible = !isPreRendered;
-            }
-
-            if (_miPhilosophyBRollBrowse != null)
-            {
-                _miPhilosophyBRollBrowse.Text = isPreRendered ? "Chọn ảnh nền…" : "Duyệt thư mục";
-                _miPhilosophyBRollBrowse.ToolTipText = isPreRendered
-                    ? "Chọn ảnh tham chiếu — Gemini dùng ảnh + câu triết lý để viết prompt phân cảnh"
-                    : "Mở thư mục chứa video nền trong Assets để chọn file";
-            }
-
-            var col = dgvPhilosophyScripts.Columns["colPhilosophyBRoll"];
-            if (col == null)
-            {
-                return;
-            }
-
-            var rect = dgvPhilosophyScripts.GetCellDisplayRectangle(col.Index, gridRowIndex, false);
-            _cmsPhilosophyBRollPicker.Show(dgvPhilosophyScripts, new Point(rect.Left, rect.Bottom));
-        }
-
-        private void PhilosophyPickBackgroundFile(int rowIndex, PhilosophyScriptItem item)
-        {
-            if (item == null)
-            {
-                return;
-            }
-
-            if (PhilosophyVisualModes.Normalize(item.VisualMode) == PhilosophyVisualModes.PreRendered)
-            {
-                PhilosophyPickReferenceImageFile(rowIndex, item);
-                return;
-            }
-
-            PhilosophyPickBRollVideoFile(rowIndex, item);
-        }
-
-        private void PhilosophyPickReferenceImageFile(int rowIndex, PhilosophyScriptItem item)
-        {
-            if (item == null)
-            {
-                return;
-            }
-
-            var profile = ResolvePhilosophyRowProfile(item);
-            var initialDir = PhilosophyBRollSelection.GetImageBrowseInitialDirectory(profile);
-            try
-            {
-                System.IO.Directory.CreateDirectory(initialDir);
-            }
-            catch
-            {
-                // ignored
-            }
-
-            using (var dlg = new OpenFileDialog
-            {
-                Title = "Chọn ảnh nền tham chiếu (mode 3)",
-                Filter = "Ảnh (*.jpg;*.jpeg;*.png;*.webp;*.bmp)|*.jpg;*.jpeg;*.png;*.webp;*.bmp|Tất cả|*.*",
-                InitialDirectory = System.IO.Directory.Exists(initialDir) ? initialDir : string.Empty
-            })
-            {
-                if (dlg.ShowDialog() != DialogResult.OK)
-                {
-                    return;
-                }
-
-                var path = dlg.FileName?.Trim() ?? string.Empty;
-                if (string.IsNullOrEmpty(path) || !PhilosophyBRollSelection.IsImageFile(path))
-                {
-                    MessageBox.Show(this, "File ảnh không hợp lệ.", "Video Triết lý",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-
-                item.BRollFolder = path;
-                if (dgvPhilosophyScripts != null && rowIndex >= 0 && rowIndex < dgvPhilosophyScripts.Rows.Count)
-                {
-                    dgvPhilosophyScripts.InvalidateRow(rowIndex);
-                }
-
-                NotifyPhilosophyDraftDirty();
-                LogPhilosophy("Ảnh nền mode 3: " + System.IO.Path.GetFileName(path));
-            }
-        }
-
-        private void ShowPhilosophyScenePromptViewer(PhilosophyScriptItem item, int gridRowIndex)
-        {
-            if (item == null)
-            {
-                return;
-            }
-
-            using (var dlg = new PhilosophyScenePromptViewerForm(item))
-            {
-                dlg.ShowDialog(this);
-            }
-
-            if (dgvPhilosophyScripts != null && gridRowIndex >= 0 && gridRowIndex < dgvPhilosophyScripts.Rows.Count)
-            {
-                dgvPhilosophyScripts.InvalidateRow(gridRowIndex);
-            }
-        }
-
-        private void PhilosophyPickBRollVideoFile(int rowIndex, PhilosophyScriptItem item)
-        {
-            if (item == null)
-            {
-                return;
-            }
-
-            var profile = ResolvePhilosophyRowProfile(item);
-            var initialDir = PhilosophyBRollSelection.GetBrowseInitialDirectory(profile);
-            try
-            {
-                System.IO.Directory.CreateDirectory(initialDir);
-            }
-            catch
-            {
-                // ignore — OpenFileDialog vẫn mở được
-            }
-
-            using (var dlg = new OpenFileDialog
-            {
-                Title = "Chọn video nền B-Roll",
-                Filter = "Video (*.mp4;*.mov)|*.mp4;*.mov|Tất cả|*.*",
-                InitialDirectory = System.IO.Directory.Exists(initialDir) ? initialDir : string.Empty
-            })
-            {
-                if (dlg.ShowDialog() != DialogResult.OK)
-                {
-                    return;
-                }
-
-                var path = dlg.FileName?.Trim() ?? string.Empty;
-                if (string.IsNullOrEmpty(path))
-                {
-                    return;
-                }
-
-                item.BRollFolder = path;
-                _philosophyScriptBindingList?.ResetBindings();
-                if (dgvPhilosophyScripts != null && rowIndex >= 0 && rowIndex < dgvPhilosophyScripts.Rows.Count)
-                {
-                    dgvPhilosophyScripts.InvalidateRow(rowIndex);
-                }
-
-                NotifyPhilosophyDraftDirty();
-            }
-        }
-
-        private void PhilosophyBrowseRowFolder(int rowIndex, bool isMusic)
-        {
-            if (dgvPhilosophyScripts == null || rowIndex < 0 || rowIndex >= dgvPhilosophyScripts.Rows.Count)
-            {
-                return;
-            }
-
-            if (!(dgvPhilosophyScripts.Rows[rowIndex].DataBoundItem is PhilosophyScriptItem item))
-            {
-                return;
-            }
-
-            if (isMusic)
-            {
-                PhilosophyBrowseRowMusicFile(rowIndex, item);
-                return;
-            }
-        }
-
-        private void PhilosophyBrowseRowMusicFile(int rowIndex, PhilosophyScriptItem item)
-        {
-            var current = item.MusicFolder?.Trim() ?? string.Empty;
-            var initialDir = string.Empty;
-            if (System.IO.File.Exists(current))
-            {
-                initialDir = System.IO.Path.GetDirectoryName(current) ?? string.Empty;
-            }
-            else if (System.IO.Directory.Exists(current))
-            {
-                initialDir = current;
-            }
-            else
-            {
-                initialDir = PhilosophyProfileAssets.GetAssetsRoot(GetSelectedPhilosophyProfileName());
-            }
-
-            using (var dlg = new OpenFileDialog
-            {
-                Title = "Chọn bài nhạc nền",
-                Filter = "Audio (*.mp3;*.wav;*.m4a)|*.mp3;*.wav;*.m4a|Tất cả|*.*",
-                InitialDirectory = System.IO.Directory.Exists(initialDir) ? initialDir : string.Empty
-            })
-            {
-                if (dlg.ShowDialog() != DialogResult.OK)
-                {
-                    return;
-                }
-
-                var path = dlg.FileName?.Trim() ?? string.Empty;
-                if (string.IsNullOrEmpty(path))
-                {
-                    return;
-                }
-
-                item.MusicFolder = System.IO.Path.GetFileName(path);
-                EnsurePhilosophyMusicInCombo(item.MusicFolder);
-                _philosophyScriptBindingList?.ResetBindings();
-                NotifyPhilosophyDraftDirty();
-            }
-        }
-
-        private void RefreshPhilosophyFolderOptions()
-        {
-            if (_colPhilosophyMusic == null)
-            {
-                return;
-            }
-
-            AppSettings settings;
-            try
-            {
-                settings = _configManager.LoadAsync().ConfigureAwait(true).GetAwaiter().GetResult()
-                           ?? new AppSettings();
-            }
-            catch
-            {
-                settings = new AppSettings();
-            }
-
-            var profile = GetSelectedPhilosophyProfileName();
-            var musicFiles = PhilosophyProfileAssets.EnumerateMusicFileNames(profile, settings);
-
-            if (_philosophyScriptBindingList != null)
-            {
-                foreach (var item in _philosophyScriptBindingList)
-                {
-                    AddPhilosophyMusicFileOption(musicFiles, item.MusicFolder);
-                }
-            }
-
-            ApplyPhilosophyMusicComboItems(_colPhilosophyMusic, musicFiles);
-        }
-
-        private static void AddPhilosophyMusicFileOption(List<string> fileNames, string selection)
-        {
-            var sel = (selection ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(sel))
-            {
-                return;
-            }
-
-            if (System.IO.File.Exists(sel))
-            {
-                AddPhilosophyFolderOption(fileNames, System.IO.Path.GetFileName(sel));
-                return;
-            }
-
-            if (!System.IO.Directory.Exists(sel))
-            {
-                AddPhilosophyFolderOption(fileNames, sel);
-            }
-        }
-
-        private static void ApplyPhilosophyMusicComboItems(DataGridViewComboBoxColumn column, List<string> fileNames)
-        {
-            if (column == null)
-            {
-                return;
-            }
-
-            column.Items.Clear();
-            column.Items.Add(string.Empty);
-            foreach (var name in fileNames)
-            {
-                column.Items.Add(name);
-            }
-        }
-
-        private void EnsurePhilosophyMusicInCombo(string fileName)
-        {
-            if (_colPhilosophyMusic == null)
-            {
-                return;
-            }
-
-            var trimmed = (fileName ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(trimmed))
-            {
-                return;
-            }
-
-            foreach (var item in _colPhilosophyMusic.Items)
-            {
-                if (string.Equals(item?.ToString(), trimmed, StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
-            }
-
-            _colPhilosophyMusic.Items.Add(trimmed);
-        }
-
-        private static void AddPhilosophyFolderOption(List<string> paths, string path)
-        {
-            var trimmed = (path ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(trimmed))
-            {
-                return;
-            }
-
-            if (paths.Any(p => string.Equals(p, trimmed, StringComparison.OrdinalIgnoreCase)))
-            {
-                return;
-            }
-
-            paths.Add(trimmed);
-        }
-
-        private void EnsurePhilosophyAmbientInCombo(string ambientKey)
-        {
-            if (_colPhilosophyAmbient == null)
-            {
-                return;
-            }
-
-            var key = PhilosophyAmbientCatalog.NormalizeKey(ambientKey);
-            foreach (var item in _colPhilosophyAmbient.Items)
-            {
-                if (string.Equals(item?.ToString(), key, StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
-            }
-
-            _colPhilosophyAmbient.Items.Add(key);
-        }
-
-        private static string FormatPhilosophyFolderCell(string path)
-        {
-            var trimmed = (path ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(trimmed))
-            {
-                return "— mặc định —";
-            }
-
-            trimmed = trimmed.TrimEnd('\\', '/');
-            var name = System.IO.Path.GetFileName(trimmed);
-            return string.IsNullOrEmpty(name) ? trimmed : name;
+            PhilosophyDeleteSelectedBatches();
         }
 
         private static string DescribePhilosophyFolderTooltip(string path, string kind)
@@ -2032,87 +1032,64 @@ namespace tiktok_Omni
         {
             if (IsPhilosophyTabBusy(out var busyReason))
             {
-                MessageBox.Show(busyReason, "Video Triết lý", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(busyReason, "Video Quote", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            var topic = txtPhilosophyTopic?.Text?.Trim() ?? string.Empty;
-            if (string.IsNullOrEmpty(topic))
+            var batches = GetPhilosophyTargetBatchesFromGrid();
+            if (batches.Count == 0)
             {
                 MessageBox.Show(
-                    "Nhập chủ đề trước khi bấm «Tạo câu triết lý».",
-                    "Video Triết lý",
+                    "Chọn ít nhất một batch trên lưới (hoặc bấm «+ Thêm batch») trước.",
+                    "Tạo nội dung Gemini",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return;
+            }
+
+            var batchesWithTopic = batches
+                .Where(b => b != null && !string.IsNullOrWhiteSpace(b.Topic))
+                .ToList();
+            if (batchesWithTopic.Count == 0)
+            {
+                MessageBox.Show(
+                    "Nhập chủ đề trong cột «Chủ đề» (bấm mở popup) cho batch đã chọn trước khi chạy Gemini.",
+                    "Tạo nội dung Gemini",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            if (batchesWithTopic.Count < batches.Count)
+            {
+                LogPhilosophy("Gemini: bỏ qua "
+                              + (batches.Count - batchesWithTopic.Count)
+                              + " batch không có chủ đề.");
             }
 
             _philosophyScriptGenCts?.Dispose();
             _philosophyScriptGenCts = new CancellationTokenSource();
             _philosophyScriptGenRunning = true;
             UpdatePhilosophyBusyControlStates();
-            SetPhilosophyProgress("Gemini: đang sinh kịch bản…", 0, indeterminate: true);
+            SetPhilosophyProgress("Gemini: đang tạo nội dung…", 0, indeterminate: true);
             try
             {
-                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-                if (settings == null || string.IsNullOrWhiteSpace(settings.AiApiKey))
-                {
-                    MessageBox.Show(
-                        "Cần AI API Key (Gemini) trong tab Cài đặt.",
-                        "Video Triết lý",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-                    LogPhilosophy("Triết lý: thiếu AI API Key.");
-                    return;
-                }
-
-                var mode = rbPhilosophyModeStory != null && rbPhilosophyModeStory.Checked ? "Story" : "Quotes";
-                var count = (int)(numPhilosophyCount?.Value ?? 5);
-                if (!TryNormalizePhilosophyDurationRange(
-                        (int)(numPhilosophyDurationMin?.Value ?? 15),
-                        (int)(numPhilosophyDurationMax?.Value ?? 60),
-                        out var minDuration,
-                        out var maxDuration,
-                        out var durationErr))
-                {
-                    MessageBox.Show(durationErr, "Video Triết lý", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-
-                var (minWords, maxWords) = PhilosophyRenderOptions.EstimateSpeechWordCount(minDuration, maxDuration);
-                LogPhilosophy("Gemini: mục tiêu " + minDuration + "–" + maxDuration + " giây (~" +
-                              minWords + "–" + maxWords + " từ/" + (mode == "Story" ? "câu chuyện" : "quote") + ").");
-                var scripts = await _videoProcessingService.GeneratePhilosophyScriptsAsync(
-                    topic,
-                    mode,
-                    count,
-                    settings,
-                    minDuration,
-                    maxDuration,
-                    _philosophyScriptGenCts.Token).ConfigureAwait(true);
+                var totalQuotes = await GeneratePhilosophyContentForBatchesAsync(
+                    batchesWithTopic,
+                    _philosophyScriptGenCts.Token,
+                    (index, total, topic) =>
+                    {
+                        SetPhilosophyProgress(
+                            "Gemini [" + index + "/" + total + "]: «" + TrimPhilosophyPreview(topic) + "»…",
+                            0,
+                            indeterminate: true);
+                    }).ConfigureAwait(true);
 
                 _philosophyScriptGenCts.Token.ThrowIfCancellationRequested();
 
                 void ApplyGrid()
                 {
-                    _philosophyScriptBindingList ??= new BindingList<PhilosophyScriptItem>();
-                    var defaultProfile = GetSelectedPhilosophyProfileName();
-                    var defaultVisual = GetDefaultPhilosophyVisualModeForNewRow(_philosophyScriptBindingList);
-                    foreach (var script in scripts)
-                    {
-                        PhilosophySubtitleStyleHelper.EnsureDefaults(script);
-                        PhilosophyAmbientCatalog.EnsureRowDefault(script);
-                        script.ProfileName = defaultProfile;
-                        script.VisualMode = defaultVisual;
-                        _philosophyScriptBindingList.Add(script);
-                    }
-
-                    if (dgvPhilosophyScripts != null)
-                    {
-                        dgvPhilosophyScripts.DataSource = _philosophyScriptBindingList;
-                    }
-
-                    RefreshPhilosophyFolderOptions();
+                    dgvPhilosophyScripts?.Invalidate();
                 }
 
                 if (dgvPhilosophyScripts != null && dgvPhilosophyScripts.InvokeRequired)
@@ -2124,29 +1101,26 @@ namespace tiktok_Omni
                     ApplyGrid();
                 }
 
-                foreach (var script in scripts)
-                {
-                    var wordCount = CountPhilosophyWords(script?.Content);
-                    if (wordCount < minWords || wordCount > maxWords)
-                    {
-                        LogPhilosophy("Cảnh báo: một dòng có " + wordCount + " từ (mục tiêu " +
-                                      minWords + "–" + maxWords + ") — nên chỉnh tay trước khi render.");
-                    }
-                }
-
-                LogPhilosophy("Triết lý: Gemini trả " + scripts.Count + " dòng — duyệt/sửa trước khi render.");
-                SetPhilosophyProgress("Đã sinh " + scripts.Count + " kịch bản", 100);
+                LogPhilosophy("Gemini xong: "
+                              + totalQuotes
+                              + " câu trong "
+                              + batchesWithTopic.Count
+                              + " batch — mở popup «Chủ đề» để duyệt/sửa.");
+                SetPhilosophyProgress(
+                    "Đã tạo " + totalQuotes + " câu · " + batchesWithTopic.Count + " batch",
+                    100);
                 NotifyPhilosophyDraftDirty();
             }
             catch (OperationCanceledException)
             {
-                LogPhilosophy("Triết lý: đã dừng sinh kịch bản.");
-                SetPhilosophyProgress("Đã dừng", 0);
+                LogPhilosophy("Quote: đã dừng tạo nội dung.");
+                SetPhilosophyProgress("Đã dừng tạo nội dung", 0);
             }
             catch (Exception ex)
             {
-                LogPhilosophy("Triết lý lỗi Gemini: " + ex.Message);
-                SetPhilosophyProgress("lỗi sinh kịch bản", 0);
+                LogPhilosophy("Quote: lỗi tạo nội dung — " + ex.Message);
+                MessageBox.Show(ex.Message, "Tạo nội dung Gemini", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                SetPhilosophyProgress("Lỗi Gemini", 0);
             }
             finally
             {
@@ -2172,7 +1146,7 @@ namespace tiktok_Omni
 
             if (_philosophyScriptGenRunning)
             {
-                reason = "Đang sinh kịch bản — bấm «Dừng» để hủy.";
+                reason = "Đang tạo nội dung — bấm «Dừng» để hủy.";
                 return true;
             }
 
@@ -2188,7 +1162,7 @@ namespace tiktok_Omni
 
         private void BtnPhilosophyStopAll_Click(object sender, EventArgs e)
         {
-            CancelAllPhilosophyWorkForEmergencyStop(logPrefix: "Triết lý");
+            CancelAllPhilosophyWorkForEmergencyStop(logPrefix: "Quote");
         }
 
         private void CancelAllPhilosophyWorkForEmergencyStop(string logPrefix = null)
@@ -2198,7 +1172,7 @@ namespace tiktok_Omni
 
             if (_philosophyScriptGenRunning)
             {
-                LogPhilosophy(prefix + " đang dừng sinh kịch bản…");
+                LogPhilosophy(prefix + " đang dừng tạo nội dung…");
                 TryCancel(_philosophyScriptGenCts);
                 cancelled = true;
             }
@@ -2235,20 +1209,19 @@ namespace tiktok_Omni
                 btnPhilosophyStopAll.Enabled = tabBusy;
             }
 
-            if (btnPhilosophyGenerateScript != null)
-            {
-                btnPhilosophyGenerateScript.Enabled = !tabBusy;
-            }
-
-            if (btnGenerateScenePrompts != null)
-            {
-                btnGenerateScenePrompts.Enabled = !tabBusy;
-            }
-
-            if (btnExportExcelPrompts != null)
-            {
-                btnExportExcelPrompts.Enabled = !tabBusy;
-            }
+            SetPhilosophySolidButtonEnabled(btnPhilosophyAddRow, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyCopyRow, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyRestoreSessions, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyDeleteRow, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyTrash, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyMoveRowUp, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyMoveRowDown, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyBrollLibrary, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyMascotImageLibrary, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyMusicLibrary, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophySfxLibrary, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyLogoLibrary, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyGenerateContent, !tabBusy);
 
             if (btnPhilosophyPushToAutoPost != null)
             {
@@ -2256,6 +1229,14 @@ namespace tiktok_Omni
             }
 
             UpdatePhilosophyRenderControlStates();
+        }
+
+        private static void SetPhilosophySolidButtonEnabled(Button btn, bool enabled)
+        {
+            if (btn != null && !btn.IsDisposed)
+            {
+                btn.Enabled = enabled;
+            }
         }
 
         private async void btnPhilosophyStartRender_Click(object sender, EventArgs e)
@@ -2268,7 +1249,7 @@ namespace tiktok_Omni
             if (_philosophyRenderRunning)
             {
                 _philosophyRenderPaused = true;
-                LogPhilosophy("Triết lý: đang dừng render… (chờ bước hiện tại kết thúc)");
+                LogPhilosophy("Quote: đang dừng render… (chờ bước hiện tại kết thúc)");
                 SetPhilosophyProgress("Đang dừng…", 0, indeterminate: true);
                 _philosophyRenderCts?.Cancel();
                 return;
@@ -2290,7 +1271,8 @@ namespace tiktok_Omni
             var settings = await _configManager.LoadAsync().ConfigureAwait(true);
             if (!resume)
             {
-                var selected = GetPhilosophyTargetRowsFromGrid();
+                var queue = BuildPhilosophyRenderQueueFromSelectedBatches();
+                var selected = queue.Select(e => e.Quote).ToList();
                 if (!TryValidatePhilosophyRenderRequest(selected, settings, out var blockMessage))
                 {
                     NotifyPhilosophyRenderBlocked(blockMessage);
@@ -2300,17 +1282,16 @@ namespace tiktok_Omni
                 if (_philosophyRenderPaused && _philosophyRenderPending != null && _philosophyRenderPending.Count > 0)
                 {
                     LogPhilosophy("Bắt đầu batch mới — bỏ " + _philosophyRenderPending.Count +
-                                  " dòng chờ từ lần trước (dùng «Tiếp tục» nếu muốn render tiếp).");
+                                  " câu chờ từ lần trước (dùng «Tiếp tục» nếu muốn render tiếp).");
                 }
 
-                _philosophyRenderPending = selected.ToList();
+                _philosophyRenderPending = queue;
                 _philosophyRenderPaused = false;
-                LogPhilosophy("Render " + _philosophyRenderPending.Count + " dòng đã chọn (trên → dưới).");
-                for (var i = 0; i < _philosophyRenderPending.Count; i++)
+                LogPhilosophy("Render " + queue.Count + " câu trong " +
+                              GetPhilosophyTargetBatchesFromGrid().Count + " batch đã chọn.");
+                for (var i = 0; i < queue.Count; i++)
                 {
-                    var rowNum = GetPhilosophyRowDisplayNumber(_philosophyRenderPending[i]);
-                    LogPhilosophy("  " + (i + 1) + ". Dòng " + rowNum + ": " +
-                                  TrimPhilosophyPreview(_philosophyRenderPending[i]?.Content));
+                    LogPhilosophy("  " + (i + 1) + ". " + TrimPhilosophyPreview(queue[i].Quote?.Content));
                 }
             }
             else
@@ -2319,7 +1300,7 @@ namespace tiktok_Omni
                 {
                     MessageBox.Show(
                         this,
-                        "Không còn dòng chờ render.\r\nBôi đen dòng trong bảng rồi bấm «Bắt đầu Render».",
+                        "Không còn dòng chờ render.\r\nBôi đen dòng trong bảng rồi bấm «Render video».",
                         "Tiếp tục render",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -2333,7 +1314,7 @@ namespace tiktok_Omni
                 }
 
                 _philosophyRenderPaused = false;
-                LogPhilosophy("Triết lý: tiếp tục render " + _philosophyRenderPending.Count + " dòng còn lại…");
+                LogPhilosophy("Quote: tiếp tục render " + _philosophyRenderPending.Count + " dòng còn lại…");
             }
 
             await RunPhilosophyRenderLoopAsync(settings).ConfigureAwait(true);
@@ -2351,31 +1332,46 @@ namespace tiktok_Omni
             _philosophyRenderCts = new CancellationTokenSource();
             UpdatePhilosophyBusyControlStates();
 
-            var profileName = GetSelectedPhilosophyProfileName();
+            var toolbarProfile = GetSelectedPhilosophyProfileName();
             var batchTotal = _philosophyRenderPending.Count;
             var completedInBatch = 0;
+            var savedMusicVolume = settings.VideoMusicVolume;
 
             try
             {
                 while (_philosophyRenderPending.Count > 0)
                 {
+                    if (!ShouldAllowInteractivePrompts())
+                    {
+                        break;
+                    }
+
                     _philosophyRenderCts.Token.ThrowIfCancellationRequested();
 
-                    var item = _philosophyRenderPending[0];
-                    var rowProfile = ResolvePhilosophyRowProfile(item);
+                    var entry = _philosophyRenderPending[0];
+                    var item = entry.Quote;
+                    var ownerBatch = entry.Batch;
+                    if (ownerBatch != null)
+                    {
+                        PhilosophyBatchHelper.EnsureQuoteAudioDefaults(ownerBatch);
+                        PhilosophyBatchHelper.EnsureBatchProfileName(ownerBatch, toolbarProfile);
+                        settings.VideoMusicVolume = PhilosophyBatchHelper.ResolveQuoteMusicVolumePercent(item, ownerBatch);
+                    }
+
+                    var rowProfile = PhilosophyBatchHelper.ResolveBatchProfileName(ownerBatch, toolbarProfile);
                     var profile = PhilosophyProfileAssets.ResolveProfile(settings, rowProfile);
                     var ordinal = completedInBatch + 1;
                     item.Status = "Đang render…";
                     item.LastError = string.Empty;
-                    _philosophyScriptBindingList?.ResetBindings();
+                    _philosophyBatchBindingList?.ResetBindings();
                     SetPhilosophyProgress(
                         "Render " + ordinal + "/" + batchTotal + "…",
                         (int)Math.Round(completedInBatch * 100d / Math.Max(1, batchTotal)),
                         indeterminate: true);
-                    LogPhilosophy("Triết lý [" + ordinal + "/" + batchTotal + "]: " + TrimPhilosophyPreview(item.Content));
+                    LogPhilosophy("Quote [" + ordinal + "/" + batchTotal + "]: " + TrimPhilosophyPreview(item.Content));
 
-                    var renderOptions = BuildPhilosophyRenderOptions(rowProfile, item);
-                    LogPhilosophy("Profile: «" + rowProfile + "»");
+                    var renderOptions = BuildPhilosophyRenderOptions(toolbarProfile, item, settings, ownerBatch);
+                    LogPhilosophy("Profile batch: «" + rowProfile + "»");
                     LogPhilosophy("Chế độ nền dòng: " + item.VisualModeLabel);
                     LogPhilosophy("Thời lượng xuất: đọc hết quote + "
                                   + PhilosophyRenderOptions.OutroPadMinSeconds.ToString("0")
@@ -2390,14 +1386,27 @@ namespace tiktok_Omni
                     try
                     {
                         ApplyMoodToProfileVoice(item, profile);
-                        var voiceId = PhilosophyVideoPipelineService.ResolveVoiceIdByMood(item.Mood, settings, profile.VoiceId);
-                        LogPhilosophy("Giọng (mood «" + (item.Mood ?? "reflective") + "»): " +
-                                      (string.IsNullOrWhiteSpace(voiceId) ? "mặc định" : voiceId));
+                        if (renderOptions.TtsOptions != null)
+                        {
+                            LogPhilosophy("Giọng: popup Âm thanh ("
+                                          + (renderOptions.TtsOptions.BodyEngine == TtsEngineKind.ElevenLabs
+                                              ? "ElevenLabs"
+                                              : "Edge TTS")
+                                          + ", tốc độ "
+                                          + renderOptions.NarrationSpeedPercent.ToString(CultureInfo.InvariantCulture)
+                                          + "%)");
+                        }
+                        else
+                        {
+                            var voiceId = PhilosophyVideoPipelineService.ResolveVoiceIdByMood(item.Mood, settings, profile.VoiceId);
+                            LogPhilosophy("Giọng (mood «" + (item.Mood ?? "reflective") + "»): "
+                                          + (string.IsNullOrWhiteSpace(voiceId) ? "mặc định" : voiceId));
+                        }
                         if (!string.IsNullOrWhiteSpace(item.OutputPath))
                         {
                             PhilosophyVideoPipelineService.TryDeletePreviousOutput(item.OutputPath, LogPhilosophy);
                             item.OutputPath = string.Empty;
-                            _philosophyScriptBindingList?.ResetBindings();
+                            _philosophyBatchBindingList?.ResetBindings();
                         }
 
                         var result = await _philosophyVideoService.GenerateFromScriptAsync(
@@ -2414,15 +1423,18 @@ namespace tiktok_Omni
                         item.LastError = string.Empty;
                         _philosophyRenderPending.RemoveAt(0);
                         completedInBatch++;
-                        EnqueuePhilosophyJobFromResult(item, result, rowProfile, settings);
+                        ownerBatch?.RefreshDerivedFields();
+                        MaybeShowPhilosophyBatchRenderReport(ownerBatch);
+                        OnPhilosophyFinished(true, result, string.Empty);
                         LogPhilosophy("Xong: " + result.OutputPath);
+                        FlushPhilosophyDraftToDisk();
                         NotifyPhilosophyDraftDirty();
                     }
                     catch (OperationCanceledException)
                     {
                         item.Status = "Dừng";
                         _philosophyRenderPaused = true;
-                        LogPhilosophy("Triết lý: đã dừng — còn " + _philosophyRenderPending.Count +
+                        LogPhilosophy("Quote: đã dừng — còn " + _philosophyRenderPending.Count +
                                       " dòng. Bấm «Tiếp tục» để render tiếp.");
                         SetPhilosophyProgress("Đã dừng — " + _philosophyRenderPending.Count + " dòng chờ", 0);
                         break;
@@ -2435,27 +1447,32 @@ namespace tiktok_Omni
                         _philosophyRenderPaused = true;
                         LogPhilosophy("Lỗi render: " + ex.Message);
                         SetPhilosophyProgress("Dừng tại lỗi", 0);
-                        MessageBox.Show(
-                            this,
-                            ex.Message,
-                            "Video Triết lý — lỗi render",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Error);
+                        if (ShouldAllowInteractivePrompts())
+                        {
+                            MessageBox.Show(
+                                this,
+                                ex.Message,
+                                "Video Quote — lỗi render",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Error);
+                        }
+
                         NotifyPhilosophyDraftDirty();
                         break;
                     }
 
-                    _philosophyScriptBindingList?.ResetBindings();
+                    _philosophyBatchBindingList?.ResetBindings();
                 }
 
                 if (!_philosophyRenderPaused && (_philosophyRenderPending == null || _philosophyRenderPending.Count == 0))
                 {
                     SetPhilosophyProgress("Hoàn tất " + completedInBatch + " video", 100);
-                    LogPhilosophy("Triết lý: hoàn tất batch render.");
+                    LogPhilosophy("Quote: hoàn tất batch render.");
                 }
             }
             finally
             {
+                settings.VideoMusicVolume = savedMusicVolume;
                 _philosophyRenderRunning = false;
                 _philosophyRenderCts?.Dispose();
                 _philosophyRenderCts = null;
@@ -2475,6 +1492,12 @@ namespace tiktok_Omni
             var hasPending = _philosophyRenderPending != null && _philosophyRenderPending.Count > 0;
             var canResume = _philosophyRenderPaused && hasPending && !running;
 
+            if (btnPhilosophyGenerateContent != null)
+            {
+                btnPhilosophyGenerateContent.Enabled = !running
+                    && !_philosophyScriptGenRunning && !_philosophyScenePromptRunning;
+            }
+
             if (btnPhilosophyStartRender != null)
             {
                 btnPhilosophyStartRender.Enabled = pipelineReady && !running
@@ -2486,56 +1509,40 @@ namespace tiktok_Omni
                 btnPhilosophyStopRender.Visible = true;
                 if (running)
                 {
-                    SetPhilosophyStopResumeButton(resumeMode: false, enabled: true);
+                    ApplyPhilosophyStopRenderButtonUi(resumeMode: false, enabled: true);
                 }
                 else if (canResume)
                 {
-                    SetPhilosophyStopResumeButton(resumeMode: true, enabled: pipelineReady
+                    ApplyPhilosophyStopRenderButtonUi(resumeMode: true, enabled: pipelineReady
                         && !_philosophyScriptGenRunning && !_philosophyScenePromptRunning);
                 }
                 else
                 {
-                    SetPhilosophyStopResumeButton(resumeMode: false, enabled: false);
+                    ApplyPhilosophyStopRenderButtonUi(resumeMode: false, enabled: false);
                 }
             }
 
-            if (numPhilosophyDurationMin != null)
-            {
-                numPhilosophyDurationMin.Enabled = !running && !_philosophyScriptGenRunning && !_philosophyScenePromptRunning;
-            }
-
-            if (numPhilosophyDurationMax != null)
-            {
-                numPhilosophyDurationMax.Enabled = !running && !_philosophyScriptGenRunning && !_philosophyScenePromptRunning;
-            }
-
-            UpdatePhilosophyGenerateScriptButtonState();
         }
 
-        private void SetPhilosophyStopResumeButton(bool resumeMode, bool enabled)
+        private void ApplyPhilosophyStopRenderButtonUi(bool resumeMode, bool enabled)
         {
-            if (btnPhilosophyStopRender == null)
+            if (btnPhilosophyStopRender == null || btnPhilosophyStopRender.IsDisposed)
             {
                 return;
             }
 
-            btnPhilosophyStopRender.Text = resumeMode ? "Tiếp tục" : "Dừng";
-            btnPhilosophyStopRender.Font = PhilosophyPrimaryActionFont;
+            btnPhilosophyStopRender.Text = resumeMode ? "Tiếp tục" : "Dừng lại";
+            btnPhilosophyStopRender.Enabled = enabled;
+            var tint = resumeMode ? PhilosophyTintResume : PhilosophyTintStop;
             if (btnPhilosophyStopRender is JellyButton stopJelly)
             {
-                stopJelly.JellyTint = resumeMode ? PhilosophyTintResume : PhilosophyTintStop;
-            }
-            else
-            {
-                btnPhilosophyStopRender.BackColor = resumeMode ? PhilosophyTintResume : PhilosophyTintStop;
+                stopJelly.JellyTint = tint;
+                stopJelly.Invalidate();
             }
 
-            ResizeAppJellyButton(
+            ApplyPhilosophyCommandButtonMetrics(
                 btnPhilosophyStopRender,
-                PhilosophyPrimaryActionHeight,
-                140,
-                AppPrimaryActionHorizontalPad);
-            btnPhilosophyStopRender.Enabled = enabled;
+                resumeMode ? 120 : 118);
         }
 
         private bool IsPhilosophyPipelineReady()
@@ -2546,27 +1553,56 @@ namespace tiktok_Omni
             }
 
             bool Ok(string key) => _systemHealth.TryGetValue(key, out var v) && v;
-            // Render cần FFmpeg + lưu trữ; TTS/Gemini/Veo kiểm tra lúc bấm «Bắt đầu Render».
+            // Render cần FFmpeg + lưu trữ; TTS/Gemini/Veo kiểm tra lúc bấm «Render video».
             return Ok("ffmpeg") && Ok("storage");
         }
 
-        private PhilosophyRenderOptions BuildPhilosophyRenderOptions(string profileName, PhilosophyScriptItem item)
+        private PhilosophyRenderOptions BuildPhilosophyRenderOptions(
+            string toolbarProfileFallback,
+            PhilosophyScriptItem item,
+            AppSettings settings,
+            PhilosophyBatchItem ownerBatch = null)
         {
-            var visualMode = PhilosophyVisualModes.Normalize(item?.VisualMode ?? 0);
+            if (ownerBatch != null)
+            {
+                PhilosophyBatchHelper.EnsureBatchProfileName(ownerBatch, toolbarProfileFallback);
+            }
 
-            return new PhilosophyRenderOptions
+            var profileName = PhilosophyBatchHelper.ResolveBatchProfileName(ownerBatch, toolbarProfileFallback);
+            var visualMode = PhilosophyVisualModes.Normalize(item?.VisualMode ?? 0);
+            var minDur = ownerBatch?.MinDurationSeconds ?? 15;
+            var maxDur = ownerBatch?.MaxDurationSeconds ?? 60;
+
+            var options = new PhilosophyRenderOptions
             {
                 ProfileName = profileName,
+                ReferenceImagePath = PhilosophyBatchHelper.ResolveReferenceImagePath(ownerBatch, item),
                 BRollFolder = item?.BRollFolder?.Trim() ?? string.Empty,
                 MusicFolder = item?.MusicFolder?.Trim() ?? string.Empty,
-                AmbientFolder = PhilosophyAmbientCatalog.ResolveAmbientFolder(item?.AmbientKey, profileName),
-                SubtitleOptions = PhilosophySubtitleStyleHelper.BuildOptions(item),
+                MusicVolumePercent = PhilosophyBatchHelper.ResolveQuoteMusicVolumePercent(item, ownerBatch),
+                NarrationSpeedPercent = PhilosophyBatchHelper.ResolveQuoteNarrationSpeedPercent(item, ownerBatch),
+                AmbientFolder = PhilosophyAmbientCatalog.ResolveAmbientMediaPath(
+                    item?.AmbientKey,
+                    profileName,
+                    settings,
+                    item?.Mood),
+                SubtitleOptions = ownerBatch != null
+                    ? PhilosophySubtitleStyleHelper.BuildOptions(ownerBatch, settings)
+                    : PhilosophySubtitleStyleHelper.BuildOptions(item, settings),
                 VisualMode = visualMode,
-                MinDurationSeconds = (int)(numPhilosophyDurationMin?.Value ?? 15),
-                MaxDurationSeconds = (int)(numPhilosophyDurationMax?.Value ?? 60),
+                MinDurationSeconds = minDur > 0 ? minDur : 15,
+                MaxDurationSeconds = maxDur > 0 ? maxDur : 60,
                 PreRenderedFolder = ResolveRowSceneVideoFolder(item),
                 QuoteForSceneMatch = (item?.Content ?? string.Empty).Trim()
             };
+
+            if (ownerBatch != null)
+            {
+                PhilosophyBatchHelper.CopyLogoSettingsToRenderOptions(ownerBatch, options);
+                options.TtsOptions = PhilosophyBatchTtsHelper.BuildTtsRenderOptions(ownerBatch, profileName, settings);
+            }
+
+            return options;
         }
 
         private string ResolveRowSceneVideoFolder(PhilosophyScriptItem item)
@@ -2580,102 +1616,10 @@ namespace tiktok_Omni
             return GetPhilosophyVideoInputFolder();
         }
 
-        private string DescribePhilosophySceneVideoFolderTooltip(PhilosophyScriptItem item)
-        {
-            if (PhilosophyVisualModes.Normalize(item?.VisualMode ?? 0) != PhilosophyVisualModes.PreRendered)
-            {
-                return "Chỉ dùng với chế độ «3. Video nhân vật tự làm sẵn»";
-            }
-
-            var resolved = ResolveRowSceneVideoFolder(item);
-            var rowFolder = (item?.SceneVideoFolder ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(rowFolder))
-            {
-                return "Dùng thư mục mặc định (thanh công cụ hoặc Assets\\{profile}\\philosophy-scenes\\)\r\n"
-                       + resolved;
-            }
-
-            return resolved;
-        }
-
-        private static string FormatPhilosophySceneVideoFolderCell(PhilosophyScriptItem item)
-        {
-            if (PhilosophyVisualModes.Normalize(item?.VisualMode ?? 0) != PhilosophyVisualModes.PreRendered)
-            {
-                return "—";
-            }
-
-            var rowFolder = (item?.SceneVideoFolder ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(rowFolder))
-            {
-                return "Chọn thư mục…";
-            }
-
-            return FormatPhilosophyFolderCell(rowFolder);
-        }
-
-        private void PhilosophyBrowseRowSceneVideoFolder(int rowIndex, PhilosophyScriptItem item)
-        {
-            if (item == null)
-            {
-                return;
-            }
-
-            if (PhilosophyVisualModes.Normalize(item.VisualMode) != PhilosophyVisualModes.PreRendered)
-            {
-                MessageBox.Show(
-                    this,
-                    "Cột «Thư mục video» chỉ dùng với chế độ «3. Video nhân vật tự làm sẵn».",
-                    "Video Triết lý",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            var profile = ResolvePhilosophyRowProfile(item);
-            var defaultDir = PhilosophyProfileAssets.EnsurePreRenderedScenesDirectory(profile);
-            var current = (item.SceneVideoFolder ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(current))
-            {
-                current = ResolveRowSceneVideoFolder(item);
-            }
-
-            var initialDir = Directory.Exists(current) ? current : defaultDir;
-            using (var dlg = new FolderBrowserDialog
-            {
-                Description = "Chọn thư mục chứa video phân cảnh (.mp4) cho dòng này.\r\n"
-                              + "Tên file theo cột «Prompt video» (vd: tam-bat-bien-giua-dong-01.mp4).",
-                SelectedPath = initialDir,
-                ShowNewFolderButton = true
-            })
-            {
-                if (dlg.ShowDialog(this) != DialogResult.OK)
-                {
-                    return;
-                }
-
-                item.SceneVideoFolder = dlg.SelectedPath?.Trim() ?? string.Empty;
-                _philosophyScriptBindingList?.ResetBindings();
-                if (dgvPhilosophyScripts != null && rowIndex >= 0 && rowIndex < dgvPhilosophyScripts.Rows.Count)
-                {
-                    dgvPhilosophyScripts.InvalidateRow(rowIndex);
-                }
-
-                NotifyPhilosophyDraftDirty();
-                LogPhilosophy("Thư mục video dòng " + GetPhilosophyRowDisplayNumber(item) + ": " + item.SceneVideoFolder);
-            }
-        }
-
-        private string ResolvePhilosophyRowProfile(PhilosophyScriptItem item)
-        {
-            var row = (item?.ProfileName ?? string.Empty).Trim();
-            if (!string.IsNullOrEmpty(row))
-            {
-                return ProfileScopedPaths.ResolveProfileName(row);
-            }
-
-            return GetSelectedPhilosophyProfileName();
-        }
+        private string ResolvePhilosophyRowProfile(PhilosophyScriptItem item, PhilosophyBatchItem batch = null) =>
+            PhilosophyBatchHelper.ResolveBatchProfileName(
+                batch ?? FindPhilosophyBatchForQuote(item),
+                GetSelectedPhilosophyProfileName());
 
         private void OpenPhilosophyOutputVideo(PhilosophyScriptItem item)
         {
@@ -2687,21 +1631,13 @@ namespace tiktok_Omni
                     string.IsNullOrEmpty(item?.LastError)
                         ? "Chưa có file video — render dòng này trước."
                         : "Render lỗi:\r\n" + item.LastError,
-                    "Video Triết lý",
+                    "Video Quote",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
                 return;
             }
 
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
-                LogPhilosophy("Mở video: " + path);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, "Không mở được file:\r\n" + ex.Message, "Video Triết lý", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            OpenPhilosophyFinishedVideoFile(path, item?.Content);
         }
 
         private static bool TryNormalizePhilosophyDurationRange(int minSeconds, int maxSeconds, out int min, out int max, out string error)
@@ -2741,15 +1677,15 @@ namespace tiktok_Omni
             out string message)
         {
             message = string.Empty;
-            if (_philosophyScriptBindingList == null || _philosophyScriptBindingList.Count == 0)
+            if (_philosophyBatchBindingList == null || _philosophyBatchBindingList.Count == 0)
             {
-                message = "Chưa có kịch bản — bấm «Tạo câu triết lý» hoặc «+ Thêm hàng» trước.";
+                message = "Chưa có batch — bấm «+ Thêm batch» trước.";
                 return false;
             }
 
             if (selected == null || selected.Count == 0)
             {
-                message = "Chọn ít nhất một dòng trong bảng (click dòng hoặc Ctrl+click nhiều dòng) rồi bấm «Bắt đầu Render».";
+                message = "Chọn ít nhất một batch trong bảng (click dòng hoặc Ctrl+click nhiều dòng) rồi bấm «Render video».";
                 return false;
             }
 
@@ -2765,23 +1701,16 @@ namespace tiktok_Omni
                 return false;
             }
 
-            if (!TryNormalizePhilosophyDurationRange(
-                    (int)(numPhilosophyDurationMin?.Value ?? 15),
-                    (int)(numPhilosophyDurationMax?.Value ?? 60),
-                    out _,
-                    out _,
-                    out var durationErr))
-            {
-                message = durationErr;
-                return false;
-            }
-
             var issues = new List<string>();
             foreach (var item in selected)
             {
+                var ownerBatch = FindPhilosophyBatchForQuote(item);
+                PhilosophyBatchHelper.EnsureBatchProfileName(ownerBatch, GetSelectedPhilosophyProfileName());
                 var rowNum = GetPhilosophyRowDisplayNumber(item);
                 var rowLabel = rowNum > 0 ? "Dòng " + rowNum : "Một dòng đã chọn";
-                var rowProfile = ResolvePhilosophyRowProfile(item);
+                var rowProfile = PhilosophyBatchHelper.ResolveBatchProfileName(
+                    ownerBatch,
+                    GetSelectedPhilosophyProfileName());
                 var visualMode = PhilosophyVisualModes.Normalize(item?.VisualMode ?? 0);
 
                 if (string.IsNullOrWhiteSpace(item?.Content))
@@ -2801,7 +1730,7 @@ namespace tiktok_Omni
                     var videoFolder = ResolveRowSceneVideoFolder(item);
                     if (string.IsNullOrEmpty(videoFolder) || !Directory.Exists(videoFolder))
                     {
-                        issues.Add(rowLabel + ": chế độ 3 cần chọn «Thư mục video» trên dòng hoặc thanh công cụ.");
+                        issues.Add(rowLabel + ": chế độ 3 cần chọn «Thư mục video» trên dòng.");
                     }
                 }
                 else if (string.IsNullOrWhiteSpace(settings?.VeoApiKey) || string.IsNullOrWhiteSpace(settings?.VeoEndpoint))
@@ -2831,13 +1760,28 @@ namespace tiktok_Omni
 
         private int GetPhilosophyRowDisplayNumber(PhilosophyScriptItem item)
         {
-            if (_philosophyScriptBindingList == null || item == null)
+            if (_philosophyBatchBindingList == null || item == null)
             {
                 return 0;
             }
 
-            var idx = _philosophyScriptBindingList.IndexOf(item);
-            return idx >= 0 ? idx + 1 : 0;
+            var batchIndex = 0;
+            foreach (var batch in _philosophyBatchBindingList)
+            {
+                batchIndex++;
+                if (batch?.Quotes == null)
+                {
+                    continue;
+                }
+
+                var quoteIndex = batch.Quotes.IndexOf(item);
+                if (quoteIndex >= 0)
+                {
+                    return batchIndex * 1000 + quoteIndex + 1;
+                }
+            }
+
+            return 0;
         }
 
         private void NotifyPhilosophyRenderBlocked(string message)
@@ -2848,7 +1792,7 @@ namespace tiktok_Omni
                 text = "Không đủ điều kiện để render.";
             }
 
-            LogPhilosophy("Triết lý: " + text.Replace("\r\n", " | "));
+            LogPhilosophy("Quote: " + text.Replace("\r\n", " | "));
             MessageBox.Show(this, text, "Không render được", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
@@ -2868,25 +1812,64 @@ namespace tiktok_Omni
             return t.Length <= 64 ? t : t.Substring(0, 61) + "…";
         }
 
-        private void EnqueuePhilosophyJobFromResult(
-            PhilosophyScriptItem item,
-            PhilosophyVideoResult result,
-            string profileName,
-            AppSettings settings)
+        private void PromptPhilosophyRenderCompleteDialog(string quote, string outputPath)
         {
-            var payload = new PhilosophyVideoJobPayload
+            if (!ShouldAllowInteractivePrompts())
             {
-                Content = item.Content,
-                QuoteText = item.Content,
-                Mood = item.Mood,
-                ProfileName = profileName,
-                BRollFolder = item.BRollFolder?.Trim() ?? string.Empty,
-                MusicFolder = item.MusicFolder?.Trim() ?? string.Empty,
-                AmbientFolder = PhilosophyAmbientCatalog.ResolveAmbientFolder(item.AmbientKey, profileName),
-                StorageRootPath = settings?.StorageRootPath ?? string.Empty
-            };
-            var title = TrimPhilosophyPreview(item.Content);
-            EnqueuePhilosophyJob(payload, "Triết lý: " + title);
+                return;
+            }
+
+            var path = (outputPath ?? string.Empty).Trim();
+            if (path.Length == 0 || !File.Exists(path))
+            {
+                return;
+            }
+
+            var label = TrimPhilosophyPreviewN((quote ?? string.Empty).Trim(), 64);
+            if (label.Length == 0)
+            {
+                label = "Video Quote";
+            }
+
+            using (var dlg = new ShowcaseRenderCompleteDialog(label, path))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    OpenPhilosophyFinishedVideoFile(path, quote);
+                }
+            }
+        }
+
+        private void OpenPhilosophyFinishedVideoFile(string path, string quote)
+        {
+            var videoPath = (path ?? string.Empty).Trim();
+            if (videoPath.Length == 0 || !File.Exists(videoPath))
+            {
+                return;
+            }
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(videoPath)
+                {
+                    UseShellExecute = true
+                });
+                var caption = TrimPhilosophyPreviewN((quote ?? string.Empty).Trim(), 48);
+                LoadProductionVideoPreview(
+                    videoPath,
+                    ProductionPipeline.ResolveThumbnailPath(videoPath),
+                    caption.Length > 0 ? caption : Path.GetFileNameWithoutExtension(videoPath));
+                LogPhilosophy("Xem video thành phẩm → " + videoPath);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    "Không mở được video:\r\n" + ex.Message,
+                    "Video Quote",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         // ─── Scene Prompts & Export ───────────────────────────────────────────
@@ -2899,11 +1882,35 @@ namespace tiktok_Omni
                 return;
             }
 
-            var targets = GetPhilosophyTargetRowsFromGrid();
+            var targets = GetPhilosophyTargetBatchesFromGrid();
             if (targets.Count == 0)
             {
                 MessageBox.Show(
-                    "Chọn ít nhất một dòng trên lưới (hoặc bấm vào dòng cần tạo prompt).",
+                    "Chọn ít nhất một batch trên lưới (hoặc bấm vào batch cần tạo prompt).",
+                    "Tạo Prompt Phân Cảnh",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var quoteJobs = new List<(PhilosophyBatchItem Batch, PhilosophyScriptItem Quote)>();
+            foreach (var batch in targets)
+            {
+                if (batch?.Quotes == null)
+                {
+                    continue;
+                }
+
+                foreach (var quote in batch.Quotes.Where(q => q != null))
+                {
+                    quoteJobs.Add((batch, quote));
+                }
+            }
+
+            if (quoteJobs.Count == 0)
+            {
+                MessageBox.Show(
+                    "Batch đã chọn chưa có câu nội dung.",
                     "Tạo Prompt Phân Cảnh",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -2926,13 +1933,14 @@ namespace tiktok_Omni
                     return;
                 }
 
-                var total = targets.Count;
+                var total = quoteJobs.Count;
                 var totalScenes = 0;
                 for (var rowIdx = 0; rowIdx < total; rowIdx++)
                 {
                     token.ThrowIfCancellationRequested();
 
-                    var item = targets[rowIdx];
+                    var batch = quoteJobs[rowIdx].Batch;
+                    var item = quoteJobs[rowIdx].Quote;
                     var quote = (item.Content ?? string.Empty).Trim();
                     if (string.IsNullOrEmpty(quote))
                     {
@@ -2948,21 +1956,28 @@ namespace tiktok_Omni
                         indeterminate: false);
 
                     var scenes = PhilosophySceneHelper.SplitIntoScenes(quote);
-                    var visualMode = PhilosophyVisualModes.Normalize(item.VisualMode);
-                    var imagePath = visualMode == PhilosophyVisualModes.PreRendered
-                        ? (item.BRollFolder ?? string.Empty).Trim()
-                        : string.Empty;
+                    var imagePath = PhilosophyBatchHelper.ResolveReferenceImagePath(batch, item);
 
                     LogPhilosophy("Dòng " + GetPhilosophyRowDisplayNumber(item) + ": " + scenes.Count +
                                   " phân cảnh (~8s/clip, đọc ~" +
                                   PhilosophySceneHelper.EstimateDuration(quote).ToString("0.0") + "s).");
 
-                    if (visualMode == PhilosophyVisualModes.PreRendered
-                        && (string.IsNullOrEmpty(imagePath) || !PhilosophyBRollSelection.IsImageFile(imagePath)))
+                    if (string.IsNullOrEmpty(imagePath))
+                    {
+                        var visualMode = PhilosophyVisualModes.Normalize(item.VisualMode);
+                        if (visualMode == PhilosophyVisualModes.PreRendered)
+                        {
+                            LogPhilosophy("Dòng " + GetPhilosophyRowDisplayNumber(item) +
+                                          ": mode 3 cần ảnh tham chiếu (popup «Nền»).");
+                        }
+
+                        LogPhilosophy("Dòng " + GetPhilosophyRowDisplayNumber(item) +
+                                      ": không có ảnh tham chiếu — Gemini dùng style photorealistic mặc định.");
+                    }
+                    else
                     {
                         LogPhilosophy("Dòng " + GetPhilosophyRowDisplayNumber(item) +
-                                      ": mode 3 cần chọn ảnh nền ở cột «Nền» trước khi sinh prompt.");
-                        continue;
+                                      ": ảnh tham chiếu → " + System.IO.Path.GetFileName(imagePath));
                     }
 
                     try
@@ -2994,12 +2009,12 @@ namespace tiktok_Omni
 
                 NotifyPhilosophyDraftDirty();
                 FlushPhilosophyDraftToDisk();
-                LogPhilosophy("Phân cảnh: " + totalScenes + " cảnh mới từ " + targets.Count + " dòng đã chọn.");
+                LogPhilosophy("Phân cảnh: " + totalScenes + " cảnh mới từ " + quoteJobs.Count + " câu đã chọn.");
                 SetPhilosophyProgress("Đã sinh " + totalScenes + " phân cảnh", 100);
             }
             catch (OperationCanceledException)
             {
-                LogPhilosophy("Triết lý: đã dừng tạo prompt phân cảnh.");
+                LogPhilosophy("Quote: đã dừng tạo prompt phân cảnh.");
                 SetPhilosophyProgress("Đã dừng", 0);
                 NotifyPhilosophyDraftDirty();
             }
@@ -3023,7 +2038,7 @@ namespace tiktok_Omni
             if (selectedItems.Count == 0)
             {
                 MessageBox.Show(
-                    "Chọn ít nhất một dòng trên lưới để xuất prompt.",
+                    "Chọn ít nhất một batch trên lưới để xuất prompt.",
                     "Tải Excel Prompt",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -3093,14 +2108,14 @@ namespace tiktok_Omni
             }
         }
 
+        private string ResolvePhilosophyPreRenderedScenesDirectory()
+        {
+            var profile = GetSelectedPhilosophyProfileName();
+            return PhilosophyProfileAssets.EnsurePreRenderedScenesDirectory(profile);
+        }
+
         private string GetPhilosophyVideoInputFolder()
         {
-            var text = (txtPhilosophyVideoInputFolder?.Text ?? string.Empty).Trim();
-            if (!string.IsNullOrEmpty(text))
-            {
-                return text;
-            }
-
             return ResolvePhilosophyPreRenderedScenesDirectory();
         }
 

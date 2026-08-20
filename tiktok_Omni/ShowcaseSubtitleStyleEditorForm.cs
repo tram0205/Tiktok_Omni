@@ -10,16 +10,29 @@ namespace tiktok_Omni
     {
         private readonly ShowcaseVideoItem _video;
         private readonly AppSettings _defaults;
+        private readonly bool _philosophyMode;
 
-        public ShowcaseSubtitleStyleEditorForm(ShowcaseVideoItem video, AppSettings defaults)
+        public ShowcaseSubtitleStyleEditorForm(ShowcaseVideoItem video, AppSettings defaults, bool philosophyMode = false)
         {
             _video = video ?? throw new ArgumentNullException(nameof(video));
             _defaults = defaults ?? new AppSettings();
+            _philosophyMode = philosophyMode;
             ShowcaseSubtitleStyleHelper.EnsureVideoDefaults(_video, _defaults);
+            if (_philosophyMode)
+            {
+                _video.ShowcaseHookSubtitleEnabled = false;
+                if (!_video.ShowcaseSubtitleEnabled)
+                {
+                    _video.ShowcaseSubtitleEnabled = true;
+                }
+            }
 
-            Text = "Phụ đề — " + ((_video.ProductName ?? string.Empty).Trim().Length > 0
-                ? _video.ProductName.Trim()
-                : "Showcase");
+            Text = _philosophyMode
+                ? "Phụ đề — Quote"
+                  + ((_video.ProductName ?? string.Empty).Trim().Length > 0 ? " · " + _video.ProductName.Trim() : string.Empty)
+                : "Phụ đề — " + ((_video.ProductName ?? string.Empty).Trim().Length > 0
+                    ? _video.ProductName.Trim()
+                    : "Showcase");
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;

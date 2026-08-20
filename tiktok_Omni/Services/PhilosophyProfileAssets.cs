@@ -29,37 +29,16 @@ namespace tiktok_Omni.Services
 
         public static IEnumerable<string> GetMusicSearchDirectories(string profileName, AppSettings settings)
         {
-            var root = GetAssetsRoot(profileName);
-            yield return Path.Combine(root, "music");
-            yield return root;
-            yield return VideoReupRemixService.GetMusicLibraryDirectory(settings);
+            _ = profileName;
+            return OmniAudioLibrary.GetMusicSearchDirectories(settings);
         }
 
-        /// <summary>Liệt kê tên file nhạc (.mp3/.wav/.m4a) từ profile + thư viện Video reup.</summary>
+        /// <summary>Liệt kê tên file nhạc từ kho dùng chung Assets\Audio\Music.</summary>
         public static List<string> EnumerateMusicFileNames(string profileName, AppSettings settings)
         {
-            var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var dir in GetMusicSearchDirectories(profileName, settings))
-            {
-                if (!Directory.Exists(dir))
-                {
-                    continue;
-                }
-
-                foreach (var ext in new[] { "*.mp3", "*.wav", "*.m4a" })
-                {
-                    foreach (var path in Directory.GetFiles(dir, ext, SearchOption.TopDirectoryOnly))
-                    {
-                        var name = Path.GetFileName(path);
-                        if (!string.IsNullOrWhiteSpace(name) && !names.ContainsKey(name))
-                        {
-                            names[name] = path;
-                        }
-                    }
-                }
-            }
-
-            return names.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+            _ = profileName;
+            OmniAudioLibrary.EnsureSharedDirectoriesExist(settings);
+            return OmniAudioLibrary.ListMusicFileNames(settings);
         }
 
         /// <summary>Giá trị ô Nhạc: tên file, đường dẫn đầy đủ, hoặc thư mục (legacy).</summary>
@@ -76,18 +55,10 @@ namespace tiktok_Omni.Services
                 return sel;
             }
 
-            foreach (var dir in GetMusicSearchDirectories(profileName, settings))
+            var shared = OmniAudioLibrary.ResolveMusicFilePath(sel, settings);
+            if (!string.IsNullOrWhiteSpace(shared))
             {
-                if (!Directory.Exists(dir))
-                {
-                    continue;
-                }
-
-                var path = Path.Combine(dir, sel);
-                if (File.Exists(path))
-                {
-                    return path;
-                }
+                return shared;
             }
 
             if (Directory.Exists(sel))
@@ -124,47 +95,41 @@ namespace tiktok_Omni.Services
 
         public static string TryPickMusicFile(string profileName, string mood)
         {
-            var root = GetAssetsRoot(profileName);
-            if (!Directory.Exists(root))
+            _ = profileName;
+            var names = OmniAudioLibrary.ListMusicFileNames(null);
+            if (names.Count == 0)
             {
                 return string.Empty;
             }
 
             var moodKey = (mood ?? string.Empty).Trim().ToLowerInvariant();
-            var candidates = new List<string>();
-
-            void Scan(string dir)
+            foreach (var name in names)
             {
-                if (!Directory.Exists(dir))
+                if (!string.IsNullOrEmpty(moodKey)
+                    && name.IndexOf(moodKey, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    return;
-                }
-
-                foreach (var ext in new[] { "*.mp3", "*.wav", "*.m4a" })
-                {
-                    candidates.AddRange(Directory.GetFiles(dir, ext, SearchOption.TopDirectoryOnly));
+                    var path = OmniAudioLibrary.ResolveMusicFilePath(name, null);
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        return path;
+                    }
                 }
             }
 
-            Scan(Path.Combine(root, "music"));
-            Scan(root);
-
-            if (candidates.Count == 0)
+            foreach (var name in names)
             {
-                return string.Empty;
+                if (name.IndexOf("bed", StringComparison.OrdinalIgnoreCase) >= 0
+                    || name.IndexOf("music", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    var path = OmniAudioLibrary.ResolveMusicFilePath(name, null);
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        return path;
+                    }
+                }
             }
 
-            var moodMatch = candidates.FirstOrDefault(f =>
-                Path.GetFileName(f).IndexOf(moodKey, StringComparison.OrdinalIgnoreCase) >= 0);
-            if (!string.IsNullOrWhiteSpace(moodMatch))
-            {
-                return moodMatch;
-            }
-
-            var generic = candidates.FirstOrDefault(f =>
-                Path.GetFileName(f).IndexOf("bed", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                Path.GetFileName(f).IndexOf("music", StringComparison.OrdinalIgnoreCase) >= 0);
-            return generic ?? candidates[0];
+            return OmniAudioLibrary.ResolveMusicFilePath(names[0], null);
         }
 
         public static string GetSharedBackgroundsRoot()
@@ -289,6 +254,32 @@ namespace tiktok_Omni.Services
         public static string EnsurePreRenderedScenesDirectory(string profileName)
         {
             var dir = GetPreRenderedScenesDirectory(profileName);
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        /// <summary>Assets\{profile}\broll\ — video nền B-Roll.</summary>
+        public static string GetBrollLibraryDirectory(string profileName)
+        {
+            return Path.Combine(GetAssetsRoot(profileName), "broll");
+        }
+
+        public static string EnsureBrollLibraryDirectory(string profileName)
+        {
+            var dir = GetBrollLibraryDirectory(profileName);
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        /// <summary>Assets\{profile}\background-images\ — ảnh tham chiếu Veo I2V / mascot.</summary>
+        public static string GetMascotImageLibraryDirectory(string profileName)
+        {
+            return Path.Combine(GetAssetsRoot(profileName), "background-images");
+        }
+
+        public static string EnsureMascotImageLibraryDirectory(string profileName)
+        {
+            var dir = GetMascotImageLibraryDirectory(profileName);
             Directory.CreateDirectory(dir);
             return dir;
         }

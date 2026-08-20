@@ -130,14 +130,22 @@ namespace tiktok_Omni
         }
 
         /// <summary>Đóng app từ console Ctrl+C (dotnet run).</summary>
-        internal void ShutdownAndClose()
+        internal void ShutdownAndClose(bool fromConsole = false)
         {
             if (IsDisposed || Disposing)
             {
                 return;
             }
 
+            if (fromConsole)
+            {
+                _consoleFastExit = true;
+            }
+
+            _applicationClosing = true;
+            CloseAllAuxiliaryFormsOnExit();
             ShutdownAllAutomationWork();
+            CancelAllApplicationWorkForEmergencyStop();
             Close();
         }
     }

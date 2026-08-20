@@ -169,12 +169,10 @@ namespace tiktok_Omni
         private TextBox txtMascotChannelTheme;
         private List<string> _mascotPreviewSceneScripts = new List<string>();
         private List<string> _mascotPreviewImagePaths = new List<string>();
-        private ComboBox cbPhilosophyProfile;
         private ComboBox cbMascotProfile;
         private GroupBox grpAiRenderProgress;
         private TableLayoutPanel tblAiRenderSlots;
         private Label lblPhilosophyPrereq;
-        private Button btnPhilosophyOpenAssets;
         private Label lblPhilosophyProgress;
         private ProgressBar pbPhilosophyProgress;
         private RichTextBox rtbPhilosophyLog;
@@ -294,10 +292,12 @@ namespace tiktok_Omni
         private bool _videoReupPipelineReady;
         private bool _videoReupGeminiReady;
         private AppSettings _videoReupSettingsSnap;
+        private AppSettings _philosophySettingsSnap;
         private Label lblVideoReupMusicPick;
         private ComboBox cbVideoReupMusic;
         private Button btnVideoReupOpenMusicFolder;
         private Button btnVideoReupOpenHookSfxFolder;
+        private Button btnVideoReupOpenLogoLibrary;
         private Label lblVideoReupMusicPathHint;
         private ToolTip _tipVideoReupMusicPath;
         private DateTime _lastVideoReupMusicAutoRefreshUtc = DateTime.MinValue;
@@ -422,19 +422,26 @@ namespace tiktok_Omni
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
+            _applicationClosing = true;
+            CloseAllAuxiliaryFormsOnExit();
             ShutdownAllAutomationWork();
+            CancelAllApplicationWorkForEmergencyStop();
 
             try
             {
                 FlushVideoReupDraftToDisk();
                 FlushSlideshowDraftToDisk();
                 FlushShowcaseDraftToDisk();
+                FlushPhilosophyDraftToDisk();
                 FlushAffiliateDraftToDisk();
                 FlushHuntProductDraftToDisk();
                 FlushAffiliateHuntResultsOnExit();
                 SaveSchedule();
                 PersistWarmupQueueOnAppExit();
-                SaveUiNavigationStateSync();
+                if (!_consoleFastExit)
+                {
+                    SaveUiNavigationStateSync();
+                }
             }
             catch
             {
@@ -445,10 +452,47 @@ namespace tiktok_Omni
             _slideshowDraftTimer?.Dispose();
             _showcaseDraftTimer?.Stop();
             _showcaseDraftTimer?.Dispose();
+            _philosophyDraftTimer?.Stop();
+            _philosophyDraftTimer?.Dispose();
             _videoReupDraftTimer?.Stop();
             _videoReupDraftTimer?.Dispose();
             _jobWorkerService?.Dispose();
             _globalJobQueue?.Dispose();
+        }
+
+        private bool ShouldAllowInteractivePrompts()
+        {
+            return !_applicationClosing && !IsDisposed && !Disposing;
+        }
+
+        private void CloseAllAuxiliaryFormsOnExit()
+        {
+            Form[] openForms;
+            try
+            {
+                openForms = Application.OpenForms.Cast<Form>().ToArray();
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (var form in openForms)
+            {
+                if (form == null || ReferenceEquals(form, this) || form.IsDisposed)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    form.Close();
+                }
+                catch
+                {
+                    // ignored on exit
+                }
+            }
         }
 
         private void InitializeTheme()
@@ -789,14 +833,14 @@ namespace tiktok_Omni
                 ["Music Volume (%)"] = "Âm lượng nhạc (%)",
                 ["Avatar Identity Pack (3-5 ảnh)"] = "Bộ nhận diện Avatar (3-5 ảnh)",
                 ["Loại video"] = "Loại video",
-                ["Triết lý/Quote"] = "Triết lý/Quote",
+                ["Quote"] = "Quote",
                 ["Product Slideshow"] = "Sản phẩm (Slideshow)",
                 ["Affiliate Deep"] = "Affiliate chuyên sâu",
                 ["Mascot Story"] = "Mascot Story",
                 ["Review Script before Render"] = "Duyệt kịch bản trước render",
                 ["Run Mascot Story Pipeline"] = "Render Mascot Story",
                 ["Run Affiliate Deep Video (4 scenes)"] = "Render Affiliate chuyên sâu",
-                ["Run Philosophy/Quote Video"] = "Chạy video Triết lý/Quote",
+                ["Run Philosophy/Quote Video"] = "Chạy video Quote",
                 ["Copy Prompt"] = "Sao chép",
                 ["Browse"] = "Duyệt...",
                 ["Save Settings"] = "Lưu cài đặt",
@@ -1826,6 +1870,11 @@ namespace tiktok_Omni
             if (btnVideoReupOpenHookSfxFolder != null)
             {
                 btnVideoReupOpenHookSfxFolder.Enabled = true;
+            }
+
+            if (btnVideoReupOpenLogoLibrary != null)
+            {
+                btnVideoReupOpenLogoLibrary.Enabled = true;
             }
 
             if (txtVideoReupVideoUrl != null)
@@ -5523,8 +5572,17 @@ namespace tiktok_Omni
 
         private string GetSelectedPhilosophyProfileName()
         {
-            var name = cbPhilosophyProfile?.SelectedItem?.ToString();
-            return ProfileScopedPaths.ResolveProfileName(name);
+            var batches = GetPhilosophyTargetBatchesFromGrid();
+            foreach (var batch in batches)
+            {
+                var row = (batch?.ProfileName ?? string.Empty).Trim();
+                if (!string.IsNullOrEmpty(row))
+                {
+                    return ProfileScopedPaths.ResolveProfileName(row);
+                }
+            }
+
+            return "default";
         }
 
         private async Task<int> EnqueuePhilosophyJobsFromLinesAsync(string[] lines, string profileName, AppSettings settings)
@@ -5556,7 +5614,7 @@ namespace tiktok_Omni
                     ScheduledPostUtc = DateTime.UtcNow.AddHours(2)
                 };
                 var shortTitle = quote.Length > 40 ? quote.Substring(0, 40) + "…" : quote;
-                EnqueuePhilosophyJob(payload, "Triết lý: " + shortTitle);
+                EnqueuePhilosophyJob(payload, "Quote: " + shortTitle);
                 enqueued++;
             }
 
@@ -5583,7 +5641,7 @@ namespace tiktok_Omni
 
             _globalJobQueue.Enqueue(job);
             TrackPhilosophyJob(job.Id, payload, title);
-            Log($"[JobQueue] Đã đẩy job Triết lý vào hàng đợi: {title}");
+            Log($"[JobQueue] Đã đẩy job Quote vào hàng đợi: {title}");
         }
 
         private void RefreshPhilosophyPrereqLabel(AppSettings settings = null)
@@ -5607,7 +5665,7 @@ namespace tiktok_Omni
                     ? Color.FromArgb(120, 220, 160)
                     : Color.FromArgb(255, 180, 120);
                 lblPhilosophyPrereq.Text = ready
-                    ? "✓ Sẵn sàng tạo video — thêm hàng / sinh script rồi bấm «Bắt đầu Render»."
+                    ? "✓ Sẵn sàng tạo video — thêm batch / bấm «Tạo nội dung Gemini» rồi «Render video»."
                     : "⚠ Cần cấu hình trước (tab Cài đặt):\r\n" + blockers.Replace("\r\n", "  •  ");
             }
 
@@ -5633,46 +5691,24 @@ namespace tiktok_Omni
             }
         }
 
-        private void btnPhilosophyOpenAssets_Click(object sender, EventArgs e)
-        {
-            var profile = GetSelectedPhilosophyProfileName();
-            var assetsDir = PhilosophyProfileAssets.GetAssetsRoot(profile);
-            try
-            {
-                Directory.CreateDirectory(assetsDir);
-                Process.Start(new ProcessStartInfo(assetsDir) { UseShellExecute = true });
-                LogPhilosophy("Đã mở thư mục Assets: " + assetsDir);
-            }
-            catch (Exception ex)
-            {
-                LogPhilosophy("Không mở được thư mục Assets: " + ex.Message);
-            }
-        }
-
         private void RefreshPhilosophyProfileCombo(AppSettings settings)
         {
-            if (cbPhilosophyProfile == null)
+            if (_colPhilosophyProfile == null)
             {
                 return;
             }
 
-            var previous = cbPhilosophyProfile.SelectedItem?.ToString();
-            cbPhilosophyProfile.Items.Clear();
-            cbPhilosophyProfile.Items.Add("default");
-            foreach (var profile in settings?.Profiles ?? new List<AutomationProfile>())
+            RefreshGridProfileComboSource(settings);
+            if (_philosophyBatchBindingList != null)
             {
-                var name = (profile?.Name ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(name) || cbPhilosophyProfile.Items.Contains(name))
+                foreach (var batch in _philosophyBatchBindingList)
                 {
-                    continue;
+                    EnsureProfileComboIncludes(batch?.ProfileName);
                 }
-
-                cbPhilosophyProfile.Items.Add(name);
             }
 
-            var target = string.IsNullOrWhiteSpace(previous) ? "default" : previous.Trim();
-            var index = cbPhilosophyProfile.Items.IndexOf(target);
-            cbPhilosophyProfile.SelectedIndex = index >= 0 ? index : 0;
+            ApplyGridProfileComboColumn(dgvPhilosophyScripts, "colPhilosophyProfile");
+            dgvPhilosophyScripts?.Invalidate();
         }
 
         private void LogPhilosophy(string message)
@@ -5697,7 +5733,9 @@ namespace tiktok_Omni
             rtbPhilosophyLog.SelectionStart = rtbPhilosophyLog.TextLength;
             rtbPhilosophyLog.SelectionLength = 0;
             rtbPhilosophyLog.SelectionColor = isError ? Color.FromArgb(255, 120, 120) : Color.FromArgb(190, 195, 205);
+            rtbPhilosophyLog.SelectionCharOffset = PhilosophyLogLineSpacing;
             rtbPhilosophyLog.AppendText(line + Environment.NewLine);
+            rtbPhilosophyLog.SelectionColor = Color.FromArgb(190, 195, 205);
             rtbPhilosophyLog.ScrollToCaret();
         }
 
@@ -7879,6 +7917,7 @@ namespace tiktok_Omni
                 LoadVideoReupDraftIntoGrid();
                 LoadSlideshowDraftIntoBuffer();
                 LoadShowcaseDraftIntoBuffer();
+                LoadPhilosophyDraftIntoGrid();
                 InitializeShowcaseTrashMaintenance();
                 LoadAffiliateDraftIntoGrid();
                 LoadHuntProductDraftIntoGrid();
@@ -8733,26 +8772,8 @@ namespace tiktok_Omni
         {
             try
             {
-                var s = await GetSettingsSnapshotForVideoReupMusicAsync().ConfigureAwait(true);
-                var dir = VideoReupRemixService.GetMusicLibraryDirectory(s);
-                VideoReupRemixService.EnsureMusicLibraryDirectoryExists(s);
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = "\"" + dir + "\"",
-                    UseShellExecute = true
-                });
+                OpenShowcaseAudioLibraryAsync(ShowcaseAudioLibraryForm.LibraryKind.BackgroundMusic);
                 await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
-                Log("Video reup nhạc: đã mở thư mục → " + dir);
-                MessageBox.Show(
-                    this,
-                    "Đã mở Assets\\Audio\\Music trong File Explorer.\r\n\r\n" +
-                    "• Copy file .mp3 / .wav / .m4a vào thư mục đó.\r\n" +
-                    "• Quay lại tab Video reup — app tự cập nhật danh sách nhạc.\r\n" +
-                    "• SFX dùng chung: Assets\\Audio\\Sfx.",
-                    "Kho nhạc dùng chung",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
@@ -8764,31 +8785,18 @@ namespace tiktok_Omni
         {
             try
             {
-                var s = await GetSettingsSnapshotForVideoReupMusicAsync().ConfigureAwait(true);
-                var dir = VideoReupRemixService.GetHookSfxLibraryDirectory(s);
-                VideoReupRemixService.EnsureHookSfxLibraryDirectoryExists(s);
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = "\"" + dir + "\"",
-                    UseShellExecute = true
-                });
+                OpenShowcaseAudioLibraryAsync(ShowcaseAudioLibraryForm.LibraryKind.SoundEffects);
                 await RefreshVideoReupMusicComboAsync().ConfigureAwait(true);
-                Log("Video reup SFX: đã mở thư mục → " + dir);
-                MessageBox.Show(
-                    this,
-                    "Đã mở Assets\\Audio\\Sfx trong File Explorer.\r\n\r\n" +
-                    "• Copy file .mp3 / .wav / .m4a / .ogg (whoosh, ding, …) vào thư mục.\r\n" +
-                    "• Chọn file trong cột «SFX Hook» trên lưới (app tự làm mới danh sách).\r\n" +
-                    "• Showcase dùng cùng kho SFX (tab Hiệu ứng).",
-                    "Kho SFX dùng chung",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
-                Log("Video reup SFX hook: " + ex.Message);
+                Log("Video reup SFX: " + ex.Message);
             }
+        }
+
+        private void btnVideoReupOpenLogoLibrary_Click(object sender, EventArgs e)
+        {
+            OpenShowcaseLogoLibraryAsync();
         }
 
         private async Task WarmupBundledToolingInBackgroundAsync()
@@ -9881,7 +9889,7 @@ namespace tiktok_Omni
                     }
                     else
                     {
-                        throw new FileNotFoundException("Không tìm thấy file video Triết lý.", payload.OutputPath);
+                        throw new FileNotFoundException("Không tìm thấy file video Quote.", payload.OutputPath);
                     }
                 }
                 else if (item.JobType == ApprovalJobType.VideoReup)
