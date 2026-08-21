@@ -21,8 +21,6 @@ namespace tiktok_Omni.Services
             "thế nhưng",
             "bởi vì",
             "nhưng",
-            "mà",
-            "vì",
             "nên",
             "còn",
             "lại"
@@ -241,7 +239,14 @@ namespace tiktok_Omni.Services
         }
 
         /// <summary>Chuẩn hóa khoảng trắng và dấu câu (không gọi API).</summary>
-        public static string NormalizePunctuation(string rawText)
+        public static string NormalizePunctuation(string rawText) =>
+            NormalizePunctuation(rawText, injectCommaHeuristics: true);
+
+        /// <summary>Quote triết lý / text người dùng đã sửa — giữ dấu câu tay, không tự chèn phẩy.</summary>
+        public static string NormalizeQuotePunctuation(string rawText) =>
+            NormalizePunctuation(rawText, injectCommaHeuristics: false);
+
+        private static string NormalizePunctuation(string rawText, bool injectCommaHeuristics)
         {
             var s = (rawText ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(s))
@@ -251,29 +256,57 @@ namespace tiktok_Omni.Services
 
             s = s.Normalize(NormalizationForm.FormC);
             s = WhitespaceRegex.Replace(s, " ");
-            s = Regex.Replace(s, @"\s+([,\.;:!?\…])", "$1");
-            s = Regex.Replace(s, @"([,\.;:!?\…])([^\s""'])", "$1 $2");
-            s = Regex.Replace(s, @"\.{2,}", ".");
+            s = CollapseSpacedPeriodEllipsis(s);
+            s = Regex.Replace(s, @"\.{4,}", "...");
+            s = Regex.Replace(s, @"\.{3}", "\uE001");
+            s = s.Replace('…', '\uE001');
+
+            s = Regex.Replace(s, @"\s+([,\.;:!?])", "$1");
+            s = Regex.Replace(s, @"([,\.;:!?])([^\s""',.;:!?…])", "$1 $2");
             s = Regex.Replace(s, @",{2,}", ",");
 
-            foreach (var conj in CommaBeforeConjunctions)
+            if (injectCommaHeuristics)
             {
-                var pattern = @"(\S)\s+(" + Regex.Escape(conj) + @")(\s+)";
-                s = Regex.Replace(
-                    s,
-                    pattern,
-                    m => EndsWithClausePunctuation(m.Groups[1].Value)
-                        ? m.Groups[1].Value + " " + m.Groups[2].Value + m.Groups[3].Value
-                        : m.Groups[1].Value + ", " + m.Groups[2].Value + m.Groups[3].Value,
-                    RegexOptions.IgnoreCase);
+                foreach (var conj in CommaBeforeConjunctions)
+                {
+                    var pattern = @"(\S+)\s+(" + Regex.Escape(conj) + @")(\s+)";
+                    s = Regex.Replace(
+                        s,
+                        pattern,
+                        m => EndsWithClausePunctuation(m.Groups[1].Value)
+                            ? m.Groups[1].Value + " " + m.Groups[2].Value + m.Groups[3].Value
+                            : m.Groups[1].Value + ", " + m.Groups[2].Value + m.Groups[3].Value,
+                        RegexOptions.IgnoreCase);
+                }
             }
 
+            s = s.Replace("\uE001", "...");
+            s = CollapseSpacedPeriodEllipsis(s);
             s = Regex.Replace(s, @"\s+", " ").Trim();
             if (!Regex.IsMatch(s, @"[\.!\?…]$"))
             {
                 s = s.TrimEnd(',', ';', ':', ' ') + ".";
             }
 
+            return s;
+        }
+
+        /// <summary>Gom «. .» / «..» / «...» về một dấu chấm (quote triết lý).</summary>
+        public static string FixSpacedPeriods(string text)
+        {
+            var s = CollapseSpacedPeriodArtifacts(text);
+            s = Regex.Replace(s, @"\.{2,}", ".");
+            return s.Replace('…', '.');
+        }
+
+        /// <summary>Chỉ sửa chấm bị tách khoảng trắng «. .» — không đụng «...» viết liền.</summary>
+        private static string CollapseSpacedPeriodEllipsis(string text) => CollapseSpacedPeriodArtifacts(text);
+
+        private static string CollapseSpacedPeriodArtifacts(string text)
+        {
+            var s = text ?? string.Empty;
+            s = Regex.Replace(s, @"(?:\.\s+){2,}\.", ".");
+            s = Regex.Replace(s, @"\.\s+\.", ".");
             return s;
         }
 

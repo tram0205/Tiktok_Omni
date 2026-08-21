@@ -24,7 +24,8 @@ namespace tiktok_Omni.Services.Showcase
             string hookStyleKey,
             bool emphaticHook,
             bool showcaseExpressiveBody,
-            bool emphaticCta = false)
+            bool emphaticCta = false,
+            bool philosophyQuote = false)
         {
             voiceBase = voiceBase ?? new EdgeTtsSynthesisOptions();
             var styleKey = NormalizeStyleKey(hookStyleKey);
@@ -51,17 +52,24 @@ namespace tiktok_Omni.Services.Showcase
                 pitchHz = style.BodyPitchHz + 1;
                 volumePct = style.BodyVolumePct + 2;
             }
+            else if (philosophyQuote)
+            {
+                // Quote triết lý: trầm có nhịp, nhấn qua volume/pitch — không phạt −5% như thân flat.
+                rateDelta = style.BodyRateDelta + 5;
+                pitchHz = style.BodyPitchHz + 1;
+                volumePct = style.BodyVolumePct + 2;
+            }
             else if (showcaseExpressiveBody)
             {
-                rateDelta = style.BodyRateDelta - 2;
-                pitchHz = style.BodyPitchHz - 1;
-                volumePct = style.BodyVolumePct - 3;
+                rateDelta = style.BodyRateDelta - 1;
+                pitchHz = style.BodyPitchHz;
+                volumePct = style.BodyVolumePct - 1;
             }
             else
             {
-                rateDelta = style.BodyRateDelta - 5;
-                pitchHz = style.BodyPitchHz - 2;
-                volumePct = style.BodyVolumePct - 5;
+                rateDelta = style.BodyRateDelta - 3;
+                pitchHz = style.BodyPitchHz - 1;
+                volumePct = style.BodyVolumePct - 3;
             }
 
             return new EdgeTtsSynthesisOptions
@@ -78,15 +86,15 @@ namespace tiktok_Omni.Services.Showcase
             switch (styleKey)
             {
                 case HookStyleCatalog.StyleNoidau:
-                    return new StyleProsody(-3, -3, 0, -9, -4, -6);
+                    return new StyleProsody(-2, -2, 2, -4, -2, -2);
                 case HookStyleCatalog.StyleBocphot:
-                    return new StyleProsody(7, 4, 9, -3, 0, -1);
+                    return new StyleProsody(8, 4, 8, -1, 1, 1);
                 case HookStyleCatalog.StyleHuongdan:
-                    return new StyleProsody(3, 2, 4, -6, 0, -3);
+                    return new StyleProsody(4, 2, 5, -2, 0, 0);
                 case HookStyleCatalog.StyleFomo:
-                    return new StyleProsody(9, 5, 12, -2, 1, 1);
+                    return new StyleProsody(10, 5, 10, 1, 2, 3);
                 case HookStyleCatalog.StyleKechuyen:
-                    return new StyleProsody(-5, -4, -1, -11, -3, -7);
+                    return new StyleProsody(-3, -3, 0, -5, -2, -3);
                 default:
                     return GetStyleProsody(HookStyleCatalog.StyleHuongdan);
             }

@@ -217,19 +217,42 @@ namespace tiktok_Omni.Services
             bool emphaticHook,
             bool showcaseExpressiveBody,
             ShowcaseTtsRenderOptions segmentTts = null,
-            bool emphaticCta = false)
+            bool emphaticCta = false,
+            bool philosophyQuote = false)
         {
-            object baseSettings = emphaticHook
-                ? CreateVietnameseHookVoiceSettings()
-                : emphaticCta
-                    ? CreateShowcaseCtaVoiceSettings()
-                    : showcaseExpressiveBody
-                        ? CreateShowcaseBodyVoiceSettings()
-                        : CreateVietnameseNarrationVoiceSettings();
+            object baseSettings = philosophyQuote
+                ? CreateVietnameseNarrationVoiceSettings()
+                : emphaticHook
+                    ? CreateVietnameseHookVoiceSettings()
+                    : emphaticCta
+                        ? CreateShowcaseCtaVoiceSettings()
+                        : showcaseExpressiveBody
+                            ? CreateShowcaseBodyVoiceSettings()
+                            : CreateVietnameseNarrationVoiceSettings();
 
             if (segmentTts == null)
             {
                 return baseSettings;
+            }
+
+            if (philosophyQuote)
+            {
+                var quoteToneId = segmentTts.ElevenToneId;
+                if (!ShowcaseElevenToneHelper.HasVoiceSettingsOverride(quoteToneId))
+                {
+                    return baseSettings;
+                }
+
+                ShowcaseElevenToneHelper.ResolveEffectiveVoiceSettings(
+                    quoteToneId,
+                    segmentTts.ElevenCustomStabilityPercent,
+                    segmentTts.ElevenCustomSimilarityPercent,
+                    segmentTts.ElevenCustomStylePercent,
+                    out var quoteStability,
+                    out var quoteSimilarity,
+                    out var quoteStyle);
+
+                return BuildVoiceSettingsObject(quoteStability, quoteSimilarity, quoteStyle);
             }
 
             if (emphaticHook)
@@ -281,13 +304,14 @@ namespace tiktok_Omni.Services
             bool showcaseExpressiveBody = false,
             string languageCodeOverride = null,
             ShowcaseTtsRenderOptions segmentTts = null,
-            bool emphaticCta = false)
+            bool emphaticCta = false,
+            bool philosophyQuote = false)
         {
             var sanitized = VietnameseTtsTextNormalizer.SanitizeForElevenLabsRequest(text);
-            var cleanText = emphaticHook || emphaticCta || showcaseExpressiveBody
+            var cleanText = emphaticHook || emphaticCta || showcaseExpressiveBody || philosophyQuote
                 ? sanitized
                 : ApplyDeepPauses(sanitized);
-            var voiceSettings = ResolveVoiceSettings(emphaticHook, showcaseExpressiveBody, segmentTts, emphaticCta);
+            var voiceSettings = ResolveVoiceSettings(emphaticHook, showcaseExpressiveBody, segmentTts, emphaticCta, philosophyQuote);
             var lang = (languageCodeOverride ?? string.Empty).Trim().ToLowerInvariant();
             if (string.IsNullOrEmpty(lang))
             {

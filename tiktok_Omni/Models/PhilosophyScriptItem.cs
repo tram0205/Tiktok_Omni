@@ -22,13 +22,16 @@ namespace tiktok_Omni.Models
         public string MusicFolder { get; set; } = string.Empty;
 
         /// <summary>Âm lượng nhạc nền per-quote (0–100%).</summary>
-        public int MusicVolumePercent { get; set; } = 20;
+        public int MusicVolumePercent { get; set; } = PhilosophyAudioDefaults.DefaultMusicVolumePercent;
 
         /// <summary>Tốc độ thoại per-quote (50–200%).</summary>
         public int NarrationSpeedPercent { get; set; } = 100;
 
         /// <summary>Tiếng đệm per-quote (lưới Âm thanh).</summary>
         public string AmbientKey { get; set; } = string.Empty;
+
+        /// <summary>Gemini gợi ý Edge style (ke_chuyen, noi_dau, …) — sync lên batch.</summary>
+        public string EdgeStyleKey { get; set; } = string.Empty;
 
         /// <summary>Legacy — không dùng khi quote thuộc batch; đọc từ <see cref="PhilosophyBatchItem"/>.</summary>
         public string SubtitleStyleLabel { get; set; } = string.Empty;
@@ -89,5 +92,8 @@ namespace tiktok_Omni.Models
 
         /// <summary>Mode 3: thư mục chứa video phân cảnh (.mp4) cho dòng này; trống = dùng «Thư mục video» trên thanh công cụ.</summary>
         public string SceneVideoFolder { get; set; } = string.Empty;
+
+        /// <summary>Mode 4: danh sách ảnh zoom Ken Burns (theo thứ tự ghép).</summary>
+        public List<string> ZoomImagePaths { get; set; } = new List<string>();
     }
 }

@@ -11,11 +11,15 @@ namespace tiktok_Omni.Services
     {
         public const string BackgroundModeBroll = "B-roll";
         public const string BackgroundModeAi = "AI tạo";
+        public const string BackgroundModeZoom = "Zoom ảnh";
+        public const string BackgroundModeSlideshow = "Slideshow ảnh";
+        public const string BackgroundModeAiStillZoom = "AI ảnh → zoom";
+        public const string BackgroundModeZoomBrollHybrid = "Zoom + B-roll";
 
-        public const int DefaultMusicVolumePercent = 20;
+        public const int DefaultMusicVolumePercent = PhilosophyAudioDefaults.DefaultMusicVolumePercent;
 
         /// <summary>Linear gain cơ sở (~10% khi slider = 100%).</summary>
-        public const double MusicBedBaseVolume = 0.10d;
+        public const double MusicBedBaseVolume = 0.50d;
 
         private static readonly string[] AllowedQuoteMoods =
         {
@@ -49,13 +53,50 @@ namespace tiktok_Omni.Services
 
         public static string ToSimpleBackgroundModeLabel(int visualMode)
         {
-            var mode = PhilosophyVisualModes.Normalize(visualMode);
-            return mode == PhilosophyVisualModes.Broll ? BackgroundModeBroll : BackgroundModeAi;
+            switch (PhilosophyVisualModes.Normalize(visualMode))
+            {
+                case PhilosophyVisualModes.ImageSlideshow:
+                    return BackgroundModeSlideshow;
+                case PhilosophyVisualModes.AiStillZoom:
+                    return BackgroundModeAiStillZoom;
+                case PhilosophyVisualModes.ZoomBrollHybrid:
+                    return BackgroundModeZoomBrollHybrid;
+                case PhilosophyVisualModes.ImageZoom:
+                    return BackgroundModeZoom;
+                case PhilosophyVisualModes.Broll:
+                    return BackgroundModeBroll;
+                default:
+                    return BackgroundModeAi;
+            }
         }
 
         public static int FromSimpleBackgroundModeLabel(string label)
         {
             var t = (label ?? string.Empty).Trim();
+            if (string.Equals(t, BackgroundModeZoomBrollHybrid, StringComparison.OrdinalIgnoreCase)
+                || t.IndexOf("zoom + b-roll", StringComparison.OrdinalIgnoreCase) >= 0
+                || t.IndexOf("hybrid", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return PhilosophyVisualModes.ZoomBrollHybrid;
+            }
+
+            if (string.Equals(t, BackgroundModeAiStillZoom, StringComparison.OrdinalIgnoreCase)
+                || t.IndexOf("ai ảnh", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return PhilosophyVisualModes.AiStillZoom;
+            }
+
+            if (string.Equals(t, BackgroundModeSlideshow, StringComparison.OrdinalIgnoreCase)
+                || t.IndexOf("slideshow", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return PhilosophyVisualModes.ImageSlideshow;
+            }
+
+            if (string.Equals(t, BackgroundModeZoom, StringComparison.OrdinalIgnoreCase))
+            {
+                return PhilosophyVisualModes.ImageZoom;
+            }
+
             if (string.Equals(t, BackgroundModeBroll, StringComparison.OrdinalIgnoreCase)
                 || t.IndexOf("b-roll", StringComparison.OrdinalIgnoreCase) >= 0
                 || t.IndexOf("broll", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -74,8 +115,13 @@ namespace tiktok_Omni.Services
             }
 
             var broll = batch.Quotes.Count(q => PhilosophyVisualModes.Normalize(q.VisualMode) == PhilosophyVisualModes.Broll);
-            var ai = batch.Quotes.Count - broll;
-            var summary = broll + " B-roll · " + ai + " AI";
+            var zoom = batch.Quotes.Count(q => PhilosophyVisualModes.Normalize(q.VisualMode) == PhilosophyVisualModes.ImageZoom);
+            var slideshow = batch.Quotes.Count(q => PhilosophyVisualModes.Normalize(q.VisualMode) == PhilosophyVisualModes.ImageSlideshow);
+            var hybrid = batch.Quotes.Count(q => PhilosophyVisualModes.Normalize(q.VisualMode) == PhilosophyVisualModes.ZoomBrollHybrid);
+            var aiStill = batch.Quotes.Count(q => PhilosophyVisualModes.Normalize(q.VisualMode) == PhilosophyVisualModes.AiStillZoom);
+            var ai = batch.Quotes.Count - broll - zoom - slideshow - hybrid - aiStill;
+            var summary = broll + " B-roll · " + zoom + " Zoom · " + slideshow + " Slideshow · "
+                          + hybrid + " Hybrid · " + aiStill + " AI ảnh · " + ai + " AI";
             var refPath = (batch.ReferenceImagePath ?? string.Empty).Trim();
             if (!string.IsNullOrEmpty(refPath) && File.Exists(refPath))
             {
@@ -117,6 +163,14 @@ namespace tiktok_Omni.Services
         public static double ResolveMusicBedLinearVolume(int volumePercent) =>
             MusicBedBaseVolume * Math.Max(0, Math.Min(100, volumePercent)) / 100d;
 
+        public static int ResolveAmbientVolumePercent() => PhilosophyAudioDefaults.DefaultAmbientVolumePercent;
+
+        public static double ResolveAmbientBedLinearVolume(int? volumePercent = null)
+        {
+            var pct = volumePercent ?? ResolveAmbientVolumePercent();
+            return Math.Max(0, Math.Min(100, pct)) / 100d;
+        }
+
         public static int ClampMusicVolumePercent(int volumePercent) =>
             Math.Max(0, Math.Min(100, volumePercent));
 
@@ -140,27 +194,14 @@ namespace tiktok_Omni.Services
                 ? ShowcaseNarrationSpeedHelper.ClampManualPercent(speedPercent)
                 : ShowcaseNarrationSpeedHelper.DefaultManualSpeedPercent;
 
-        public static void EnsureBatchAudioDefaults(PhilosophyBatchItem batch)
+        public static void EnsureBatchAudioDefaults(PhilosophyBatchItem batch, AppSettings settings = null)
         {
             if (batch == null)
             {
                 return;
             }
 
-            if (batch.MusicVolumePercent <= 0)
-            {
-                batch.MusicVolumePercent = DefaultMusicVolumePercent;
-            }
-
-            if (batch.BodyNarrationSpeedPercent <= 0)
-            {
-                batch.BodyNarrationSpeedPercent = ShowcaseNarrationSpeedHelper.DefaultManualSpeedPercent;
-            }
-
-            if (string.IsNullOrWhiteSpace(batch.BodyVoiceLanguageId))
-            {
-                batch.BodyVoiceLanguageId = ShowcaseVoicePresetDimensions.Language.ViSouth;
-            }
+            PhilosophyAudioDefaults.ApplyToBatch(batch, settings);
 
             if (batch.Quotes == null)
             {
@@ -292,7 +333,7 @@ namespace tiktok_Omni.Services
             batch.AmbientKey = PhilosophyAmbientCatalog.NormalizeKey(first.AmbientKey);
         }
 
-        /// <summary>Profile + phụ đề thuộc batch — xóa bản sao legacy trên quote để không override batch.</summary>
+        /// <summary>Profile + nhãn legacy — giữ styling phụ đề per-quote (Gemini / popup Phụ đề).</summary>
         public static void ClearQuoteBatchOwnedFields(PhilosophyScriptItem quote)
         {
             if (quote == null)
@@ -302,21 +343,6 @@ namespace tiktok_Omni.Services
 
             quote.ProfileName = string.Empty;
             quote.SubtitleStyleLabel = string.Empty;
-            quote.SubtitlePosition = string.Empty;
-            quote.SubtitleFontName = string.Empty;
-            quote.SubtitleFontSize = 0;
-            quote.SubtitleAnimation = string.Empty;
-            quote.SubtitleBold = true;
-            quote.SubtitleItalic = false;
-            quote.SubtitleWordsPerLine = 0;
-            quote.SubtitlePrimaryColourAss = string.Empty;
-            quote.SubtitleSecondaryColourAss = string.Empty;
-            quote.SubtitleEnabled = true;
-            quote.SubtitleLookPreset = string.Empty;
-            quote.SubtitleDecorPreset = string.Empty;
-            quote.SubtitleHighlightColourAss = string.Empty;
-            quote.SubtitleDisplayQuote = string.Empty;
-            quote.SubtitleDisplayAnimation = string.Empty;
         }
 
         public static void NormalizeBatchQuoteOwnership(PhilosophyBatchItem batch)
@@ -360,6 +386,11 @@ namespace tiktok_Omni.Services
             batch.SubtitleHighlightColourAss = template.SubtitleHighlightColourAss ?? string.Empty;
             batch.SubtitleDisplayQuote = template.SubtitleDisplayQuote ?? string.Empty;
             batch.SubtitleDisplayAnimation = template.SubtitleDisplayAnimation ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(batch.SubtitleAnimation)
+                && !string.IsNullOrWhiteSpace(template.SubtitleDisplayAnimation))
+            {
+                batch.SubtitleAnimation = template.SubtitleDisplayAnimation;
+            }
         }
 
         public static string SuggestBRollFolder(string profileName, string topic, string mood)
@@ -368,11 +399,15 @@ namespace tiktok_Omni.Services
             var moodKey = (mood ?? "reflective").Trim().ToLowerInvariant();
             var topicKey = Slugify(topic);
 
+            var sharedRoot = ProfileScopedPaths.GetSharedBackgroundsDirectory();
             foreach (var candidate in new[]
                      {
+                         Path.Combine(sharedRoot, topicKey),
+                         Path.Combine(sharedRoot, moodKey),
+                         Path.Combine(sharedRoot, "Nature", moodKey),
+                         sharedRoot,
                          Path.Combine(PhilosophyProfileAssets.GetAssetsRoot(profile), "broll", topicKey),
                          Path.Combine(PhilosophyProfileAssets.GetAssetsRoot(profile), "broll", moodKey),
-                         Path.Combine(ProfileScopedPaths.GetSharedBackgroundsDirectory(), "Nature", moodKey),
                          Path.Combine(PhilosophyProfileAssets.GetAssetsRoot(profile), "broll")
                      })
             {
@@ -435,6 +470,60 @@ namespace tiktok_Omni.Services
             return names[0];
         }
 
+        /// <summary>Ánh xạ edge_style Gemini → HookStyleCatalog key.</summary>
+        public static string ResolveGeminiEdgeStyle(string suggestedStyleKey, string mood)
+        {
+            var raw = (suggestedStyleKey ?? string.Empty).Trim().ToLowerInvariant();
+            if (!string.IsNullOrEmpty(raw))
+            {
+                var exact = HookStyleCatalog.AllStyleKeys.FirstOrDefault(k =>
+                    string.Equals(k, raw, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(exact))
+                {
+                    return ShowcaseEdgeProsodyHelper.NormalizeStoredHookStyleKey(exact);
+                }
+
+                if (raw.Contains("chuyen") || raw.Contains("story") || raw.Contains("ke_chuyen"))
+                {
+                    return HookStyleCatalog.StyleKechuyen;
+                }
+
+                if (raw.Contains("noi") || raw.Contains("pain") || raw.Contains("dau"))
+                {
+                    return HookStyleCatalog.StyleNoidau;
+                }
+
+                if (raw.Contains("fomo"))
+                {
+                    return HookStyleCatalog.StyleFomo;
+                }
+
+                if (raw.Contains("huong") || raw.Contains("guide"))
+                {
+                    return HookStyleCatalog.StyleHuongdan;
+                }
+
+                if (raw.Contains("boc") || raw.Contains("phot"))
+                {
+                    return HookStyleCatalog.StyleBocphot;
+                }
+            }
+
+            switch ((mood ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "melancholic":
+                    return HookStyleCatalog.StyleNoidau;
+                case "hopeful":
+                    return HookStyleCatalog.StyleHuongdan;
+                case "intense":
+                    return HookStyleCatalog.StyleBocphot;
+                case "calm":
+                    return HookStyleCatalog.StyleKechuyen;
+                default:
+                    return HookStyleCatalog.StyleKechuyen;
+            }
+        }
+
         /// <summary>Ánh xạ tên file SFX Gemini gợi ý → tên file trong kho Assets\Audio\Sfx.</summary>
         public static string ResolveGeminiSfxFileName(AppSettings settings, string suggestedFileName, string mood)
         {
@@ -494,13 +583,11 @@ namespace tiktok_Omni.Services
 
             var profile = ProfileScopedPaths.ResolveProfileName(profileName);
             var mascot = PhilosophyGeminiBackgroundContext.BuildMascotContext(profile, settings);
-            var persona = (mascot?.TextSummary ?? string.Empty).Trim();
-            var personaBlock = string.IsNullOrEmpty(persona) ? string.Empty : persona + ". ";
+            var prefix = PhilosophyGeminiBackgroundContext.BuildMascotVeoPromptPrefix(mascot);
 
-            return "Vertical 9:16 cinematic philosophy video. " + personaBlock + "Topic: «"
+            return prefix + "Topic: «"
                    + TrimGridLabel(topic, 80, "quote") + "». Mood: " + mood + ". Quote context: «"
-                   + TrimGridLabel(content, 120, "") + "». Feature the profile mascot character with identity-consistent face, "
-                   + "hair and outfit; subtle motion, no on-screen text, atmospheric lighting matching mood.";
+                   + TrimGridLabel(content, 120, "") + "». Subtle character motion, no on-screen text, atmospheric lighting matching mood.";
         }
 
         public static List<PhilosophyBatchItem> MigrateLegacyScripts(

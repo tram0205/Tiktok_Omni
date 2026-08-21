@@ -37,7 +37,7 @@ namespace tiktok_Omni.Models
 
         public string AmbientKey { get; set; } = string.Empty;
 
-        public int MusicVolumePercent { get; set; } = 20;
+        public int MusicVolumePercent { get; set; } = PhilosophyAudioDefaults.DefaultMusicVolumePercent;
 
         // Giọng đọc quote (mirror Showcase body voice — popup Âm thanh)
         public string BodyTtsEngine { get; set; } = string.Empty;
@@ -119,9 +119,9 @@ namespace tiktok_Omni.Models
 
         public string LastError { get; set; } = string.Empty;
 
-        public int MinDurationSeconds { get; set; } = 15;
+        public int MinDurationSeconds { get; set; } = PhilosophyRenderOptions.QuotesDefaultMinSeconds;
 
-        public int MaxDurationSeconds { get; set; } = 60;
+        public int MaxDurationSeconds { get; set; } = PhilosophyRenderOptions.QuotesDefaultMaxSeconds;
 
         // Grid display (không persist riêng)
         public string TopicGridLabel

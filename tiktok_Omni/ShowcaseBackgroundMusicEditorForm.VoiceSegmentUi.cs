@@ -961,7 +961,8 @@ namespace tiktok_Omni
                 else if (edge)
                 {
                     var key = SelectedSegmentStyleKey(seg);
-                    if (ShowcaseEdgeProsodyHelper.TryGetPresetOffsets(key, out var rate, out var pitch))
+                    var philosophyQuote = _philosophyMode && !seg.IsHook;
+                    if (ShowcaseEdgeProsodyHelper.TryGetPresetOffsets(key, philosophyQuote, out var rate, out var pitch))
                     {
                         seg.TrkRate.Value = rate;
                         seg.TrkPitch.Value = pitch;
@@ -1232,6 +1233,11 @@ namespace tiktok_Omni
             else
             {
                 _video.ShowcaseBodyNarrationSpeedPercent = pct;
+            }
+
+            if (_philosophyMode && _philosophyBatch != null && !seg.IsHook)
+            {
+                _philosophyBatch.BodyNarrationSpeedPercent = pct;
             }
 
             ShowcaseNarrationSpeedHelper.SyncLegacyCombinedSpeedField(_video);
@@ -1715,6 +1721,11 @@ namespace tiktok_Omni
                 _bodyVoice.NarrationButtonRow.Controls.Add(_btnListenBodyNarration);
             }
 
+            if (_philosophyMode)
+            {
+                AttachPhilosophyQuoteBatchJellyButtons();
+            }
+
             LayoutVoiceNarrationButtons(_hookVoice);
             LayoutVoiceNarrationButtons(_bodyVoice);
         }
@@ -1766,6 +1777,19 @@ namespace tiktok_Omni
             if (_philosophyMode && !seg.IsHook && _btnRenderFullMixedAudio != null && _btnRenderFullMixedAudio.Visible)
             {
                 Form1.ResizeAppJellyButton(_btnRenderFullMixedAudio, minWidth: 96);
+            }
+
+            if (_philosophyMode && !seg.IsHook)
+            {
+                foreach (var btn in new[] { _btnPhilosophySuggestMood, _btnPhilosophyBatchVoice, _btnPhilosophyBatchRender })
+                {
+                    if (btn == null)
+                    {
+                        continue;
+                    }
+
+                    Form1.ResizeAppJellyButton(btn, minWidth: 96);
+                }
             }
 
             seg.NarrationButtonRow?.PerformLayout();

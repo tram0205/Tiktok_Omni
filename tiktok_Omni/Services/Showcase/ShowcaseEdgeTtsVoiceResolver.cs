@@ -9,20 +9,23 @@ namespace tiktok_Omni.Services.Showcase
             ShowcaseTtsRenderOptions options,
             bool emphaticHook = false,
             bool showcaseExpressiveBody = true,
-            bool emphaticCta = false)
+            bool emphaticCta = false,
+            bool philosophyQuote = false)
         {
             var voiceBase = ResolveVoiceBase(options);
             voiceBase = ShowcaseEdgeProsodyHelper.ApplyUserOffsets(
                 voiceBase,
                 options?.HookStyleKey,
                 options?.EdgeRateOffsetPercent ?? 0,
-                options?.EdgePitchOffsetHz ?? 0);
+                options?.EdgePitchOffsetHz ?? 0,
+                philosophyQuote);
             return ShowcaseEdgeHookStyleProsody.ApplySegmentProsody(
                 voiceBase,
                 options?.HookStyleKey,
                 emphaticHook,
                 showcaseExpressiveBody,
-                emphaticCta);
+                emphaticCta,
+                philosophyQuote);
         }
 
         public static EdgeTtsSynthesisOptions ResolveVoiceBase(ShowcaseTtsRenderOptions options)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services
@@ -28,8 +29,11 @@ namespace tiktok_Omni.Services
 
         public AssSubtitleGeneratorOptions SubtitleOptions { get; set; }
 
-        /// <summary>0 = B-Roll có sẵn, 1 = Veo T2V cảnh vật, 2 = Veo I2V mascot, 3 = Video tự làm sẵn.</summary>
+        /// <summary>0 = B-Roll, 1 = Veo T2V, 2 = Veo I2V, 3 = Video tự làm sẵn, 4 = Zoom ảnh.</summary>
         public int VisualMode { get; set; } = 0;
+
+        /// <summary>Mode 4: ảnh zoom Ken Burns (đường dẫn đầy đủ, theo thứ tự).</summary>
+        public List<string> ZoomImagePaths { get; set; } = new List<string>();
 
         /// <summary>Mode 3: thư mục chứa video phân cảnh tự làm sẵn.</summary>
         public string PreRenderedFolder { get; set; } = string.Empty;
@@ -46,10 +50,34 @@ namespace tiktok_Omni.Services
         public string StorageRootPath { get; set; } = string.Empty;
 
         /// <summary>Thời lượng video tối thiểu (giây) — mục tiêu Gemini/TTS khi tạo kịch bản.</summary>
-        public int MinDurationSeconds { get; set; } = 15;
+        public int MinDurationSeconds { get; set; } = QuotesDefaultMinSeconds;
 
         /// <summary>Thời lượng video tối đa (giây) — mục tiêu Gemini/TTS khi tạo kịch bản.</summary>
-        public int MaxDurationSeconds { get; set; } = 60;
+        public int MaxDurationSeconds { get; set; } = QuotesDefaultMaxSeconds;
+
+        public const int QuotesDefaultMinSeconds = 15;
+        public const int QuotesDefaultMaxSeconds = 20;
+        public const int StoryDefaultMinSeconds = 45;
+        public const int StoryDefaultMaxSeconds = 60;
+
+        public static bool IsStoryMode(string generationMode) =>
+            string.Equals(generationMode, "Story", StringComparison.OrdinalIgnoreCase);
+
+        public static (int MinSeconds, int MaxSeconds) GetDefaultDurationBounds(string generationMode) =>
+            IsStoryMode(generationMode)
+                ? (StoryDefaultMinSeconds, StoryDefaultMaxSeconds)
+                : (QuotesDefaultMinSeconds, QuotesDefaultMaxSeconds);
+
+        public static (int MinSeconds, int MaxSeconds) ResolveDurationBounds(
+            string generationMode,
+            int minSeconds,
+            int maxSeconds)
+        {
+            var defaults = GetDefaultDurationBounds(generationMode);
+            var min = minSeconds > 0 ? minSeconds : defaults.MinSeconds;
+            var max = maxSeconds > 0 ? maxSeconds : defaults.MaxSeconds;
+            return NormalizeDurationBounds(min, max);
+        }
 
         public bool BrandLogoEnabled { get; set; } = true;
 
@@ -70,6 +98,13 @@ namespace tiktok_Omni.Services
 
         /// <summary>Khoảng lặng tối đa sau khi đọc hết quote.</summary>
         public const double OutroPadMaxSeconds = 6d;
+
+        /// <summary>Outro cố định khi mix audio preview / thành phẩm nghe thử (nhạc thêm 3s rồi cắt).</summary>
+        public const double AudioMixOutroSeconds = 3d;
+
+        /// <summary>Thời lượng file mix audio = hết thoại + <see cref="AudioMixOutroSeconds"/>.</summary>
+        public static double ResolveAudioMixOutputDuration(double voiceSeconds) =>
+            Math.Max(0.5d, voiceSeconds) + AudioMixOutroSeconds;
 
         /// <summary>Outro linh hoạt 3–6s: dùng phần video nền còn lại sau giọng đọc (phân cảnh cuối).</summary>
         public static double ResolveOutroPadSeconds(double voiceSeconds, double backgroundSeconds)

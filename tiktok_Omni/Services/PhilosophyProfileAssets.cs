@@ -258,17 +258,16 @@ namespace tiktok_Omni.Services
             return dir;
         }
 
-        /// <summary>Assets\{profile}\broll\ — video nền B-Roll.</summary>
-        public static string GetBrollLibraryDirectory(string profileName)
+        /// <summary>Kho B-roll dùng chung mọi profile Video Quote: <c>Assets\Backgrounds\</c>.</summary>
+        public static string GetBrollLibraryDirectory(string profileName = null)
         {
-            return Path.Combine(GetAssetsRoot(profileName), "broll");
+            _ = profileName;
+            return ProfileScopedPaths.GetSharedBackgroundsDirectory();
         }
 
-        public static string EnsureBrollLibraryDirectory(string profileName)
+        public static string EnsureBrollLibraryDirectory(string profileName = null)
         {
-            var dir = GetBrollLibraryDirectory(profileName);
-            Directory.CreateDirectory(dir);
-            return dir;
+            return ProfileScopedPaths.GetSharedBackgroundsDirectory(ensureExists: true);
         }
 
         /// <summary>Assets\{profile}\background-images\ — ảnh tham chiếu Veo I2V / mascot.</summary>
@@ -280,6 +279,19 @@ namespace tiktok_Omni.Services
         public static string EnsureMascotImageLibraryDirectory(string profileName)
         {
             var dir = GetMascotImageLibraryDirectory(profileName);
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        /// <summary>Assets\{profile}\zoom-images\ — thư viện ảnh Ken Burns zoom (per-quote).</summary>
+        public static string GetZoomImageLibraryDirectory(string profileName)
+        {
+            return Path.Combine(GetAssetsRoot(profileName), "zoom-images");
+        }
+
+        public static string EnsureZoomImageLibraryDirectory(string profileName)
+        {
+            var dir = GetZoomImageLibraryDirectory(profileName);
             Directory.CreateDirectory(dir);
             return dir;
         }

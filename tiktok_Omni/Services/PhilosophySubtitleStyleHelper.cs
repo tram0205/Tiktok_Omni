@@ -86,6 +86,23 @@ namespace tiktok_Omni.Services
             return ShowcaseSubtitleStyleHelper.BuildBodyOptions(video, settings);
         }
 
+        public static AssSubtitleGeneratorOptions BuildOptionsForBatchQuote(
+            PhilosophyBatchItem batch,
+            PhilosophyScriptItem quote,
+            AppSettings settings = null)
+        {
+            if (batch == null)
+            {
+                throw new ArgumentNullException(nameof(batch));
+            }
+
+            var profile = PhilosophyBatchHelper.ResolveBatchProfileName(batch);
+            var video = PhilosophyBatchShowcaseSubtitleAdapter.ToShowcaseVideo(batch, profile);
+            PhilosophyBatchShowcaseSubtitleAdapter.ApplyQuoteSubtitleOverridesToVideo(video, quote);
+            ShowcaseSubtitleStyleHelper.EnsureVideoDefaults(video, settings);
+            return ShowcaseSubtitleStyleHelper.BuildBodyOptions(video, settings);
+        }
+
         public static AssSubtitleGeneratorOptions BuildOptions(PhilosophyScriptItem item, AppSettings settings = null)
         {
             if (item != null && settings != null && UsesShowcaseStyleFields(item))

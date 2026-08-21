@@ -61,7 +61,7 @@ namespace tiktok_Omni.Services
                     displayAnim = (batch.SubtitleDisplayAnimation ?? string.Empty).Trim();
                 }
 
-                video.Scenes.Add(new AiVideoGenInputItem
+                var scene = new AiVideoGenInputItem
                 {
                     ProductName = video.ProductName,
                     SceneTitle = "Câu " + (i + 1),
@@ -70,7 +70,9 @@ namespace tiktok_Omni.Services
                     ShowcaseSubtitleDisplayVoiceover = displayQuote,
                     ShowcaseSubtitleDisplayAnimation = displayAnim,
                     ShowcaseSubtitleDisplayDisabled = !batch.SubtitleEnabled
-                });
+                };
+                CopyQuoteSubtitleStyleToScene(quote, scene, batch.SubtitleEnabled);
+                video.Scenes.Add(scene);
             }
 
             return video;
@@ -109,8 +111,7 @@ namespace tiktok_Omni.Services
 
             for (var i = 0; i < quotes.Count && i < scenes.Count; i++)
             {
-                quotes[i].SubtitleDisplayQuote = scenes[i].ShowcaseSubtitleDisplayVoiceover ?? string.Empty;
-                quotes[i].SubtitleDisplayAnimation = scenes[i].ShowcaseSubtitleDisplayAnimation ?? string.Empty;
+                CopySceneSubtitleStyleToQuote(scenes[i], quotes[i]);
             }
 
             var first = quotes.FirstOrDefault();
@@ -156,6 +157,96 @@ namespace tiktok_Omni.Services
         {
             var t = (content ?? string.Empty).Trim();
             return t.Length <= 48 ? t : t.Substring(0, 47) + "…";
+        }
+
+        /// <summary>Áp styling per-quote lên video batch khi render từng câu.</summary>
+        public static void ApplyQuoteSubtitleOverridesToVideo(ShowcaseVideoItem video, PhilosophyScriptItem quote)
+        {
+            if (video == null || quote == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(quote.SubtitleLookPreset))
+            {
+                video.ShowcaseSubtitleLookPreset = quote.SubtitleLookPreset.Trim();
+            }
+
+            if (quote.SubtitleFontSize > 0)
+            {
+                video.ShowcaseSubtitleFontSize = quote.SubtitleFontSize;
+            }
+
+            if (!string.IsNullOrWhiteSpace(quote.SubtitlePosition))
+            {
+                video.ShowcaseSubtitlePosition = quote.SubtitlePosition.Trim();
+            }
+
+            var effect = (quote.SubtitleDisplayAnimation ?? string.Empty).Trim();
+            if (effect.Length == 0)
+            {
+                effect = (quote.SubtitleAnimation ?? string.Empty).Trim();
+            }
+
+            if (effect.Length > 0)
+            {
+                video.ShowcaseSubtitleAnimation = effect;
+            }
+
+            if (!string.IsNullOrWhiteSpace(quote.SubtitleHighlightColourAss))
+            {
+                video.ShowcaseSubtitleHighlightColourAss = quote.SubtitleHighlightColourAss.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(quote.SubtitleDecorPreset))
+            {
+                video.ShowcaseSubtitleDecorPreset = quote.SubtitleDecorPreset.Trim();
+            }
+
+            video.ShowcaseSubtitleEnabled = quote.SubtitleEnabled;
+        }
+
+        private static void CopyQuoteSubtitleStyleToScene(
+            PhilosophyScriptItem quote,
+            AiVideoGenInputItem scene,
+            bool batchSubtitleEnabled)
+        {
+            if (quote == null || scene == null)
+            {
+                return;
+            }
+
+            scene.ShowcaseSubtitleDisplayLookPreset = quote.SubtitleLookPreset ?? string.Empty;
+            scene.ShowcaseSubtitleDisplayFontSize = quote.SubtitleFontSize;
+            scene.ShowcaseSubtitleDisplayPosition = quote.SubtitlePosition ?? string.Empty;
+            scene.ShowcaseSubtitleDisplayHighlightColourAss = quote.SubtitleHighlightColourAss ?? string.Empty;
+            scene.ShowcaseSubtitleDisplayDecorPreset = quote.SubtitleDecorPreset ?? string.Empty;
+
+            var anim = (quote.SubtitleDisplayAnimation ?? string.Empty).Trim();
+            if (anim.Length == 0)
+            {
+                anim = (quote.SubtitleAnimation ?? string.Empty).Trim();
+            }
+
+            scene.ShowcaseSubtitleDisplayAnimation = anim;
+            scene.ShowcaseSubtitleDisplayDisabled = !quote.SubtitleEnabled || !batchSubtitleEnabled;
+        }
+
+        private static void CopySceneSubtitleStyleToQuote(AiVideoGenInputItem scene, PhilosophyScriptItem quote)
+        {
+            if (scene == null || quote == null)
+            {
+                return;
+            }
+
+            quote.SubtitleDisplayQuote = scene.ShowcaseSubtitleDisplayVoiceover ?? string.Empty;
+            quote.SubtitleDisplayAnimation = scene.ShowcaseSubtitleDisplayAnimation ?? string.Empty;
+            quote.SubtitleLookPreset = scene.ShowcaseSubtitleDisplayLookPreset ?? string.Empty;
+            quote.SubtitleFontSize = scene.ShowcaseSubtitleDisplayFontSize;
+            quote.SubtitlePosition = scene.ShowcaseSubtitleDisplayPosition ?? string.Empty;
+            quote.SubtitleHighlightColourAss = scene.ShowcaseSubtitleDisplayHighlightColourAss ?? string.Empty;
+            quote.SubtitleDecorPreset = scene.ShowcaseSubtitleDisplayDecorPreset ?? string.Empty;
+            quote.SubtitleEnabled = !scene.ShowcaseSubtitleDisplayDisabled;
         }
     }
 }

@@ -12,8 +12,8 @@ namespace tiktok_Omni.Services
             string promptHint,
             string generationMode = "Quotes",
             int quoteCount = 5,
-            int minDurationSeconds = 15,
-            int maxDurationSeconds = 60,
+            int minDurationSeconds = PhilosophyRenderOptions.QuotesDefaultMinSeconds,
+            int maxDurationSeconds = PhilosophyRenderOptions.QuotesDefaultMaxSeconds,
             string defaultAmbientKey = null,
             bool supportsMetadata = false,
             bool usesGemini = true)
@@ -64,7 +64,8 @@ namespace tiktok_Omni.Services
         public static PhilosophyContentTemplatePreset Philosophy { get; } = new PhilosophyContentTemplatePreset(
             DefaultId,
             "Quote",
-            "Viết câu quote sâu sắc, trầm, có chiều sâu cảm xúc — phù hợp TikTok quote video.");
+            "Viết câu quote sâu sắc, trầm, có chiều sâu cảm xúc — phù hợp TikTok quote video.",
+            maxDurationSeconds: PhilosophyRenderOptions.QuotesDefaultMaxSeconds);
 
         public static PhilosophyContentTemplatePreset Story { get; } = new PhilosophyContentTemplatePreset(
             "story",
@@ -72,8 +73,8 @@ namespace tiktok_Omni.Services
             "Viết MỘT bài monologue/kể chuyện ngắn có mở–thân–kết, giọng kể chậm, có nhịp thở giữa ý.",
             generationMode: "Story",
             quoteCount: 1,
-            minDurationSeconds: 30,
-            maxDurationSeconds: 90);
+            minDurationSeconds: PhilosophyRenderOptions.StoryDefaultMinSeconds,
+            maxDurationSeconds: PhilosophyRenderOptions.StoryDefaultMaxSeconds);
 
         public static PhilosophyContentTemplatePreset Motivational { get; } = new PhilosophyContentTemplatePreset(
             "motivational",

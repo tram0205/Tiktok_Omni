@@ -142,6 +142,50 @@ namespace tiktok_Omni.Services.Showcase
             return normalized;
         }
 
+        /// <summary>Quote triết lý — đọc tự nhiên, không chèn ngắt nghỉ sâu (...).</summary>
+        public static string PreparePhilosophyQuoteText(
+            string text,
+            AppSettings settings,
+            ShowcaseTtsRenderOptions showcaseTts,
+            Action<string> log)
+        {
+            var line = (text ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+
+            if (!TtsAvailabilityHelper.IsElevenLabsConfigured(settings))
+            {
+                return line;
+            }
+
+            showcaseTts = showcaseTts ?? new ShowcaseTtsRenderOptions();
+            var model = ElevenLabsTtsHelper.ResolveModelId(settings);
+            var isV3 = string.Equals(
+                model,
+                ElevenLabsTtsHelper.DefaultVietnameseModel,
+                StringComparison.OrdinalIgnoreCase);
+
+            if (isV3)
+            {
+                var toneTag = ShowcaseElevenToneHelper.ResolveAudioTag(showcaseTts.BodyVoiceToneId);
+                if (!string.IsNullOrEmpty(toneTag))
+                {
+                    line = InsertAudioTagIfAbsent(line, toneTag);
+                    log?.Invoke("[TTS] ElevenLabs quote · Tone «"
+                                 + ShowcaseElevenToneHelper.GetToneLabel(showcaseTts.BodyVoiceToneId)
+                                 + "» · "
+                                 + toneTag
+                                 + " · không ngắt nghỉ sâu.");
+                    return line;
+                }
+            }
+
+            log?.Invoke("[TTS] ElevenLabs quote · đọc tự nhiên (không ngắt nghỉ sâu).");
+            return line;
+        }
+
         private static string ApplyPauseOnly(string line, SegmentKind kind)
         {
             return line;

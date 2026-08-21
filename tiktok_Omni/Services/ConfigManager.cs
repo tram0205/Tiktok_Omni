@@ -646,6 +646,23 @@ namespace tiktok_Omni.Services
                 settings.VideoMusicVolume = 14;
             }
 
+            settings.PhilosophyDefaultMusicVolumePercent = PhilosophyAudioDefaults.ClampVolume(
+                settings.PhilosophyDefaultMusicVolumePercent);
+            settings.PhilosophyDefaultNarrationSpeedPercent = ShowcaseNarrationSpeedHelper.ClampManualPercent(
+                settings.PhilosophyDefaultNarrationSpeedPercent);
+            if (settings.PhilosophyDefaultNarrationSpeedPercent <= 0)
+            {
+                settings.PhilosophyDefaultNarrationSpeedPercent = PhilosophyAudioDefaults.DefaultNarrationSpeedPercent;
+            }
+
+            settings.PhilosophyDefaultTtsEngine = string.IsNullOrWhiteSpace(settings.PhilosophyDefaultTtsEngine)
+                ? ShowcaseTtsHelper.EngineEdgeTts
+                : settings.PhilosophyDefaultTtsEngine.Trim();
+            settings.PhilosophyDefaultBodyStyleKey = string.IsNullOrWhiteSpace(settings.PhilosophyDefaultBodyStyleKey)
+                ? HookStyleCatalog.StyleKechuyen
+                : settings.PhilosophyDefaultBodyStyleKey.Trim();
+            settings.PhilosophyDefaultAmbientKey = PhilosophyAmbientCatalog.NormalizeKey(settings.PhilosophyDefaultAmbientKey);
+
             if (settings.NotificationSmtpPort <= 0 || settings.NotificationSmtpPort > 65535)
             {
                 settings.NotificationSmtpPort = 587;
@@ -960,6 +977,22 @@ namespace tiktok_Omni.Services
 
         public int VideoTextSize { get; set; } = 50;
         public int VideoMusicVolume { get; set; } = 14;
+
+        /// <summary>Âm lượng nhạc nền mặc định tab Quote (không dùng <see cref="VideoMusicVolume"/>).</summary>
+        public int PhilosophyDefaultMusicVolumePercent { get; set; } = PhilosophyAudioDefaults.DefaultMusicVolumePercent;
+
+        /// <summary>EdgeTts | ElevenLabs — engine TTS mặc định batch Quote mới.</summary>
+        public string PhilosophyDefaultTtsEngine { get; set; } = ShowcaseTtsHelper.EngineEdgeTts;
+
+        /// <summary>Edge style mặc định quote — key <see cref="HookStyleCatalog"/> (vd. ke_chuyen).</summary>
+        public string PhilosophyDefaultBodyStyleKey { get; set; } = HookStyleCatalog.StyleKechuyen;
+
+        /// <summary>Tiếng đệm mặc định batch Quote — key <see cref="PhilosophyAmbientCatalog"/> hoặc none.</summary>
+        public string PhilosophyDefaultAmbientKey { get; set; } = PhilosophyAmbientCatalog.NoneKey;
+
+        /// <summary>Tốc độ đọc mặc định batch Quote (50–200%).</summary>
+        public int PhilosophyDefaultNarrationSpeedPercent { get; set; } = PhilosophyAudioDefaults.DefaultNarrationSpeedPercent;
+
         public string VideoBackgroundMusicFileName { get; set; } = string.Empty;
         public bool VideoMusicRandomizeStartTime { get; set; } = true;
         public bool? AutoResumeQueueOnStartup { get; set; } = false;

@@ -18,9 +18,9 @@ namespace tiktok_Omni.Services
 
         public int VisualMode { get; set; }
 
-        public int MinDurationSeconds { get; set; } = 15;
+        public int MinDurationSeconds { get; set; } = PhilosophyRenderOptions.QuotesDefaultMinSeconds;
 
-        public int MaxDurationSeconds { get; set; } = 60;
+        public int MaxDurationSeconds { get; set; } = PhilosophyRenderOptions.QuotesDefaultMaxSeconds;
 
         /// <summary>Thư mục video phân cảnh tự làm (mode 3) — lưu draft.</summary>
         public string PreRenderedVideoFolder { get; set; } = string.Empty;

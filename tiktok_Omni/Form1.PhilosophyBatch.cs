@@ -364,7 +364,7 @@ namespace tiktok_Omni
                     using (var dlg = new PhilosophyTopicEditorForm(
                         batch,
                         GeneratePhilosophyScriptsForBatchAsync,
-                        ApplyPhilosophyGeminiScriptsFromTopicEditor))
+                        ApplyPhilosophyGeminiScriptsAndAutoAudioAsync))
                     {
                         changed = dlg.ShowDialog(this) == DialogResult.OK;
                     }
@@ -483,6 +483,7 @@ namespace tiktok_Omni
             PhilosophySubtitleStyleHelper.ApplyPhilosophyDefaults(proxy);
             PhilosophyBatchHelper.CopySubtitleTemplateFromQuote(batch, proxy);
             PhilosophyBatchHelper.EnsureBatchDefaults(batch);
+            PhilosophyBatchHelper.EnsureBatchAudioDefaults(batch, _philosophySettingsSnap);
             batch.RefreshDerivedFields();
             return batch;
         }
@@ -722,18 +723,21 @@ namespace tiktok_Omni
                     continue;
                 }
 
-                PhilosophyBatchHelper.EnsureQuoteAudioDefaults(batch);
+                PhilosophyBatchHelper.EnsureBatchAudioDefaults(batch, _philosophySettingsSnap);
                 quotes.AddRange(batch.Quotes.Where(q => q != null));
             }
 
             return quotes;
         }
 
-        private void ApplyPhilosophyGeminiScriptsFromTopicEditor(
+        private async Task ApplyPhilosophyGeminiScriptsAndAutoAudioAsync(
             PhilosophyBatchItem batch,
-            IReadOnlyList<PhilosophyScriptItem> scripts)
+            IReadOnlyList<PhilosophyScriptItem> scripts,
+            CancellationToken cancellationToken)
         {
-            ApplyPhilosophyGeminiScriptsForBatch(batch, scripts, settings: null);
+            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
+            ApplyPhilosophyGeminiScriptsForBatch(batch, scripts, settings);
+            await TryAutoGeneratePhilosophyBatchAudioAsync(batch, settings, cancellationToken).ConfigureAwait(true);
         }
 
         private void ApplyPhilosophyGeminiScriptsForBatch(
@@ -747,15 +751,20 @@ namespace tiktok_Omni
             }
 
             var mode = string.Equals(batch.GenerationMode, "Story", StringComparison.OrdinalIgnoreCase) ? "Story" : "Quotes";
+            var duration = PhilosophyRenderOptions.ResolveDurationBounds(
+                mode,
+                batch.MinDurationSeconds,
+                batch.MaxDurationSeconds);
             if (!TryNormalizePhilosophyDurationRange(
-                    batch.MinDurationSeconds > 0 ? batch.MinDurationSeconds : 15,
-                    batch.MaxDurationSeconds > 0 ? batch.MaxDurationSeconds : 60,
+                    duration.MinSeconds,
+                    duration.MaxSeconds,
                     out var minDuration,
                     out var maxDuration,
                     out _))
             {
-                minDuration = 15;
-                maxDuration = 60;
+                duration = PhilosophyRenderOptions.GetDefaultDurationBounds(mode);
+                minDuration = duration.MinSeconds;
+                maxDuration = duration.MaxSeconds;
             }
 
             ApplyPhilosophyGeminiScriptsToBatch(
@@ -817,6 +826,16 @@ namespace tiktok_Omni
                 cancellationToken.ThrowIfCancellationRequested();
                 ApplyPhilosophyGeminiScriptsForBatch(batch, scripts, settings);
                 totalQuotes += scripts?.Count ?? 0;
+
+                try
+                {
+                    await TryAutoGeneratePhilosophyBatchAudioAsync(batch, settings, cancellationToken)
+                        .ConfigureAwait(true);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
             }
 
             return totalQuotes;
@@ -855,9 +874,13 @@ namespace tiktok_Omni
             var count = mode == "Story"
                 ? 1
                 : Math.Max(1, Math.Min(20, batch.QuoteCount > 0 ? batch.QuoteCount : 5));
+            var duration = PhilosophyRenderOptions.ResolveDurationBounds(
+                mode,
+                batch.MinDurationSeconds,
+                batch.MaxDurationSeconds);
             if (!TryNormalizePhilosophyDurationRange(
-                    batch.MinDurationSeconds > 0 ? batch.MinDurationSeconds : 15,
-                    batch.MaxDurationSeconds > 0 ? batch.MaxDurationSeconds : 60,
+                    duration.MinSeconds,
+                    duration.MaxSeconds,
                     out var minDuration,
                     out var maxDuration,
                     out var durationErr))
@@ -913,11 +936,22 @@ namespace tiktok_Omni
 
                 PhilosophyAmbientCatalog.EnsureRowDefault(script);
                 PhilosophyBatchHelper.ClearQuoteBatchOwnedFields(script);
-                script.VisualMode = PhilosophyVisualModes.Broll;
-                if (string.IsNullOrWhiteSpace(script.BRollFolder)
-                    || (!PhilosophyBRollSelection.IsRandomToken(script.BRollFolder)
-                        && !File.Exists(script.BRollFolder)
-                        && !Directory.Exists(script.BRollFolder)))
+                if (script.ZoomImagePaths != null && script.ZoomImagePaths.Count > 0)
+                {
+                    script.VisualMode = PhilosophyVisualModes.ImageZoom;
+                }
+                else if (script.VisualMode != PhilosophyVisualModes.VeoMascot
+                         && script.VisualMode != PhilosophyVisualModes.VeoScenery
+                         && script.VisualMode != PhilosophyVisualModes.PreRendered)
+                {
+                    script.VisualMode = PhilosophyVisualModes.Broll;
+                }
+
+                if (script.VisualMode == PhilosophyVisualModes.Broll
+                    && (string.IsNullOrWhiteSpace(script.BRollFolder)
+                        || (!PhilosophyBRollSelection.IsRandomToken(script.BRollFolder)
+                            && !File.Exists(script.BRollFolder)
+                            && !Directory.Exists(script.BRollFolder))))
                 {
                     script.BRollFolder = PhilosophyBatchHelper.SuggestBRollFolder(profile, topic, script.Mood);
                 }
@@ -939,10 +973,58 @@ namespace tiktok_Omni
                 batch.Quotes.Add(script);
             }
 
-            PhilosophyBatchHelper.ApplyBatchAudioToQuotes(batch);
+            var suggestedEdge = scripts?
+                .Select(s => s?.EdgeStyleKey)
+                .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s));
+            var dominantMood = batch.Quotes.FirstOrDefault()?.Mood ?? "reflective";
+            batch.BodyStyleKey = PhilosophyBatchHelper.ResolveGeminiEdgeStyle(suggestedEdge, dominantMood);
+
+            var firstQuote = batch.Quotes.FirstOrDefault();
+            if (firstQuote != null)
+            {
+                PhilosophyBatchHelper.CopySubtitleTemplateFromQuote(batch, firstQuote);
+                batch.SubtitleEnabled = true;
+            }
+
+            PhilosophyBatchHelper.ApplyBatchAudioToQuotes(batch, overwriteAll: false);
+            PhilosophyBatchHelper.SyncBatchAudioSummaryFromQuotes(batch);
+            PhilosophyBatchHelper.EnsureBatchAudioDefaults(batch, settings);
             PhilosophyBatchHelper.NormalizeBatchQuoteOwnership(batch);
             batch.RefreshDerivedFields();
             _philosophyBatchBindingList?.ResetBindings();
+        }
+
+        private async Task TryAutoGeneratePhilosophyBatchAudioAsync(
+            PhilosophyBatchItem batch,
+            AppSettings settings,
+            CancellationToken cancellationToken)
+        {
+            if (batch?.Quotes == null || batch.Quotes.Count == 0)
+            {
+                return;
+            }
+
+            var profile = ResolvePhilosophyBatchProfile(batch);
+            var topic = batch.Topic?.Trim() ?? "batch";
+            SetPhilosophyProgress("Audio tự động (thoại + mix): «" + TrimPhilosophyPreview(topic) + "»…", 0, indeterminate: true);
+            try
+            {
+                await PhilosophyBatchAutoAudioHelper.TryGenerateBatchAudioAsync(
+                    batch,
+                    settings,
+                    profile,
+                    _videoProcessingService,
+                    LogPhilosophy,
+                    cancellationToken).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                LogPhilosophy("Audio tự động batch «" + topic + "» lỗi: " + ex.Message);
+            }
         }
 
         private void PromptPhilosophyBatchRenderReport(PhilosophyBatchItem batch)
@@ -988,7 +1070,7 @@ namespace tiktok_Omni
                     continue;
                 }
 
-                PhilosophyBatchHelper.EnsureQuoteAudioDefaults(batch);
+                PhilosophyBatchHelper.EnsureBatchAudioDefaults(batch, _philosophySettingsSnap);
                 PhilosophyBatchHelper.EnsureBatchProfileName(batch, GetSelectedPhilosophyProfileName());
                 foreach (var quote in batch.Quotes.Where(q => q != null))
                 {

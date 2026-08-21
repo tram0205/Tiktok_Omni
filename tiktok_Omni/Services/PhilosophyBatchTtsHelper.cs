@@ -69,21 +69,12 @@ namespace tiktok_Omni.Services
 
             ttsOptions = ttsOptions ?? new ShowcaseTtsRenderOptions();
             Directory.CreateDirectory(workDirectory ?? Path.GetDirectoryName(outputMp3) ?? ".");
-            var scenes = new List<AiVideoGenInputItem>
-            {
-                new AiVideoGenInputItem
-                {
-                    SceneVoiceover = quote,
-                    ShowcaseSceneSilent = false
-                }
-            };
-
             var narration = new AffiliateNarrationService();
+
             log?.Invoke("[Quote] TTS theo cấu hình popup Âm thanh ("
                          + DescribeEngine(ttsOptions.BodyEngine) + ")…");
-            await narration.GenerateShowcaseHookPreviewAsync(
+            await narration.GeneratePhilosophyQuoteVoicePreviewAsync(
                 quote,
-                scenes,
                 settings,
                 outputMp3,
                 log,
@@ -94,6 +85,11 @@ namespace tiktok_Omni.Services
             {
                 throw new InvalidOperationException("TTS không tạo được file audio.");
             }
+
+            var sourcePath = Path.Combine(
+                Path.GetDirectoryName(outputMp3) ?? workDirectory ?? ".",
+                Path.GetFileNameWithoutExtension(outputMp3) + "_source.mp3");
+            File.Copy(outputMp3, sourcePath, overwrite: true);
 
             var speedPct = ShowcaseNarrationSpeedHelper.ResolveEffectiveSpeedPercent(narrationSpeedPercent);
             if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg) || speedPct == 100)

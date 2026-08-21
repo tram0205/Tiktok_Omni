@@ -24,7 +24,7 @@ namespace tiktok_Omni
 
         private readonly PhilosophyBatchItem _batch;
         private readonly Func<PhilosophyBatchItem, CancellationToken, Task<IReadOnlyList<PhilosophyScriptItem>>> _generateScriptsAsync;
-        private readonly Action<PhilosophyBatchItem, IReadOnlyList<PhilosophyScriptItem>> _applyScripts;
+        private readonly Func<PhilosophyBatchItem, IReadOnlyList<PhilosophyScriptItem>, CancellationToken, Task> _applyScriptsAsync;
 
         private Label _lblTopic;
         private TextBox _txtTopic;
@@ -42,15 +42,16 @@ namespace tiktok_Omni
         private DataGridView _grid;
         private BindingList<PhilosophyScriptItem> _quotes;
         private CancellationTokenSource _generateCts;
+        private bool _loadingBatch;
 
         public PhilosophyTopicEditorForm(
             PhilosophyBatchItem batch,
             Func<PhilosophyBatchItem, CancellationToken, Task<IReadOnlyList<PhilosophyScriptItem>>> generateScriptsAsync,
-            Action<PhilosophyBatchItem, IReadOnlyList<PhilosophyScriptItem>> applyScripts)
+            Func<PhilosophyBatchItem, IReadOnlyList<PhilosophyScriptItem>, CancellationToken, Task> applyScriptsAsync)
         {
             _batch = batch ?? throw new ArgumentNullException(nameof(batch));
             _generateScriptsAsync = generateScriptsAsync ?? throw new ArgumentNullException(nameof(generateScriptsAsync));
-            _applyScripts = applyScripts ?? throw new ArgumentNullException(nameof(applyScripts));
+            _applyScriptsAsync = applyScriptsAsync ?? throw new ArgumentNullException(nameof(applyScriptsAsync));
 
             _quotes = new BindingList<PhilosophyScriptItem>(
                 _batch.Quotes?.Where(q => q != null).ToList() ?? new List<PhilosophyScriptItem>());
@@ -166,7 +167,7 @@ namespace tiktok_Omni
         private static string BuildIntroText(bool manual) =>
             manual
                 ? "«Nhập tay»: gõ từng câu vào lưới bên dưới (cột «Quote») — thêm dòng bằng hàng trống cuối lưới."
-                : "Chọn loại nội dung, nhập chủ đề — bấm «Tạo nội dung» (Gemini) hoặc gõ tay trên lưới bên dưới. "
+                : "Chọn loại nội dung, nhập chủ đề — bấm «Tạo nội dung» (Gemini): app tự tạo thoại + render audio thành phẩm (nhạc + tiếng đệm). "
                   + "Toolbar «Tạo nội dung Gemini» xử lý nhiều batch đã chọn.";
 
         private Panel CreateTopicSection()
@@ -271,8 +272,8 @@ namespace tiktok_Omni
         private Panel CreateOptionsSection()
         {
             _numCount = CreateSpinner(1, 20, 5);
-            _numMinDuration = CreateSpinner(5, 180, 15);
-            _numMaxDuration = CreateSpinner(5, 180, 60);
+            _numMinDuration = CreateSpinner(5, 180, PhilosophyRenderOptions.QuotesDefaultMinSeconds);
+            _numMaxDuration = CreateSpinner(5, 180, PhilosophyRenderOptions.QuotesDefaultMaxSeconds);
 
             var panel = new FlowLayoutPanel
             {
@@ -315,8 +316,8 @@ namespace tiktok_Omni
             _btnGenerate.Click += async (_, __) => await GenerateContentAsync().ConfigureAwait(true);
             panel.Controls.Add(_btnGenerate);
 
-            _rbQuotes.CheckedChanged += (_, __) => SyncQuoteCountEnabled();
-            _rbStory.CheckedChanged += (_, __) => SyncQuoteCountEnabled();
+            _rbQuotes.CheckedChanged += (_, __) => OnGenerationModeChanged();
+            _rbStory.CheckedChanged += (_, __) => OnGenerationModeChanged();
 
             return panel;
         }
@@ -551,20 +552,32 @@ namespace tiktok_Omni
 
         private void LoadFromBatch()
         {
-            _txtTopic.Text = _batch.Topic ?? string.Empty;
-            SelectTemplateCombo(_batch.ContentTemplateId);
-            _txtMetadata.Text = _batch.ContentMetadata ?? string.Empty;
-            var story = string.Equals(_batch.GenerationMode, "Story", StringComparison.OrdinalIgnoreCase);
-            _rbStory.Checked = story;
-            _rbQuotes.Checked = !story;
-            _numCount.Value = Math.Max(_numCount.Minimum,
-                Math.Min(_numCount.Maximum, _batch.QuoteCount > 0 ? _batch.QuoteCount : 5));
-            _numMinDuration.Value = Math.Max(_numMinDuration.Minimum,
-                Math.Min(_numMinDuration.Maximum, _batch.MinDurationSeconds > 0 ? _batch.MinDurationSeconds : 15));
-            _numMaxDuration.Value = Math.Max(_numMaxDuration.Minimum,
-                Math.Min(_numMaxDuration.Maximum, _batch.MaxDurationSeconds > 0 ? _batch.MaxDurationSeconds : 60));
-            SyncQuoteCountEnabled();
-            SyncTemplateUi();
+            _loadingBatch = true;
+            try
+            {
+                _txtTopic.Text = _batch.Topic ?? string.Empty;
+                SelectTemplateCombo(_batch.ContentTemplateId);
+                _txtMetadata.Text = _batch.ContentMetadata ?? string.Empty;
+                var story = string.Equals(_batch.GenerationMode, "Story", StringComparison.OrdinalIgnoreCase);
+                _rbStory.Checked = story;
+                _rbQuotes.Checked = !story;
+                _numCount.Value = Math.Max(_numCount.Minimum,
+                    Math.Min(_numCount.Maximum, _batch.QuoteCount > 0 ? _batch.QuoteCount : 5));
+                var duration = PhilosophyRenderOptions.ResolveDurationBounds(
+                    _batch.GenerationMode,
+                    _batch.MinDurationSeconds,
+                    _batch.MaxDurationSeconds);
+                _numMinDuration.Value = Math.Max(_numMinDuration.Minimum,
+                    Math.Min(_numMinDuration.Maximum, duration.MinSeconds));
+                _numMaxDuration.Value = Math.Max(_numMaxDuration.Minimum,
+                    Math.Min(_numMaxDuration.Maximum, duration.MaxSeconds));
+                SyncQuoteCountEnabled();
+                SyncTemplateUi();
+            }
+            finally
+            {
+                _loadingBatch = false;
+            }
         }
 
         private void SelectTemplateCombo(string templateId)
@@ -715,6 +728,30 @@ namespace tiktok_Omni
             }
         }
 
+        private void OnGenerationModeChanged()
+        {
+            SyncQuoteCountEnabled();
+            if (!_loadingBatch)
+            {
+                ApplyDefaultDurationForMode();
+            }
+        }
+
+        private void ApplyDefaultDurationForMode()
+        {
+            if (_numMinDuration == null || _numMaxDuration == null)
+            {
+                return;
+            }
+
+            var mode = _rbStory != null && _rbStory.Checked ? "Story" : "Quotes";
+            var duration = PhilosophyRenderOptions.GetDefaultDurationBounds(mode);
+            _numMinDuration.Value = Math.Max(_numMinDuration.Minimum,
+                Math.Min(_numMinDuration.Maximum, duration.MinSeconds));
+            _numMaxDuration.Value = Math.Max(_numMaxDuration.Minimum,
+                Math.Min(_numMaxDuration.Maximum, duration.MaxSeconds));
+        }
+
         private void SaveBatchFieldsFromUi()
         {
             _batch.Topic = _txtTopic.Text?.Trim() ?? string.Empty;
@@ -790,12 +827,17 @@ namespace tiktok_Omni
             _generateCts = new CancellationTokenSource();
 
             _btnGenerate.Enabled = false;
+            var generateLabel = _btnGenerate.Text;
             try
             {
+                _btnGenerate.Text = "Đang gọi Gemini…";
                 var scripts = await _generateScriptsAsync(_batch, _generateCts.Token).ConfigureAwait(true);
                 _generateCts.Token.ThrowIfCancellationRequested();
 
-                _applyScripts(_batch, scripts);
+                _btnGenerate.Text = "Đang render audio…";
+                await _applyScriptsAsync(_batch, scripts, _generateCts.Token).ConfigureAwait(true);
+                _generateCts.Token.ThrowIfCancellationRequested();
+
                 ReloadQuotesFromBatch();
             }
             catch (OperationCanceledException)
@@ -808,6 +850,7 @@ namespace tiktok_Omni
             }
             finally
             {
+                _btnGenerate.Text = generateLabel;
                 _btnGenerate.Enabled = true;
             }
         }

@@ -664,6 +664,61 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>TTS quote Triết lý — body engine, đọc tự nhiên (không hook nhấn / ngắt nghỉ sâu).</summary>
+        public async Task GeneratePhilosophyQuoteVoicePreviewAsync(
+            string quoteText,
+            AppSettings settings,
+            string outputPath,
+            Action<string> log,
+            CancellationToken cancellationToken,
+            ShowcaseTtsRenderOptions showcaseTts)
+        {
+            var quote = (quoteText ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(quote))
+            {
+                throw new InvalidOperationException("Quote trống — không gọi TTS.");
+            }
+
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                throw new ArgumentException("Quote preview path is required.", nameof(outputPath));
+            }
+
+            showcaseTts = showcaseTts ?? new ShowcaseTtsRenderOptions();
+            var engine = showcaseTts.BodyEngine;
+            TtsAvailabilityHelper.ValidateEngine(settings, engine);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+            var prepared = PhilosophyGeminiTtsContext.NormalizeQuoteContentForTts(quote);
+            if (engine == TtsEngineKind.ElevenLabs)
+            {
+                prepared = ShowcaseElevenLabsTextHelper.PreparePhilosophyQuoteText(
+                    prepared,
+                    settings,
+                    showcaseTts,
+                    log);
+            }
+
+            log?.Invoke("[TTS] Quote triết lý · "
+                         + (engine == TtsEngineKind.ElevenLabs ? "ElevenLabs" : "Edge TTS")
+                         + " · «"
+                         + TrimQuoteTtsLog(prepared)
+                         + "»…");
+            await GenerateVoiceSegmentAsync(
+                    prepared,
+                    emphaticHook: false,
+                    settings,
+                    outputPath,
+                    log,
+                    cancellationToken,
+                    showcaseTts,
+                    engine,
+                    showcaseExpressiveBody: false,
+                    emphaticCta: false,
+                    philosophyQuote: true)
+                .ConfigureAwait(false);
+        }
+
         private static bool TryReuseExistingAudioPart(string path)
         {
             try
@@ -885,6 +940,12 @@ namespace tiktok_Omni.Services
             return VietnameseTtsTextNormalizer.SanitizeForElevenLabsRequest(text);
         }
 
+        private static string TrimQuoteTtsLog(string text)
+        {
+            var t = (text ?? string.Empty).Trim();
+            return t.Length <= 120 ? t : t.Substring(0, 119) + "…";
+        }
+
         private async Task<string> NormalizeShowcaseTextAsync(
             string text,
             AppSettings settings,
@@ -959,7 +1020,8 @@ namespace tiktok_Omni.Services
             ShowcaseTtsRenderOptions showcaseTts,
             TtsEngineKind engine,
             bool showcaseExpressiveBody = false,
-            bool emphaticCta = false)
+            bool emphaticCta = false,
+            bool philosophyQuote = false)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -976,14 +1038,18 @@ namespace tiktok_Omni.Services
                         ? "Edge CTA · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey)
                         : showcaseExpressiveBody
                             ? "Edge thân êm · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey)
-                            : "Edge · " + showcaseTts.Preset.Label
+                            : philosophyQuote
+                                ? "Edge quote · " + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.BodyStyleKey)
+                                : "Edge · " + showcaseTts.Preset.Label
                 : emphaticHook
                     ? "ElevenLabs nhấn · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey) + "»"
                     : emphaticCta
                         ? "ElevenLabs CTA · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.HookStyleKey) + "»"
                         : showcaseExpressiveBody
                             ? "ElevenLabs thân · «" + ShowcaseEdgeProsodyHelper.GetHookStyleDisplayName(showcaseTts.BodyStyleKey) + "»"
-                            : "ElevenLabs kể chuyện";
+                            : philosophyQuote
+                                ? "ElevenLabs quote · tự nhiên"
+                                : "ElevenLabs kể chuyện";
             log?.Invoke("[TTS] Sinh giọng — " + mode + "…");
             var audioRef = await _videoService.GenerateAudioAsync(
                 text,
@@ -994,7 +1060,8 @@ namespace tiktok_Omni.Services
                 emphaticHook: emphaticHook,
                 showcaseExpressiveBody: showcaseExpressiveBody,
                 logAction: log,
-                emphaticCta: emphaticCta).ConfigureAwait(false);
+                emphaticCta: emphaticCta,
+                philosophyQuote: philosophyQuote).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(audioRef))
             {
                 throw new InvalidOperationException("TTS returned empty audio.");

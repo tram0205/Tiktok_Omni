@@ -35,6 +35,7 @@ namespace tiktok_Omni
         private static readonly Color PhilosophyTintTrash = Color.FromArgb(88, 92, 72);
         private static readonly Color PhilosophyTintBrollLibrary = Color.FromArgb(56, 108, 88);
         private static readonly Color PhilosophyTintMascotLibrary = Color.FromArgb(100, 72, 190);
+        private static readonly Color PhilosophyTintZoomLibrary = Color.FromArgb(72, 138, 118);
         private static readonly Color PhilosophyTintMusicLibrary = Color.FromArgb(138, 58, 118);
         private static readonly Color PhilosophyTintSfxLibrary = Color.FromArgb(168, 118, 42);
         private static readonly Color PhilosophyTintLogoLibrary = Color.FromArgb(72, 118, 168);
@@ -74,6 +75,7 @@ namespace tiktok_Omni
         private Button btnPhilosophyMoveRowDown;
         private Button btnPhilosophyBrollLibrary;
         private Button btnPhilosophyMascotImageLibrary;
+        private Button btnPhilosophyZoomImageLibrary;
         private Button btnPhilosophyMusicLibrary;
         private Button btnPhilosophySfxLibrary;
         private Button btnPhilosophyLogoLibrary;
@@ -382,6 +384,14 @@ namespace tiktok_Omni
             btnPhilosophyMascotImageLibrary.Click -= btnPhilosophyMascotImageLibrary_Click;
             btnPhilosophyMascotImageLibrary.Click += btnPhilosophyMascotImageLibrary_Click;
 
+            btnPhilosophyZoomImageLibrary = CreatePhilosophyJellyButton(
+                "btnPhilosophyZoomImageLibrary",
+                "🔍 Thư viện ảnh zoom",
+                PhilosophyTintZoomLibrary,
+                220);
+            btnPhilosophyZoomImageLibrary.Click -= btnPhilosophyZoomImageLibrary_Click;
+            btnPhilosophyZoomImageLibrary.Click += btnPhilosophyZoomImageLibrary_Click;
+
             btnPhilosophyMusicLibrary = CreatePhilosophyJellyButton(
                 "btnPhilosophyMusicLibrary",
                 "🎵 Thư viện nhạc nền",
@@ -408,6 +418,7 @@ namespace tiktok_Omni
 
             flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyBrollLibrary);
             flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyMascotImageLibrary);
+            flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyZoomImageLibrary);
             flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyMusicLibrary);
             flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophySfxLibrary);
             flpPhilosophyLibraryCenter.Controls.Add(btnPhilosophyLogoLibrary);
@@ -941,9 +952,9 @@ namespace tiktok_Omni
         private void btnPhilosophyBrollLibrary_Click(object sender, EventArgs e)
         {
             OpenPhilosophyAssetLibraryFolder(
-                PhilosophyProfileAssets.EnsureBrollLibraryDirectory(GetSelectedPhilosophyProfileName()),
+                PhilosophyProfileAssets.EnsureBrollLibraryDirectory(),
                 "Thư viện B-roll",
-                "Copy file .mp4 vào đây — dùng cột «Nền» hoặc chế độ B-Roll trên lưới.");
+                "Kho chung Assets\\Backgrounds — mọi profile dùng chung. Copy file .mp4 vào đây, rồi chọn cột «Nền» hoặc «Ngẫu nhiên».");
         }
 
         private void btnPhilosophyMascotImageLibrary_Click(object sender, EventArgs e)
@@ -952,6 +963,14 @@ namespace tiktok_Omni
                 PhilosophyProfileAssets.EnsureMascotImageLibraryDirectory(GetSelectedPhilosophyProfileName()),
                 "Thư viện Ảnh mascot",
                 "Copy ảnh .jpg/.png/.webp — dùng cho chế độ AI I2V / ảnh tham chiếu phân cảnh.");
+        }
+
+        private void btnPhilosophyZoomImageLibrary_Click(object sender, EventArgs e)
+        {
+            OpenPhilosophyAssetLibraryFolder(
+                PhilosophyProfileAssets.EnsureZoomImageLibraryDirectory(GetSelectedPhilosophyProfileName()),
+                "Thư viện ảnh zoom",
+                "Copy ảnh .jpg/.png/.webp vào đây — Gemini gợi ý zoom_images; chọn «Zoom ảnh» trong popup Nền.");
         }
 
         private void btnPhilosophyMusicLibrary_Click(object sender, EventArgs e)
@@ -1103,11 +1122,11 @@ namespace tiktok_Omni
 
                 LogPhilosophy("Gemini xong: "
                               + totalQuotes
-                              + " câu trong "
+                              + " câu · "
                               + batchesWithTopic.Count
-                              + " batch — mở popup «Chủ đề» để duyệt/sửa.");
+                              + " batch — đã gợi ý nhạc/tiếng đệm/Edge/phụ đề và render audio thành phẩm. Mở «Âm thanh» để nghe.");
                 SetPhilosophyProgress(
-                    "Đã tạo " + totalQuotes + " câu · " + batchesWithTopic.Count + " batch",
+                    "Đã tạo " + totalQuotes + " câu + audio thành phẩm · " + batchesWithTopic.Count + " batch",
                     100);
                 NotifyPhilosophyDraftDirty();
             }
@@ -1218,6 +1237,7 @@ namespace tiktok_Omni
             SetPhilosophySolidButtonEnabled(btnPhilosophyMoveRowDown, !tabBusy);
             SetPhilosophySolidButtonEnabled(btnPhilosophyBrollLibrary, !tabBusy);
             SetPhilosophySolidButtonEnabled(btnPhilosophyMascotImageLibrary, !tabBusy);
+            SetPhilosophySolidButtonEnabled(btnPhilosophyZoomImageLibrary, !tabBusy);
             SetPhilosophySolidButtonEnabled(btnPhilosophyMusicLibrary, !tabBusy);
             SetPhilosophySolidButtonEnabled(btnPhilosophySfxLibrary, !tabBusy);
             SetPhilosophySolidButtonEnabled(btnPhilosophyLogoLibrary, !tabBusy);
@@ -1335,7 +1355,6 @@ namespace tiktok_Omni
             var toolbarProfile = GetSelectedPhilosophyProfileName();
             var batchTotal = _philosophyRenderPending.Count;
             var completedInBatch = 0;
-            var savedMusicVolume = settings.VideoMusicVolume;
 
             try
             {
@@ -1353,9 +1372,8 @@ namespace tiktok_Omni
                     var ownerBatch = entry.Batch;
                     if (ownerBatch != null)
                     {
-                        PhilosophyBatchHelper.EnsureQuoteAudioDefaults(ownerBatch);
+                        PhilosophyBatchHelper.EnsureBatchAudioDefaults(ownerBatch, settings);
                         PhilosophyBatchHelper.EnsureBatchProfileName(ownerBatch, toolbarProfile);
-                        settings.VideoMusicVolume = PhilosophyBatchHelper.ResolveQuoteMusicVolumePercent(item, ownerBatch);
                     }
 
                     var rowProfile = PhilosophyBatchHelper.ResolveBatchProfileName(ownerBatch, toolbarProfile);
@@ -1472,7 +1490,6 @@ namespace tiktok_Omni
             }
             finally
             {
-                settings.VideoMusicVolume = savedMusicVolume;
                 _philosophyRenderRunning = false;
                 _philosophyRenderCts?.Dispose();
                 _philosophyRenderCts = null;
@@ -1570,8 +1587,13 @@ namespace tiktok_Omni
 
             var profileName = PhilosophyBatchHelper.ResolveBatchProfileName(ownerBatch, toolbarProfileFallback);
             var visualMode = PhilosophyVisualModes.Normalize(item?.VisualMode ?? 0);
-            var minDur = ownerBatch?.MinDurationSeconds ?? 15;
-            var maxDur = ownerBatch?.MaxDurationSeconds ?? 60;
+            var mode = ownerBatch?.GenerationMode ?? "Quotes";
+            var duration = PhilosophyRenderOptions.ResolveDurationBounds(
+                mode,
+                ownerBatch?.MinDurationSeconds ?? 0,
+                ownerBatch?.MaxDurationSeconds ?? 0);
+            var minDur = duration.MinSeconds;
+            var maxDur = duration.MaxSeconds;
 
             var options = new PhilosophyRenderOptions
             {
@@ -1587,11 +1609,13 @@ namespace tiktok_Omni
                     settings,
                     item?.Mood),
                 SubtitleOptions = ownerBatch != null
-                    ? PhilosophySubtitleStyleHelper.BuildOptions(ownerBatch, settings)
+                    ? PhilosophySubtitleStyleHelper.BuildOptionsForBatchQuote(ownerBatch, item, settings)
                     : PhilosophySubtitleStyleHelper.BuildOptions(item, settings),
                 VisualMode = visualMode,
-                MinDurationSeconds = minDur > 0 ? minDur : 15,
-                MaxDurationSeconds = maxDur > 0 ? maxDur : 60,
+                MinDurationSeconds = minDur,
+                MaxDurationSeconds = maxDur,
+                ZoomImagePaths = item?.ZoomImagePaths?.Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => p.Trim()).ToList()
+                                 ?? new List<string>(),
                 PreRenderedFolder = ResolveRowSceneVideoFolder(item),
                 QuoteForSceneMatch = (item?.Content ?? string.Empty).Trim()
             };
@@ -1723,6 +1747,43 @@ namespace tiktok_Omni
                     if (!PhilosophyBRollSelection.TryValidateSelection(item?.BRollFolder, rowProfile, out var brollErr))
                     {
                         issues.Add(rowLabel + ": " + brollErr);
+                    }
+                }
+                else if (visualMode == PhilosophyVisualModes.ImageZoom
+                         || visualMode == PhilosophyVisualModes.ImageSlideshow)
+                {
+                    if (!PhilosophyBRollSelection.TryValidateZoomImages(item?.ZoomImagePaths, rowProfile, out var zoomErr))
+                    {
+                        issues.Add(rowLabel + ": " + zoomErr);
+                    }
+                }
+                else if (visualMode == PhilosophyVisualModes.ZoomBrollHybrid)
+                {
+                    if (!PhilosophyBRollSelection.TryValidateZoomImages(item?.ZoomImagePaths, rowProfile, out var zoomHyErr))
+                    {
+                        issues.Add(rowLabel + ": " + zoomHyErr);
+                    }
+
+                    if (!PhilosophyBRollSelection.TryValidateSelection(item?.BRollFolder, rowProfile, out var brollHyErr))
+                    {
+                        issues.Add(rowLabel + ": " + brollHyErr + " (cần B-roll cho outro).");
+                    }
+                }
+                else if (visualMode == PhilosophyVisualModes.AiStillZoom)
+                {
+                    if (string.IsNullOrWhiteSpace(settings?.AiApiKey))
+                    {
+                        issues.Add(rowLabel + ": chế độ «AI ảnh → zoom» cần AI API Key (Gemini) trong Cài đặt.");
+                    }
+
+                    var refPath = PhilosophyBatchHelper.ResolveReferenceImagePath(ownerBatch, item);
+                    if (string.IsNullOrEmpty(refPath))
+                    {
+                        var mascot = PhilosophyGeminiBackgroundContext.BuildMascotContext(rowProfile, null);
+                        if (!mascot.HasMascotImage)
+                        {
+                            issues.Add(rowLabel + ": cần ảnh ref batch hoặc ảnh mascot profile cho «AI ảnh → zoom».");
+                        }
                     }
                 }
                 else if (visualMode == PhilosophyVisualModes.PreRendered)

@@ -36,8 +36,7 @@ namespace tiktok_Omni
                 : "Chưa có file — thêm vào Assets\\Audio\\Music (dùng chung mọi tab video)";
 
             var video = PhilosophyBatchShowcaseAudioAdapter.ToShowcaseVideo(batch, profile);
-            ShowcaseMusicHelper.EnsureVideoDefaults(video, settings);
-            ShowcaseTtsHelper.EnsureVideoDefaults(video, settings);
+            PhilosophyAudioDefaults.EnsureVideoDefaults(video, settings);
 
             string SessionBase() => PhilosophyBatchAudioPreviewHelper.GetSessionBase(batch, settings);
             var quoteCount = batch.Quotes?.Count ?? 0;
@@ -52,11 +51,10 @@ namespace tiktok_Omni
                 PhilosophyBatchAudioPreviewHelper.HasAnyQuoteFullMixPreview(SessionBase(), quoteCount);
 
             ShowcaseBackgroundMusicEditorForm audioDlg = null;
-            audioDlg = new ShowcaseBackgroundMusicEditorForm(
+            audioDlg = PhilosophyAudioEditorForm.Create(
                 video,
                 settings,
                 musicNames,
-                generateHookNarrationAsync: null,
                 generateBodyNarrationAsync: async () =>
                 {
                     var quoteIndices = audioDlg.GetPhilosophyQuoteIndicesForBatchOperation();
@@ -71,28 +69,36 @@ namespace tiktok_Omni
                             _videoProcessingService,
                             LogPhilosophy,
                             CancellationToken.None,
-                            quoteIndices).ConfigureAwait(true);
+                            quoteIndices).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
+                        if (audioDlg != null && !audioDlg.IsDisposed)
+                        {
+                            audioDlg.BeginInvoke(new Action(() =>
+                            {
+                                MessageBox.Show(audioDlg, ex.Message, "Tạo audio quote", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            }));
+                        }
+
                         LogPhilosophy("[Quote] Tạo audio quote lỗi: " + ex.Message);
-                        MessageBox.Show(this, ex.Message, "Tạo audio quote", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
 
                     if (audioDlg != null && !audioDlg.IsDisposed)
                     {
-                        audioDlg.RefreshNarrationButtons();
-                        audioDlg.RefreshPhilosophyQuotesGrid();
+                        audioDlg.BeginInvoke(new Action(() =>
+                        {
+                            audioDlg.RefreshPhilosophyQuoteAudioUi();
+                            audioDlg.SetOperationStatus(string.Empty);
+                        }));
                     }
                 },
-                listenHookNarrationAsync: null,
                 listenBodyNarrationAsync: async () =>
                 {
                     audioDlg?.SetOperationStatus("Đang phát audio quote…");
                     await ListenPhilosophyBatchVoicePreviewAsync(batch, settings).ConfigureAwait(true);
                 },
-                canListenHookNarration: () => false,
                 canListenBodyNarration: CanListenBody,
                 renderFullMixedAudioAsync: async () =>
                 {
@@ -106,19 +112,39 @@ namespace tiktok_Omni
                             profile,
                             LogPhilosophy,
                             CancellationToken.None,
-                            quoteIndices).ConfigureAwait(true);
+                            quoteIndices,
+                            video,
+                            progress =>
+                            {
+                                if (audioDlg == null || audioDlg.IsDisposed || string.IsNullOrWhiteSpace(progress))
+                                {
+                                    return;
+                                }
+
+                                audioDlg.BeginInvoke(new Action(() => audioDlg.SetOperationStatus(progress)));
+                            }).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
+                        if (audioDlg != null && !audioDlg.IsDisposed)
+                        {
+                            audioDlg.BeginInvoke(new Action(() =>
+                            {
+                                MessageBox.Show(audioDlg, ex.Message, "Render Audio", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            }));
+                        }
+
                         LogPhilosophy("[Quote] Render audio lỗi: " + ex.Message);
-                        MessageBox.Show(this, ex.Message, "Render Audio", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
 
                     if (audioDlg != null && !audioDlg.IsDisposed)
                     {
-                        audioDlg.RefreshNarrationButtons();
-                        audioDlg.RefreshPhilosophyQuotesGrid();
+                        audioDlg.BeginInvoke(new Action(() =>
+                        {
+                            audioDlg.RefreshPhilosophyQuoteAudioUi();
+                            audioDlg.SetOperationStatus(string.Empty);
+                        }));
                     }
                 },
                 listenFullMixedAudioAsync: async () =>
@@ -128,8 +154,6 @@ namespace tiktok_Omni
                 },
                 canRenderFullMixedAudio: CanRenderFullMix,
                 canListenFullMixedAudio: CanListenFullMix,
-                openScriptEditor: null,
-                philosophyMode: true,
                 philosophyAmbientKey: batch.AmbientKey,
                 philosophyMusicLibrarySummary: musicSummary,
                 philosophyBatch: batch);

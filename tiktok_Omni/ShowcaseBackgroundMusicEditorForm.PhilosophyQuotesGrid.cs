@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using tiktok_Omni.Models;
 using tiktok_Omni.Services;
@@ -32,6 +34,15 @@ namespace tiktok_Omni
         private Button _btnPhilosophyDeleteQuoteRows;
         private DataGridViewComboBoxColumn _colPhilosophyQuoteMusic;
         private DataGridViewComboBoxColumn _colPhilosophyQuoteAmbient;
+        private readonly Dictionary<int, PhilosophyBatchAudioRowValidator.RowValidationResult> _philosophyQuoteStatusByRow =
+            new Dictionary<int, PhilosophyBatchAudioRowValidator.RowValidationResult>();
+        private Label _lblPhilosophyBatchScopeHint;
+        private bool _philosophyProsodyExpanded;
+        private JellyButton _btnPhilosophySuggestMood;
+        private JellyButton _btnPhilosophyBatchVoice;
+        private JellyButton _btnPhilosophyBatchRender;
+        private bool _philosophyQuotesGridSyncLock;
+        private bool _philosophyQuoteStatusRefreshQueued;
 
         private sealed class PhilosophyAmbientComboItem
         {
@@ -54,7 +65,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            PhilosophyBatchHelper.EnsureQuoteAudioDefaults(_philosophyBatch);
+                PhilosophyBatchHelper.EnsureBatchAudioDefaults(_philosophyBatch, _settings);
 
             _philosophyQuotesGridHost = new Panel
             {
@@ -146,7 +157,6 @@ namespace tiktok_Omni
             {
                 Name = "colPhilosophyQuoteVolume",
                 HeaderText = "volume nhạc",
-                DataPropertyName = nameof(PhilosophyScriptItem.MusicVolumePercent),
                 FillWeight = 6,
                 MinimumWidth = 64,
                 DefaultCellStyle =
@@ -156,6 +166,20 @@ namespace tiktok_Omni
                 }
             };
 
+            _dgvPhilosophyQuotes.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "colPhilosophyQuoteMood",
+                HeaderText = "Mood",
+                ReadOnly = true,
+                FillWeight = 6,
+                MinimumWidth = 72,
+                DefaultCellStyle =
+                {
+                    Alignment = DataGridViewContentAlignment.MiddleCenter,
+                    WrapMode = DataGridViewTriState.False,
+                    ForeColor = Color.FromArgb(160, 168, 182)
+                }
+            });
             _dgvPhilosophyQuotes.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "colPhilosophyQuoteContent",
@@ -174,9 +198,23 @@ namespace tiktok_Omni
             _dgvPhilosophyQuotes.Columns.Add(colPhilosophyQuoteVolume);
             _dgvPhilosophyQuotes.Columns.Add(new DataGridViewTextBoxColumn
             {
+                Name = "colPhilosophyQuoteStatus",
+                HeaderText = "TT",
+                ReadOnly = true,
+                FillWeight = 4,
+                MinimumWidth = 40,
+                ToolTipText = "✓ sẵn sàng · ◐ có thoại · ! thiếu hoặc cũ",
+                DefaultCellStyle =
+                {
+                    Alignment = DataGridViewContentAlignment.MiddleCenter,
+                    WrapMode = DataGridViewTriState.False,
+                    Font = new Font("Segoe UI", 11F, FontStyle.Bold)
+                }
+            });
+            _dgvPhilosophyQuotes.Columns.Add(new DataGridViewTextBoxColumn
+            {
                 Name = "colPhilosophyQuoteSpeed",
                 HeaderText = "Tốc độ",
-                DataPropertyName = nameof(PhilosophyScriptItem.NarrationSpeedPercent),
                 FillWeight = 7,
                 MinimumWidth = 72,
                 DefaultCellStyle =
@@ -227,11 +265,13 @@ namespace tiktok_Omni
             _dgvPhilosophyQuotes.EditingControlShowing += PhilosophyQuotesGrid_EditingControlShowing;
             _dgvPhilosophyQuotes.CellValidating += PhilosophyQuotesGrid_CellValidating;
             _dgvPhilosophyQuotes.DataError += PhilosophyQuotesGrid_DataError;
+            _dgvPhilosophyQuotes.CellBeginEdit += PhilosophyQuotesGrid_CellBeginEdit;
             _dgvPhilosophyQuotes.CellContentClick += PhilosophyQuotesGrid_CellContentClick;
+            _dgvPhilosophyQuotes.CellMouseClick += PhilosophyQuotesGrid_CellMouseClick;
             _dgvPhilosophyQuotes.SelectionChanged += (_, __) => RefreshPhilosophyQuoteBatchActionLabels();
             _dgvPhilosophyQuotes.CellValueChanged += PhilosophyQuotesGrid_CellValueChanged;
             _dgvPhilosophyQuotes.KeyDown += PhilosophyQuotesGrid_KeyDown;
-            _dgvPhilosophyQuotes.CellEndEdit += (_, __) => QueuePhilosophyQuotesGridRowResize();
+            _dgvPhilosophyQuotes.CellEndEdit += PhilosophyQuotesGrid_CellEndEdit;
             _dgvPhilosophyQuotes.ColumnWidthChanged += (_, __) => QueuePhilosophyQuotesGridRowResize();
             _dgvPhilosophyQuotes.Resize += (_, __) =>
             {
@@ -274,8 +314,37 @@ namespace tiktok_Omni
             QueuePhilosophyQuotesGridRowResize();
             LayoutPhilosophyQuotesGrid();
             RefreshPhilosophyQuoteBatchActionLabels();
+            RefreshPhilosophyQuoteRowStatuses();
 
             _philosophyVoiceTabLayout.Controls.Add(_philosophyQuotesGridHost, 0, 1);
+        }
+
+        private void RefreshPhilosophyQuoteRowStatuses()
+        {
+            if (_dgvPhilosophyQuotes == null || _philosophyBatch?.Quotes == null)
+            {
+                return;
+            }
+
+            var sessionBase = GetPhilosophyQuotesSessionBase();
+            _philosophyQuoteStatusByRow.Clear();
+            for (var i = 0; i < _dgvPhilosophyQuotes.Rows.Count; i++)
+            {
+                var quote = i < _philosophyBatch.Quotes.Count ? _philosophyBatch.Quotes[i] : null;
+                var status = PhilosophyBatchAudioRowValidator.Validate(
+                    quote,
+                    i,
+                    _philosophyBatch,
+                    sessionBase,
+                    _video,
+                    _settings);
+                _philosophyQuoteStatusByRow[i] = status;
+            }
+
+            if (_dgvPhilosophyQuotes.Columns.Contains("colPhilosophyQuoteStatus"))
+            {
+                _dgvPhilosophyQuotes.InvalidateColumn(_dgvPhilosophyQuotes.Columns["colPhilosophyQuoteStatus"].Index);
+            }
         }
 
         private static bool IsPhilosophyQuotesGridLayoutLocked(DataGridView grid) =>
@@ -340,26 +409,211 @@ namespace tiktok_Omni
                 BackColor = Color.FromArgb(120, 58, 58),
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
-                Margin = new Padding(0, 4, 12, 4),
+                Margin = new Padding(0, 4, 8, 4),
                 Padding = new Padding(12, 6, 12, 6),
                 UseVisualStyleBackColor = false
             };
             _btnPhilosophyDeleteQuoteRows.FlatAppearance.BorderSize = 0;
             _btnPhilosophyDeleteQuoteRows.Click += (_, __) => DeleteSelectedPhilosophyQuotes();
 
+            panel.Controls.Add(_btnPhilosophyDeleteQuoteRows);
+            panel.Controls.Add(CreatePhilosophyToolbarButton(
+                "📁 Thư viện nhạc",
+                Color.FromArgb(52, 92, 118),
+                (_, __) => OpenPhilosophyAudioLibraryFolder(OmniAudioLibrary.GetSharedMusicDirectory(_settings), "Thư viện nhạc")));
+            panel.Controls.Add(CreatePhilosophyToolbarButton(
+                "📁 Thư viện SFX",
+                Color.FromArgb(72, 88, 118),
+                (_, __) => OpenPhilosophyAudioLibraryFolder(OmniAudioLibrary.GetSharedSfxDirectory(_settings), "Thư viện SFX")));
+
             var hint = new Label
             {
-                Text = "Sửa trực tiếp cột «Quote» · chọn dòng rồi «Xóa dòng» hoặc phím Delete",
+                Text = "Chuột phải Volume/Tốc độ → preset · Đổi tốc độ = FFmpeg chỉnh thoại (không TTS lại) · TT = trạng thái",
                 AutoSize = true,
-                MaximumSize = new Size(980, 0),
+                MaximumSize = new Size(1200, 0),
                 ForeColor = Color.FromArgb(140, 148, 162),
                 Font = new Font("Segoe UI", 9.25F),
-                Margin = new Padding(0, 10, 0, 0)
+                Margin = new Padding(8, 10, 0, 0)
             };
-
-            panel.Controls.Add(_btnPhilosophyDeleteQuoteRows);
             panel.Controls.Add(hint);
             return panel;
+        }
+
+        private static Button CreatePhilosophyToolbarButton(string text, Color back, EventHandler onClick)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                AutoSize = true,
+                MinimumSize = new Size(120, 38),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = back,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.25F),
+                Margin = new Padding(0, 4, 8, 4),
+                Padding = new Padding(10, 6, 10, 6),
+                UseVisualStyleBackColor = false,
+                Cursor = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderSize = 0;
+            btn.Click += onClick;
+            return btn;
+        }
+
+        private void OpenPhilosophyAudioLibraryFolder(string folder, string title)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(folder))
+                {
+                    System.IO.Directory.CreateDirectory(folder);
+                }
+
+                Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void ApplyMoodSuggestionsForSelectedOrAllRows()
+        {
+            if (_philosophyBatch?.Quotes == null)
+            {
+                return;
+            }
+
+            CommitPhilosophyQuotesGridEdits();
+            var indices = GetSelectedPhilosophyQuoteRowIndices();
+            if (indices.Count == 0)
+            {
+                indices = Enumerable.Range(0, _philosophyBatch.Quotes.Count).ToList();
+            }
+
+            var profile = PhilosophyBatchHelper.ResolveBatchProfileName(_philosophyBatch, _video?.ProfileName);
+            foreach (var i in indices)
+            {
+                if (i < 0 || i >= _philosophyBatch.Quotes.Count)
+                {
+                    continue;
+                }
+
+                PhilosophyBatchAudioSuggestionHelper.ApplyMoodSuggestion(
+                    _philosophyBatch.Quotes[i],
+                    _philosophyBatch,
+                    _settings,
+                    profile);
+            }
+
+            RefreshPhilosophyQuotesGrid();
+            SetOperationStatus("Đã gợi ý nhạc + tiếng đệm theo mood cho " + indices.Count + " dòng.");
+        }
+
+        private async Task RunPhilosophyBatchVoiceAllAsync()
+        {
+            if (_generateBodyNarrationAsync == null)
+            {
+                return;
+            }
+
+            _dgvPhilosophyQuotes?.ClearSelection();
+            SetOperationStatus("Đang tạo thoại cả batch…");
+            try
+            {
+                await _generateBodyNarrationAsync().ConfigureAwait(true);
+                RefreshPhilosophyQuoteAudioUi();
+                SetOperationStatus("Tạo thoại cả batch xong.");
+            }
+            catch (Exception ex)
+            {
+                SetOperationStatus("Lỗi tạo thoại: " + ex.Message);
+            }
+        }
+
+        private async Task RunPhilosophyBatchRenderAllAsync()
+        {
+            if (_renderFullMixedAudioAsync == null)
+            {
+                return;
+            }
+
+            _dgvPhilosophyQuotes?.ClearSelection();
+            SetOperationStatus("Đang render mix cả batch…");
+            try
+            {
+                await _renderFullMixedAudioAsync().ConfigureAwait(true);
+                RefreshPhilosophyQuoteAudioUi();
+                SetOperationStatus("Render mix cả batch xong.");
+            }
+            catch (Exception ex)
+            {
+                SetOperationStatus("Lỗi render mix: " + ex.Message);
+            }
+        }
+
+        private void AttachPhilosophyQuoteBatchJellyButtons()
+        {
+            if (!_philosophyMode || _bodyVoice?.NarrationButtonRow == null || _btnPhilosophySuggestMood != null)
+            {
+                return;
+            }
+
+            _btnPhilosophySuggestMood = CreateVoiceNarrationJellyButton(
+                "btnPhilosophySuggestMood",
+                "Gợi ý theo mood",
+                Color.FromArgb(92, 72, 128));
+            _btnPhilosophySuggestMood.Click += (_, __) => ApplyMoodSuggestionsForSelectedOrAllRows();
+
+            _btnPhilosophyBatchVoice = CreateVoiceNarrationJellyButton(
+                "btnPhilosophyBatchVoice",
+                "Tạo thoại cả batch",
+                Color.FromArgb(56, 108, 88));
+            _btnPhilosophyBatchVoice.Click += async (_, __) =>
+            {
+                if (!ValidateAndSave())
+                {
+                    return;
+                }
+
+                _btnPhilosophyBatchVoice.Enabled = false;
+                try
+                {
+                    await RunPhilosophyBatchVoiceAllAsync().ConfigureAwait(true);
+                }
+                finally
+                {
+                    _btnPhilosophyBatchVoice.Enabled = true;
+                    RefreshNarrationButtons();
+                }
+            };
+
+            _btnPhilosophyBatchRender = CreateVoiceNarrationJellyButton(
+                "btnPhilosophyBatchRender",
+                "Render cả batch",
+                Color.FromArgb(68, 98, 88));
+            _btnPhilosophyBatchRender.Click += async (_, __) =>
+            {
+                if (!ValidateAndSave())
+                {
+                    return;
+                }
+
+                _btnPhilosophyBatchRender.Enabled = false;
+                try
+                {
+                    await RunPhilosophyBatchRenderAllAsync().ConfigureAwait(true);
+                }
+                finally
+                {
+                    _btnPhilosophyBatchRender.Enabled = true;
+                    RefreshNarrationButtons();
+                }
+            };
+
+            _bodyVoice.NarrationButtonRow.Controls.Add(_btnPhilosophySuggestMood);
+            _bodyVoice.NarrationButtonRow.Controls.Add(_btnPhilosophyBatchVoice);
+            _bodyVoice.NarrationButtonRow.Controls.Add(_btnPhilosophyBatchRender);
         }
 
         private IReadOnlyList<int> GetSelectedPhilosophyQuoteRowIndices()
@@ -480,7 +734,413 @@ namespace tiktok_Omni
                 QueuePhilosophyQuotesGridRowResize();
                 _dgvPhilosophyQuotes.InvalidateRow(e.RowIndex);
                 RefreshNarrationButtons();
+                RefreshPhilosophyQuoteRowStatuses();
+                SetOperationStatus("Quote dòng " + (e.RowIndex + 1) + " đổi — cần «Tạo lại thoại».");
+                return;
             }
+
+            if (colName == "colPhilosophyQuoteMusic"
+                || colName == "colPhilosophyQuoteAmbient")
+            {
+                var sessionBase = GetPhilosophyQuotesSessionBase();
+                PhilosophyBatchAudioPreviewHelper.DeleteQuotePreviewFiles(sessionBase, e.RowIndex);
+                QueuePhilosophyQuoteRowStatusRefresh();
+            }
+        }
+
+        private void PhilosophyQuotesGrid_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
+        {
+            if (_dgvPhilosophyQuotes == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            var colName = _dgvPhilosophyQuotes.Columns[e.ColumnIndex].Name;
+            if (!(_dgvPhilosophyQuotes.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem quote))
+            {
+                return;
+            }
+
+            if (colName == "colPhilosophyQuoteVolume")
+            {
+                var volume = PhilosophyBatchHelper.ResolveQuoteMusicVolumePercent(quote, _philosophyBatch);
+                _dgvPhilosophyQuotes.Rows[e.RowIndex].Cells[e.ColumnIndex].Value = volume.ToString(CultureInfo.InvariantCulture);
+                return;
+            }
+
+            if (colName == "colPhilosophyQuoteSpeed")
+            {
+                var speed = PhilosophyBatchHelper.ResolveQuoteNarrationSpeedPercent(quote, _philosophyBatch);
+                _dgvPhilosophyQuotes.Rows[e.RowIndex].Cells[e.ColumnIndex].Value = speed.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        private void PhilosophyQuotesGrid_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            QueuePhilosophyQuotesGridRowResize();
+
+            if (_dgvPhilosophyQuotes == null || e.RowIndex < 0 || e.ColumnIndex < 0 || _philosophyQuotesGridSyncLock)
+            {
+                return;
+            }
+
+            var colName = _dgvPhilosophyQuotes.Columns[e.ColumnIndex].Name;
+            if (colName == "colPhilosophyQuoteVolume" || colName == "colPhilosophyQuoteSpeed")
+            {
+                TryCommitPhilosophyQuoteNumericCell(e.RowIndex, colName, invalidateOnly: true);
+                if (colName == "colPhilosophyQuoteSpeed")
+                {
+                    _ = ReapplyPhilosophyQuoteVoiceSpeedForRowAsync(e.RowIndex);
+                }
+            }
+        }
+
+        private async Task ReapplyPhilosophyBatchVoiceSpeedAsync()
+        {
+            if (_philosophyBatch?.Quotes == null)
+            {
+                return;
+            }
+
+            PhilosophyBatchTtsHelper.SyncBodyVoiceToHookTrack(_video);
+            var indices = Enumerable.Range(0, _philosophyBatch.Quotes.Count).ToList();
+            SetOperationStatus("Đang chỉnh tốc độ thoại cả batch…");
+            try
+            {
+                await PhilosophyBatchAudioPreviewHelper.ReapplyQuoteVoiceSpeedBatchAsync(
+                    _philosophyBatch,
+                    _video,
+                    _settings,
+                    indices,
+                    null).ConfigureAwait(true);
+                RefreshPhilosophyQuoteAudioUi();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Tốc độ thoại", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private async Task ReapplyPhilosophyQuoteVoiceSpeedForRowAsync(int rowIndex)
+        {
+            if (_philosophyBatch?.Quotes == null || rowIndex < 0 || rowIndex >= _philosophyBatch.Quotes.Count)
+            {
+                return;
+            }
+
+            var quote = _philosophyBatch.Quotes[rowIndex];
+            if (quote == null || string.IsNullOrWhiteSpace(quote.Content))
+            {
+                return;
+            }
+
+            var sessionBase = GetPhilosophyQuotesSessionBase();
+            if (!PhilosophyBatchAudioPreviewHelper.HasQuoteVoicePreview(sessionBase, rowIndex))
+            {
+                QueuePhilosophyQuoteRowStatusRefresh();
+                return;
+            }
+
+            PhilosophyBatchTtsHelper.SyncBodyVoiceToHookTrack(_video);
+            SetOperationStatus("Đang chỉnh tốc độ thoại dòng " + (rowIndex + 1) + "…");
+            try
+            {
+                await PhilosophyBatchAudioPreviewHelper.ReapplyQuoteVoiceSpeedAsync(
+                    sessionBase,
+                    rowIndex,
+                    quote,
+                    _philosophyBatch,
+                    _video,
+                    _settings,
+                    null).ConfigureAwait(true);
+                RefreshPhilosophyQuoteAudioUi();
+                SetOperationStatus("Tốc độ dòng " + (rowIndex + 1) + " đã cập nhật — bấm «Render audio» để ghép mix.");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Tốc độ thoại", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                SetOperationStatus(string.Empty);
+            }
+        }
+
+        internal void RefreshPhilosophyQuoteAudioUi()
+        {
+            RefreshPhilosophyQuoteRowStatuses();
+            RefreshNarrationButtons();
+            RefreshPhilosophyQuoteBatchActionLabels();
+            if (_dgvPhilosophyQuotes == null)
+            {
+                return;
+            }
+
+            foreach (var colName in new[] { "colPhilosophyQuoteStatus", "colPhilosophyQuoteVoice", "colPhilosophyQuoteFullMix" })
+            {
+                if (_dgvPhilosophyQuotes.Columns.Contains(colName))
+                {
+                    _dgvPhilosophyQuotes.InvalidateColumn(_dgvPhilosophyQuotes.Columns[colName].Index);
+                }
+            }
+        }
+
+        private void QueuePhilosophyQuoteRowStatusRefresh()
+        {
+            if (_philosophyQuoteStatusRefreshQueued || _dgvPhilosophyQuotes == null || _dgvPhilosophyQuotes.IsDisposed)
+            {
+                return;
+            }
+
+            _philosophyQuoteStatusRefreshQueued = true;
+            BeginInvoke(new Action(() =>
+            {
+                _philosophyQuoteStatusRefreshQueued = false;
+                if (_dgvPhilosophyQuotes == null || _dgvPhilosophyQuotes.IsDisposed)
+                {
+                    return;
+                }
+
+                RefreshPhilosophyQuoteRowStatuses();
+            }));
+        }
+
+        private bool TryCommitPhilosophyQuoteNumericCell(int rowIndex, string colName, bool invalidateOnly)
+        {
+            if (_philosophyBatch?.Quotes == null || rowIndex < 0 || rowIndex >= _philosophyBatch.Quotes.Count || _dgvPhilosophyQuotes == null)
+            {
+                return false;
+            }
+
+            var quote = _philosophyBatch.Quotes[rowIndex];
+            if (quote == null || !_dgvPhilosophyQuotes.Columns.Contains(colName))
+            {
+                return false;
+            }
+
+            var cell = _dgvPhilosophyQuotes.Rows[rowIndex].Cells[colName];
+            var text = (cell.EditedFormattedValue ?? cell.Value)?.ToString()?.Trim().TrimEnd('%') ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            {
+                return false;
+            }
+
+            var changed = false;
+            if (colName == "colPhilosophyQuoteVolume")
+            {
+                var volume = PhilosophyBatchHelper.ClampMusicVolumePercent(parsed);
+                changed = quote.MusicVolumePercent != volume;
+                quote.MusicVolumePercent = volume;
+            }
+            else if (colName == "colPhilosophyQuoteSpeed")
+            {
+                var speed = PhilosophyBatchHelper.ClampNarrationSpeedPercent(parsed);
+                changed = quote.NarrationSpeedPercent != speed;
+                quote.NarrationSpeedPercent = speed;
+            }
+            else
+            {
+                return false;
+            }
+
+            if (!changed && invalidateOnly)
+            {
+                return true;
+            }
+
+            if (colName == "colPhilosophyQuoteVolume")
+            {
+                var sessionBase = GetPhilosophyQuotesSessionBase();
+                PhilosophyBatchAudioPreviewHelper.DeleteQuotePreviewFiles(sessionBase, rowIndex);
+            }
+
+            QueuePhilosophyQuoteRowStatusRefresh();
+            if (colName == "colPhilosophyQuoteSpeed")
+            {
+                SetOperationStatus("Tốc độ dòng " + (rowIndex + 1) + " → " + parsed + "%…");
+            }
+
+            _dgvPhilosophyQuotes.InvalidateCell(_dgvPhilosophyQuotes.Columns[colName].Index, rowIndex);
+            return true;
+        }
+
+        private void ApplyPhilosophyBatchSpeedToAllQuotes(int speedPercent)
+        {
+            if (_philosophyBatch?.Quotes == null)
+            {
+                return;
+            }
+
+            var speed = PhilosophyBatchHelper.ClampNarrationSpeedPercent(speedPercent);
+            _philosophyBatch.BodyNarrationSpeedPercent = speed;
+            foreach (var quote in _philosophyBatch.Quotes)
+            {
+                if (quote != null)
+                {
+                    quote.NarrationSpeedPercent = speed;
+                }
+            }
+
+            if (_dgvPhilosophyQuotes != null && _dgvPhilosophyQuotes.Columns.Contains("colPhilosophyQuoteSpeed"))
+            {
+                var col = _dgvPhilosophyQuotes.Columns["colPhilosophyQuoteSpeed"].Index;
+                for (var i = 0; i < _dgvPhilosophyQuotes.Rows.Count; i++)
+                {
+                    _dgvPhilosophyQuotes.InvalidateCell(col, i);
+                }
+            }
+
+            QueuePhilosophyQuoteRowStatusRefresh();
+        }
+
+        private Task PlayPhilosophyQuotePreviewAsync(int rowIndex, bool fullMix)
+        {
+            var sessionBase = GetPhilosophyQuotesSessionBase();
+            var path = fullMix
+                ? PhilosophyBatchAudioPreviewHelper.GetQuoteFullMixPreviewPath(sessionBase, rowIndex)
+                : PhilosophyBatchAudioPreviewHelper.GetQuoteVoicePreviewPath(sessionBase, rowIndex);
+            if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
+            {
+                if (fullMix)
+                {
+                    MessageBox.Show(
+                        this,
+                        "Chưa có audio thành phẩm cho dòng này. Bấm «Render audio» trước.",
+                        "Nghe audio",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+
+                return Task.CompletedTask;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = path,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Nghe audio", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private static string FormatPhilosophyMoodLabel(string mood)
+        {
+            var m = (mood ?? "reflective").Trim().ToLowerInvariant();
+            switch (m)
+            {
+                case "calm": return "calm";
+                case "hopeful": return "hopeful";
+                case "melancholic": return "melancholic";
+                case "intense": return "intense";
+                default: return "reflective";
+            }
+        }
+
+        private void PhilosophyQuotesGrid_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right || e.RowIndex < 0 || e.ColumnIndex < 0 || _dgvPhilosophyQuotes == null)
+            {
+                return;
+            }
+
+            var colName = _dgvPhilosophyQuotes.Columns[e.ColumnIndex].Name;
+            if (colName == "colPhilosophyQuoteVolume")
+            {
+                ShowPhilosophyVolumePresetMenu(e.RowIndex);
+                return;
+            }
+
+            if (colName == "colPhilosophyQuoteSpeed")
+            {
+                ShowPhilosophySpeedPresetMenu(e.RowIndex);
+            }
+        }
+
+        private void ShowPhilosophyVolumePresetMenu(int rowIndex)
+        {
+            if (_philosophyBatch?.Quotes == null || rowIndex < 0 || rowIndex >= _philosophyBatch.Quotes.Count)
+            {
+                return;
+            }
+
+            var menu = new ContextMenuStrip
+            {
+                BackColor = Color.FromArgb(45, 49, 60),
+                ForeColor = Color.WhiteSmoke,
+                Font = Font
+            };
+            foreach (var pct in new[] { 10, 15, 20, 25, 30 })
+            {
+                var value = pct;
+                menu.Items.Add(value + "%", null, (_, __) => ApplyPhilosophyQuoteVolume(rowIndex, value));
+            }
+
+            menu.Show(Cursor.Position);
+        }
+
+        private void ShowPhilosophySpeedPresetMenu(int rowIndex)
+        {
+            if (_philosophyBatch?.Quotes == null || rowIndex < 0 || rowIndex >= _philosophyBatch.Quotes.Count)
+            {
+                return;
+            }
+
+            var menu = new ContextMenuStrip
+            {
+                BackColor = Color.FromArgb(45, 49, 60),
+                ForeColor = Color.WhiteSmoke,
+                Font = Font
+            };
+            foreach (var pct in new[] { 70, 80, 90, 100, 110 })
+            {
+                var value = pct;
+                menu.Items.Add(value + "%", null, (_, __) => ApplyPhilosophyQuoteSpeed(rowIndex, value));
+            }
+
+            menu.Show(Cursor.Position);
+        }
+
+        private void ApplyPhilosophyQuoteVolume(int rowIndex, int volume)
+        {
+            if (_philosophyBatch?.Quotes == null || rowIndex < 0 || rowIndex >= _philosophyBatch.Quotes.Count)
+            {
+                return;
+            }
+
+            _philosophyBatch.Quotes[rowIndex].MusicVolumePercent = PhilosophyBatchHelper.ClampMusicVolumePercent(volume);
+            var sessionBase = GetPhilosophyQuotesSessionBase();
+            PhilosophyBatchAudioPreviewHelper.DeleteQuotePreviewFiles(sessionBase, rowIndex);
+            if (_dgvPhilosophyQuotes != null && _dgvPhilosophyQuotes.Columns.Contains("colPhilosophyQuoteVolume"))
+            {
+                _dgvPhilosophyQuotes.InvalidateCell(_dgvPhilosophyQuotes.Columns["colPhilosophyQuoteVolume"].Index, rowIndex);
+            }
+
+            QueuePhilosophyQuoteRowStatusRefresh();
+        }
+
+        private void ApplyPhilosophyQuoteSpeed(int rowIndex, int speed)
+        {
+            if (_philosophyBatch?.Quotes == null || rowIndex < 0 || rowIndex >= _philosophyBatch.Quotes.Count)
+            {
+                return;
+            }
+
+            _philosophyBatch.Quotes[rowIndex].NarrationSpeedPercent = PhilosophyBatchHelper.ClampNarrationSpeedPercent(speed);
+            if (_dgvPhilosophyQuotes != null && _dgvPhilosophyQuotes.Columns.Contains("colPhilosophyQuoteSpeed"))
+            {
+                _dgvPhilosophyQuotes.InvalidateCell(_dgvPhilosophyQuotes.Columns["colPhilosophyQuoteSpeed"].Index, rowIndex);
+            }
+
+            _ = ReapplyPhilosophyQuoteVoiceSpeedForRowAsync(rowIndex);
         }
 
         private void ResizePhilosophyQuotesGridRows()
@@ -615,6 +1275,7 @@ namespace tiktok_Omni
                 }
 
                 PhilosophyAmbientCatalog.EnsureRowDefault(quote);
+                quote.Content = PhilosophyGeminiTtsContext.FixQuotePeriods(quote.Content);
                 EnsurePhilosophyQuoteAmbientInCombo(quote.AmbientKey);
                 EnsurePhilosophyQuoteMusicInCombo(quote.MusicFolder);
                 if (quote.MusicVolumePercent <= 0)
@@ -642,7 +1303,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            PhilosophyBatchHelper.EnsureQuoteAudioDefaults(_philosophyBatch);
+                PhilosophyBatchHelper.EnsureBatchAudioDefaults(_philosophyBatch, _settings);
             MergePhilosophyQuoteComboItems();
             if (_philosophyQuotesBinding == null)
             {
@@ -658,6 +1319,7 @@ namespace tiktok_Omni
             QueuePhilosophyQuotesGridRowResize();
             LayoutPhilosophyQuotesGrid();
             RefreshPhilosophyQuoteBatchActionLabels();
+            RefreshPhilosophyQuoteRowStatuses();
         }
 
         private void InitializePhilosophyQuoteComboItems()
@@ -885,6 +1547,13 @@ namespace tiktok_Omni
                 _btnRenderFullMixedAudio.Text = selectedCount > 1
                     ? "Render audio (" + selectedCount + " dòng)"
                     : "Render audio";
+            }
+
+            if (_lblPhilosophyBatchScopeHint != null && !_lblPhilosophyBatchScopeHint.IsDisposed)
+            {
+                _lblPhilosophyBatchScopeHint.Text = selectedCount > 0
+                    ? "«Tạo audio thoại» / «Render audio» áp dụng " + selectedCount + " dòng đang chọn."
+                    : "Không chọn dòng = áp dụng cả batch (mọi quote có nội dung).";
             }
         }
 
@@ -1147,6 +1816,25 @@ namespace tiktok_Omni
             if (colName == "colPhilosophyQuoteAmbient")
             {
                 e.ToolTipText = PhilosophyAmbientCatalog.GetLabel(quote.AmbientKey);
+                return;
+            }
+
+            if (colName == "colPhilosophyQuoteStatus"
+                && _philosophyQuoteStatusByRow.TryGetValue(e.RowIndex, out var status))
+            {
+                e.ToolTipText = status.Detail;
+                return;
+            }
+
+            if (colName == "colPhilosophyQuoteVolume")
+            {
+                e.ToolTipText = "Chuột phải → chọn preset volume nhạc nền";
+                return;
+            }
+
+            if (colName == "colPhilosophyQuoteSpeed")
+            {
+                e.ToolTipText = "Chuột phải → chọn preset tốc độ thoại";
             }
         }
 
@@ -1177,8 +1865,46 @@ namespace tiktok_Omni
             }
 
             var colName = _dgvPhilosophyQuotes.Columns[e.ColumnIndex].Name;
+            if (colName == "colPhilosophyQuoteStatus")
+            {
+                if (_philosophyQuoteStatusByRow.TryGetValue(e.RowIndex, out var status))
+                {
+                    e.Value = status.Summary;
+                    e.CellStyle.ForeColor = status.IsValid
+                        ? Color.FromArgb(120, 210, 140)
+                        : status.Summary == "◐"
+                            ? Color.FromArgb(200, 190, 120)
+                            : Color.FromArgb(240, 150, 110);
+                }
+                else
+                {
+                    e.Value = "?";
+                }
+
+                e.FormattingApplied = true;
+                return;
+            }
+
+            if (colName == "colPhilosophyQuoteMood")
+            {
+                if (_dgvPhilosophyQuotes.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem quoteMood)
+                {
+                    e.Value = FormatPhilosophyMoodLabel(quoteMood.Mood);
+                    e.FormattingApplied = true;
+                }
+
+                return;
+            }
+
             if (colName == "colPhilosophyQuoteVolume")
             {
+                if (_dgvPhilosophyQuotes.IsCurrentCellInEditMode
+                    && _dgvPhilosophyQuotes.CurrentCell?.RowIndex == e.RowIndex
+                    && _dgvPhilosophyQuotes.CurrentCell?.ColumnIndex == e.ColumnIndex)
+                {
+                    return;
+                }
+
                 if (_dgvPhilosophyQuotes.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem quoteVolume)
                 {
                     e.Value = PhilosophyBatchHelper.ClampMusicVolumePercent(
@@ -1194,6 +1920,13 @@ namespace tiktok_Omni
 
             if (colName == "colPhilosophyQuoteSpeed")
             {
+                if (_dgvPhilosophyQuotes.IsCurrentCellInEditMode
+                    && _dgvPhilosophyQuotes.CurrentCell?.RowIndex == e.RowIndex
+                    && _dgvPhilosophyQuotes.CurrentCell?.ColumnIndex == e.ColumnIndex)
+                {
+                    return;
+                }
+
                 if (_dgvPhilosophyQuotes.Rows[e.RowIndex].DataBoundItem is PhilosophyScriptItem quoteSpeed)
                 {
                     e.Value = PhilosophyBatchHelper.ResolveQuoteNarrationSpeedPercent(quoteSpeed, _philosophyBatch)
@@ -1296,7 +2029,7 @@ namespace tiktok_Omni
             }
         }
 
-        private void PhilosophyQuotesGrid_CellContentClick(object sender, DataGridViewCellEventArgs e)
+        private async void PhilosophyQuotesGrid_CellContentClick(object sender, DataGridViewCellEventArgs e)
         {
             if (_dgvPhilosophyQuotes == null || e.RowIndex < 0 || e.ColumnIndex < 0)
             {
@@ -1309,37 +2042,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            var sessionBase = GetPhilosophyQuotesSessionBase();
-            var path = colName == "colPhilosophyQuoteVoice"
-                ? PhilosophyBatchAudioPreviewHelper.GetQuoteVoicePreviewPath(sessionBase, e.RowIndex)
-                : PhilosophyBatchAudioPreviewHelper.GetQuoteFullMixPreviewPath(sessionBase, e.RowIndex);
-            if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
-            {
-                if (colName == "colPhilosophyQuoteFullMix")
-                {
-                    MessageBox.Show(
-                        this,
-                        "Chưa có audio thành phẩm cho dòng này. Bấm «Render audio» trước.",
-                        "Nghe audio",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                }
-
-                return;
-            }
-
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = path,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, "Nghe audio", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            await PlayPhilosophyQuotePreviewAsync(e.RowIndex, colName == "colPhilosophyQuoteFullMix").ConfigureAwait(true);
         }
 
         private void PhilosophyQuotesGrid_DataError(object sender, DataGridViewDataErrorEventArgs e)
@@ -1374,7 +2077,25 @@ namespace tiktok_Omni
 
             try
             {
-                if (_dgvPhilosophyQuotes.IsCurrentCellInEditMode)
+                if (_dgvPhilosophyQuotes.IsCurrentCellInEditMode && _dgvPhilosophyQuotes.CurrentCell != null)
+                {
+                    var colName = _dgvPhilosophyQuotes.Columns[_dgvPhilosophyQuotes.CurrentCell.ColumnIndex].Name;
+                    if (colName == "colPhilosophyQuoteVolume" || colName == "colPhilosophyQuoteSpeed")
+                    {
+                        TryCommitPhilosophyQuoteNumericCell(_dgvPhilosophyQuotes.CurrentCell.RowIndex, colName, invalidateOnly: false);
+                    }
+
+                    _philosophyQuotesGridSyncLock = true;
+                    try
+                    {
+                        _dgvPhilosophyQuotes.CancelEdit();
+                    }
+                    finally
+                    {
+                        _philosophyQuotesGridSyncLock = false;
+                    }
+                }
+                else if (_dgvPhilosophyQuotes.IsCurrentCellInEditMode)
                 {
                     _dgvPhilosophyQuotes.EndEdit();
                 }
@@ -1415,7 +2136,7 @@ namespace tiktok_Omni
                     quote.AmbientKey = System.IO.Path.GetFileName(quote.AmbientKey.Trim());
                 }
 
-                quote.Content = (quote.Content ?? string.Empty).Trim();
+                quote.Content = PhilosophyGeminiTtsContext.FixQuotePeriods(quote.Content);
                 quote.MusicVolumePercent = PhilosophyBatchHelper.ClampMusicVolumePercent(
                     quote.MusicVolumePercent > 0
                         ? quote.MusicVolumePercent

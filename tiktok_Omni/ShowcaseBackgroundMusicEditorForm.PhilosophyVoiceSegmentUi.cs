@@ -18,6 +18,7 @@ namespace tiktok_Omni
         private const int VoiceSegLeftRowStyle = 1;
         private const int VoiceSegLeftRowGender = 2;
         private const int VoiceSegLeftRowTone = 3;
+        private const int VoiceSegLeftRowBatchSpeed = 4;
         private const int VoiceSegPhilosophyRightRowProsody = 0;
         private const int VoiceSegPhilosophyRightRowCustomTone = 1;
 
@@ -183,6 +184,16 @@ namespace tiktok_Omni
                 seg.FootnoteLabel.MaximumSize = new Size(tableW, 0);
             }
 
+            if (seg.NarrationSpeedHost != null)
+            {
+                seg.NarrationSpeedHost.AutoSize = true;
+                seg.NarrationSpeedHost.Dock = DockStyle.Top;
+                seg.NarrationSpeedHost.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                seg.NarrationSpeedHost.Width = comboFieldW + VoiceSegmentPairLabelWidth - PhilosophyVoiceLabelInset;
+                LayoutNarrationSpeedHostContents(seg, seg.NarrationSpeedHost.Width);
+                seg.NarrationSpeedHost.PerformLayout();
+            }
+
             seg.Shell?.Invalidate(true);
             SyncSegmentShellHeight(seg);
         }
@@ -301,6 +312,10 @@ namespace tiktok_Omni
                 {
                     OnSegmentProsodySliderChanged(seg);
                 }
+                else if (ReferenceEquals(s, seg.TrkNarrationSpeed))
+                {
+                    OnPhilosophyBatchNarrationSpeedChanged(seg, applyVoice: false);
+                }
                 else if (ReferenceEquals(s, seg.TrkStability) || ReferenceEquals(s, seg.TrkSimilarity) || ReferenceEquals(s, seg.TrkStyle))
                 {
                     OnSegmentCustomToneSliderChanged(seg);
@@ -328,23 +343,30 @@ namespace tiktok_Omni
             seg.TrkSimilarity.Scroll += OnSegChanged;
             seg.TrkStyle.Scroll += OnSegChanged;
 
+            seg.TrkNarrationSpeed = CreateNarrationSpeedTrackBar();
+            seg.LblNarrationSpeedValue = CreateNarrationSpeedValueLabel();
+            seg.TrkNarrationSpeed.ValueChanged += OnSegChanged;
+            seg.TrkNarrationSpeed.Scroll += (_, __) => OnPhilosophyBatchNarrationSpeedChanged(seg, applyVoice: true);
+            var speedHost = BuildSegmentNarrationSpeedHost(seg);
+            seg.NarrationSpeedHost = speedHost;
+
             var tbl = new TableLayoutPanel
             {
                 AutoSize = true,
                 ColumnCount = 2,
-                RowCount = 3,
+                RowCount = 4,
                 BackColor = BackColor,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             seg.Table = tbl;
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            for (var i = 0; i < 3; i++)
+            for (var i = 0; i < 4; i++)
             {
                 tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             }
 
-            const int leftRowCount = 4;
+            const int leftRowCount = 5;
             var leftPanel = new TableLayoutPanel
             {
                 AutoSize = true,
@@ -382,6 +404,8 @@ namespace tiktok_Omni
             seg.LblTone = MkLbl("Tone giọng");
             leftPanel.Controls.Add(seg.LblTone, 0, VoiceSegLeftRowTone);
             leftPanel.Controls.Add(seg.CbTone, 1, VoiceSegLeftRowTone);
+            leftPanel.Controls.Add(MkLbl("Tốc độ cả batch"), 0, VoiceSegLeftRowBatchSpeed);
+            leftPanel.Controls.Add(speedHost, 1, VoiceSegLeftRowBatchSpeed);
 
             const int rightRowCount = 2;
             var rightPanel = new TableLayoutPanel
@@ -404,9 +428,8 @@ namespace tiktok_Omni
             var customToneHost = BuildSegmentCustomTonePanel(seg);
             seg.CustomToneHost = customToneHost;
 
-            var prosodyHost = BuildPhilosophySegmentEdgeProsodyPanel(seg);
-            seg.ProsodyHost = prosodyHost;
-            rightPanel.Controls.Add(prosodyHost, 0, VoiceSegPhilosophyRightRowProsody);
+            var prosodyWrap = BuildPhilosophySegmentEdgeProsodyPanel(seg);
+            rightPanel.Controls.Add(prosodyWrap, 0, VoiceSegPhilosophyRightRowProsody);
             rightPanel.Controls.Add(customToneHost, 0, VoiceSegPhilosophyRightRowCustomTone);
 
             tbl.Controls.Add(leftPanel, 0, VoiceSegRowMain);
@@ -436,13 +459,24 @@ namespace tiktok_Omni
             tbl.Controls.Add(seg.NarrationButtonRow, 0, VoiceSegRowButtons);
             tbl.SetColumnSpan(seg.NarrationButtonRow, 2);
 
+            _lblPhilosophyBatchScopeHint = new Label
+            {
+                AutoSize = true,
+                ForeColor = Color.FromArgb(130, 138, 152),
+                Font = new Font("Segoe UI", 9F),
+                Text = "Không chọn dòng = áp dụng cả batch. «Tốc độ cả batch» ~100% là đủ — preset quote đã cân nhịp buồn, không cần 150%.",
+                Margin = new Padding(PhilosophyVoiceLabelInset, VoiceSegV(2), 0, VoiceSegV(4))
+            };
+            tbl.Controls.Add(_lblPhilosophyBatchScopeHint, 0, 3);
+            tbl.SetColumnSpan(_lblPhilosophyBatchScopeHint, 2);
+
             _cbBodyTtsEngine = seg.CbTts;
             return seg;
         }
 
         private Control BuildPhilosophySegmentEdgeProsodyPanel(VoiceSegmentUi seg)
         {
-            var host = new TableLayoutPanel
+            var inner = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 ColumnCount = 2,
@@ -450,20 +484,21 @@ namespace tiktok_Omni
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = BackColor,
-                Margin = new Padding(0, VoiceSegV(2), 0, 0)
+                Margin = new Padding(PhilosophyVoiceLabelInset, VoiceSegV(2), 0, 0),
+                Visible = false
             };
-            host.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            host.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            host.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            inner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            inner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            inner.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            host.Resize += (_, __) =>
+            inner.Resize += (_, __) =>
             {
                 if (_voiceUiLock || seg.ProsodyHost == null)
                 {
                     return;
                 }
 
-                var w = Math.Max(280, host.ClientSize.Width);
+                var w = Math.Max(280, inner.ClientSize.Width);
                 if (w > 0)
                 {
                     LayoutPhilosophyProsodyHostContents(seg, w);
@@ -472,21 +507,55 @@ namespace tiktok_Omni
                 SyncSegmentShellHeight(seg);
             };
 
-            host.Controls.Add(BuildEdgeProsodySliderRow(
+            inner.Controls.Add(BuildEdgeProsodySliderRow(
                 "Rate",
                 seg.TrkRate,
                 seg.LblRateValue,
                 "-25%",
                 "+25%",
                 400), 0, 0);
-            host.Controls.Add(BuildEdgeProsodySliderRow(
+            inner.Controls.Add(BuildEdgeProsodySliderRow(
                 "Pitch",
                 seg.TrkPitch,
                 seg.LblPitchValue,
                 "-12Hz",
                 "+12Hz",
                 400), 1, 0);
-            return host;
+
+            var toggle = new LinkLabel
+            {
+                AutoSize = true,
+                Text = "Nâng cao (Rate / Pitch) ▾",
+                LinkColor = Color.FromArgb(140, 180, 220),
+                ActiveLinkColor = Color.FromArgb(180, 210, 240),
+                VisitedLinkColor = Color.FromArgb(140, 180, 220),
+                Margin = new Padding(PhilosophyVoiceLabelInset, VoiceSegV(2), 0, 0),
+                Font = new Font("Segoe UI", 9F)
+            };
+            toggle.LinkClicked += (_, __) =>
+            {
+                _philosophyProsodyExpanded = !_philosophyProsodyExpanded;
+                inner.Visible = _philosophyProsodyExpanded;
+                toggle.Text = _philosophyProsodyExpanded
+                    ? "Nâng cao (Rate / Pitch) ▴"
+                    : "Nâng cao (Rate / Pitch) ▾";
+                SyncSegmentShellHeight(seg);
+            };
+
+            var wrap = new Panel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top,
+                BackColor = BackColor
+            };
+            wrap.Controls.Add(toggle);
+            wrap.Controls.Add(inner);
+            inner.Top = toggle.Bottom + 2;
+            toggle.Location = new Point(0, 0);
+
+            seg.ProsodyHost = inner;
+            return wrap;
         }
 
         private int ResolveSegmentProsodyRightRow(VoiceSegmentUi seg) =>
@@ -554,7 +623,13 @@ namespace tiktok_Omni
             SetSegmentRightRowVisible(seg, VoiceSegPhilosophyRightRowProsody, edge);
             if (seg.ProsodyHost != null)
             {
-                seg.ProsodyHost.Visible = edge;
+                var wrap = seg.ProsodyHost.Parent;
+                if (wrap != null)
+                {
+                    wrap.Visible = edge;
+                }
+
+                seg.ProsodyHost.Visible = edge && _philosophyProsodyExpanded;
             }
         }
 
@@ -587,5 +662,26 @@ namespace tiktok_Omni
 
         private void SetSegmentRightRowVisible(VoiceSegmentUi seg, int row, bool visible) =>
             SetSegmentPanelRowVisible(seg?.RightParamsPanel, row, visible);
+
+        private void OnPhilosophyBatchNarrationSpeedChanged(VoiceSegmentUi seg, bool applyVoice)
+        {
+            if (_voiceUiLock || seg?.TrkNarrationSpeed == null)
+            {
+                return;
+            }
+
+            UpdateSegmentNarrationSpeedLabel(seg);
+            SaveSegmentNarrationSpeed(seg);
+            ApplyPhilosophyBatchSpeedToAllQuotes(seg.TrkNarrationSpeed.Value);
+            if (!applyVoice)
+            {
+                return;
+            }
+
+            _ = ReapplyPhilosophyBatchVoiceSpeedAsync();
+            SetOperationStatus("Tốc độ cả batch → "
+                               + seg.TrkNarrationSpeed.Value
+                               + "% · thoại đã cập nhật — bấm «Render audio» để ghép mix.");
+        }
     }
 }

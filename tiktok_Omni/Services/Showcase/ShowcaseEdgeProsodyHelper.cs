@@ -63,7 +63,14 @@ namespace tiktok_Omni.Services.Showcase
             return HookStyleCatalog.StyleHuongdan;
         }
 
-        public static bool TryGetPresetOffsets(string hookStyleKey, out int rateOffsetPercent, out int pitchOffsetHz)
+        public static bool TryGetPresetOffsets(string hookStyleKey, out int rateOffsetPercent, out int pitchOffsetHz) =>
+            TryGetPresetOffsets(hookStyleKey, philosophyQuote: false, out rateOffsetPercent, out pitchOffsetHz);
+
+        public static bool TryGetPresetOffsets(
+            string hookStyleKey,
+            bool philosophyQuote,
+            out int rateOffsetPercent,
+            out int pitchOffsetHz)
         {
             rateOffsetPercent = 0;
             pitchOffsetHz = 0;
@@ -73,7 +80,15 @@ namespace tiktok_Omni.Services.Showcase
                 return false;
             }
 
-            GetPresetForCatalogStyle(key, out rateOffsetPercent, out pitchOffsetHz);
+            if (philosophyQuote)
+            {
+                GetPresetForPhilosophyQuoteStyle(key, out rateOffsetPercent, out pitchOffsetHz);
+            }
+            else
+            {
+                GetPresetForCatalogStyle(key, out rateOffsetPercent, out pitchOffsetHz);
+            }
+
             return true;
         }
 
@@ -82,9 +97,24 @@ namespace tiktok_Omni.Services.Showcase
             int customRateOffsetPercent,
             int customPitchOffsetHz,
             out int rateOffsetPercent,
+            out int pitchOffsetHz) =>
+            ResolveEffectiveOffsets(
+                hookStyleKey,
+                customRateOffsetPercent,
+                customPitchOffsetHz,
+                philosophyQuote: false,
+                out rateOffsetPercent,
+                out pitchOffsetHz);
+
+        public static void ResolveEffectiveOffsets(
+            string hookStyleKey,
+            int customRateOffsetPercent,
+            int customPitchOffsetHz,
+            bool philosophyQuote,
+            out int rateOffsetPercent,
             out int pitchOffsetHz)
         {
-            if (TryGetPresetOffsets(hookStyleKey, out rateOffsetPercent, out pitchOffsetHz))
+            if (TryGetPresetOffsets(hookStyleKey, philosophyQuote, out rateOffsetPercent, out pitchOffsetHz))
             {
                 return;
             }
@@ -108,12 +138,21 @@ namespace tiktok_Omni.Services.Showcase
             EdgeTtsSynthesisOptions voiceBase,
             string hookStyleKey,
             int customRateOffsetPercent,
-            int customPitchOffsetHz)
+            int customPitchOffsetHz) =>
+            ApplyUserOffsets(voiceBase, hookStyleKey, customRateOffsetPercent, customPitchOffsetHz, philosophyQuote: false);
+
+        public static EdgeTtsSynthesisOptions ApplyUserOffsets(
+            EdgeTtsSynthesisOptions voiceBase,
+            string hookStyleKey,
+            int customRateOffsetPercent,
+            int customPitchOffsetHz,
+            bool philosophyQuote)
         {
             ResolveEffectiveOffsets(
                 hookStyleKey,
                 customRateOffsetPercent,
                 customPitchOffsetHz,
+                philosophyQuote,
                 out var rateOffsetPercent,
                 out var pitchOffsetHz);
             return ApplyUserOffsets(voiceBase, rateOffsetPercent, pitchOffsetHz);
@@ -183,34 +222,66 @@ namespace tiktok_Omni.Services.Showcase
             return rateStr + " · " + pitchStr;
         }
 
-        /// <summary>Offset slider gắn sẵn — chênh rõ giữa phong cách (trên preset giọng nữ +8%).</summary>
+        /// <summary>Offset slider gắn sẵn — Showcase/Reup (cân nhịp, không quá chậm).</summary>
         private static void GetPresetForCatalogStyle(string catalogStyleKey, out int rateOffsetPercent, out int pitchOffsetHz)
         {
             switch (NormalizeStoredHookStyleKey(catalogStyleKey))
             {
                 case HookStyleCatalog.StyleFomo:
-                    rateOffsetPercent = 18;
-                    pitchOffsetHz = 9;
+                    rateOffsetPercent = 14;
+                    pitchOffsetHz = 7;
                     return;
                 case HookStyleCatalog.StyleBocphot:
-                    rateOffsetPercent = 14;
-                    pitchOffsetHz = 8;
+                    rateOffsetPercent = 11;
+                    pitchOffsetHz = 6;
                     return;
                 case HookStyleCatalog.StyleHuongdan:
-                    rateOffsetPercent = 10;
-                    pitchOffsetHz = 6;
+                    rateOffsetPercent = 6;
+                    pitchOffsetHz = 3;
                     return;
                 case HookStyleCatalog.StyleKechuyen:
-                    rateOffsetPercent = -10;
-                    pitchOffsetHz = -6;
+                    rateOffsetPercent = -5;
+                    pitchOffsetHz = -3;
                     return;
                 case HookStyleCatalog.StyleNoidau:
-                    rateOffsetPercent = -18;
-                    pitchOffsetHz = -10;
+                    rateOffsetPercent = -8;
+                    pitchOffsetHz = -5;
                     return;
                 default:
-                    rateOffsetPercent = 10;
-                    pitchOffsetHz = 6;
+                    rateOffsetPercent = 6;
+                    pitchOffsetHz = 3;
+                    return;
+            }
+        }
+
+        /// <summary>Quote triết lý — trầm/cảm xúc nhưng ~100% tốc độ batch, có nhấn nhá.</summary>
+        private static void GetPresetForPhilosophyQuoteStyle(string catalogStyleKey, out int rateOffsetPercent, out int pitchOffsetHz)
+        {
+            switch (NormalizeStoredHookStyleKey(catalogStyleKey))
+            {
+                case HookStyleCatalog.StyleNoidau:
+                    rateOffsetPercent = -5;
+                    pitchOffsetHz = -3;
+                    return;
+                case HookStyleCatalog.StyleKechuyen:
+                    rateOffsetPercent = -2;
+                    pitchOffsetHz = -2;
+                    return;
+                case HookStyleCatalog.StyleHuongdan:
+                    rateOffsetPercent = 3;
+                    pitchOffsetHz = 1;
+                    return;
+                case HookStyleCatalog.StyleFomo:
+                    rateOffsetPercent = 8;
+                    pitchOffsetHz = 4;
+                    return;
+                case HookStyleCatalog.StyleBocphot:
+                    rateOffsetPercent = 6;
+                    pitchOffsetHz = 3;
+                    return;
+                default:
+                    rateOffsetPercent = 0;
+                    pitchOffsetHz = 0;
                     return;
             }
         }

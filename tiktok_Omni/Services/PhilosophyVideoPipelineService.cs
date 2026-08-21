@@ -21,7 +21,6 @@ namespace tiktok_Omni.Services
         private const int TargetHeight = 1920;
         private const double DefaultBackgroundSeconds = 18d;
         private const double VoiceMixGain = 1.65d;
-        private const double AmbientBedVolume = 0.05d;
         private static readonly Random BrollRandom = new Random();
 
         private readonly VideoService _videoService = new VideoService();
@@ -207,6 +206,101 @@ namespace tiktok_Omni.Services
             }
 
             return true;
+        }
+
+        public static bool TryValidateBackgroundPreviewPrerequisites(AppSettings settings, out string errorMessage)
+        {
+            errorMessage = string.Empty;
+            if (settings == null)
+            {
+                errorMessage = "Chưa có Cài đặt app.";
+                return false;
+            }
+
+            return VideoReupRemixService.TryValidateFfmpegToolkit(settings, out errorMessage);
+        }
+
+        /// <summary>Chỉ bước 1 pipeline — ghép/tạo video nền, chưa TTS/âm thanh.</summary>
+        public async Task<(bool Success, string Error)> GenerateBackgroundVideoAsync(
+            PhilosophyScriptItem item,
+            PhilosophyRenderOptions renderOptions,
+            AppSettings settings,
+            AutomationProfile profile,
+            string outputPath,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            if (item == null)
+            {
+                return (false, "Thiếu quote.");
+            }
+
+            if (!TryValidateBackgroundPreviewPrerequisites(settings, out var ffErr))
+            {
+                return (false, ffErr);
+            }
+
+            try
+            {
+                var mood = NormalizePhilosophyMood(item.Mood);
+                renderOptions = renderOptions ?? new PhilosophyRenderOptions();
+                var brandProfile = profile ?? new AutomationProfile { Name = "default" };
+                if (string.IsNullOrWhiteSpace(brandProfile.Name))
+                {
+                    brandProfile.Name = "default";
+                }
+
+                var nick = ProfileScopedPaths.ResolveProfileName(
+                    string.IsNullOrWhiteSpace(renderOptions.ProfileName) ? brandProfile.Name : renderOptions.ProfileName);
+                brandProfile.Name = nick;
+
+                await VideoReupRemixService.EnsureFfmpegToolkitAsync(settings, log, cancellationToken).ConfigureAwait(false);
+                if (!FfmpegToolkitService.TryResolve(settings, out _, out var ffResolveErr))
+                {
+                    return (false, ffResolveErr);
+                }
+
+                var visualPrompt = PhilosophyProfileAssets.EnhanceVisualPrompt(BuildVisualPrompt(mood), brandProfile);
+                var motionPrompt = ResolveMotionPrompt(item, visualPrompt);
+                var visualMode = PhilosophyVisualModes.Normalize(renderOptions.VisualMode);
+                var (minDurationSeconds, maxDurationSeconds) = NormalizeDurationBounds(renderOptions);
+                var backgroundTargetSeconds = Math.Max(
+                    8d,
+                    Math.Min(120d, (minDurationSeconds + maxDurationSeconds) / 2d));
+
+                var outputDir = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+                if (!string.IsNullOrWhiteSpace(outputDir))
+                {
+                    Directory.CreateDirectory(outputDir);
+                }
+
+                log?.Invoke("[Preview nền] Ghép video nền (chưa âm thanh)…");
+                log?.Invoke("[Preview nền] Chế độ: " + DescribeVisualMode(visualMode));
+
+                await EnsureBackgroundReadyAsync(
+                    visualMode,
+                    nick,
+                    motionPrompt,
+                    visualPrompt,
+                    renderOptions,
+                    outputPath,
+                    settings,
+                    backgroundTargetSeconds,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!File.Exists(outputPath) || new FileInfo(outputPath).Length < 10_000L)
+                {
+                    return (false, "Không tạo được file preview nền.");
+                }
+
+                log?.Invoke("[Preview nền] Xong → " + outputPath);
+                return (true, string.Empty);
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
+            }
         }
 
         public async Task<PhilosophyVideoResult> RunScriptAsync(
@@ -455,6 +549,90 @@ namespace tiktok_Omni.Services
                 return;
             }
 
+            if (visualMode == PhilosophyVisualModes.ImageZoom)
+            {
+                log?.Invoke("[Quote] Bước 1/4: Mode 4 — Zoom ảnh (Ken Burns)…");
+                var (ok, reason) = await TryAssembleZoomImageBackgroundAsync(
+                    renderOptions,
+                    bgPath,
+                    backgroundTargetSeconds,
+                    settings,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+                if (!ok)
+                {
+                    throw new InvalidOperationException(
+                        "Bước 1/4 — không tạo được nền zoom ảnh.\r\n" +
+                        (string.IsNullOrWhiteSpace(reason) ? "Kiểm tra cột «Zoom ảnh» và thư viện zoom-images." : reason));
+                }
+
+                return;
+            }
+
+            if (visualMode == PhilosophyVisualModes.ImageSlideshow)
+            {
+                log?.Invoke("[Quote] Bước 1/4: Mode 5 — Slideshow ảnh (crossfade)…");
+                var (okSl, reasonSl) = await TryAssembleSlideshowBackgroundAsync(
+                    renderOptions,
+                    bgPath,
+                    backgroundTargetSeconds,
+                    settings,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+                if (!okSl)
+                {
+                    throw new InvalidOperationException(
+                        "Bước 1/4 — không tạo được slideshow ảnh.\r\n" +
+                        (string.IsNullOrWhiteSpace(reasonSl) ? "Kiểm tra cột «Zoom ảnh»." : reasonSl));
+                }
+
+                return;
+            }
+
+            if (visualMode == PhilosophyVisualModes.AiStillZoom)
+            {
+                log?.Invoke("[Quote] Bước 1/4: Mode 6 — AI ảnh tĩnh → zoom…");
+                var (okAi, reasonAi) = await TryAssembleAiStillZoomBackgroundAsync(
+                    motionPrompt,
+                    visualPrompt,
+                    nick,
+                    renderOptions,
+                    bgPath,
+                    backgroundTargetSeconds,
+                    settings,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+                if (!okAi)
+                {
+                    throw new InvalidOperationException(
+                        "Bước 1/4 — không tạo được nền AI ảnh → zoom.\r\n" +
+                        (string.IsNullOrWhiteSpace(reasonAi) ? "Cần Gemini API Key + ảnh mascot/ref." : reasonAi));
+                }
+
+                return;
+            }
+
+            if (visualMode == PhilosophyVisualModes.ZoomBrollHybrid)
+            {
+                log?.Invoke("[Quote] Bước 1/4: Mode 7 — Zoom ảnh + B-roll outro…");
+                var (okHy, reasonHy) = await TryAssembleZoomBrollHybridBackgroundAsync(
+                    nick,
+                    renderOptions,
+                    bgPath,
+                    backgroundTargetSeconds,
+                    settings,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+                if (!okHy)
+                {
+                    throw new InvalidOperationException(
+                        "Bước 1/4 — không tạo được nền hybrid.\r\n" +
+                        (string.IsNullOrWhiteSpace(reasonHy) ? "Cần ảnh zoom + B-roll outro." : reasonHy));
+                }
+
+                return;
+            }
+
             log?.Invoke("[Quote] Bước 1/4: Mode 0 — kho B-Roll…");
             if (TryResolveBrollBackground(nick, renderOptions, bgPath, log))
             {
@@ -531,6 +709,421 @@ namespace tiktok_Omni.Services
             }
         }
 
+        /// <summary>Mode 4: Tạo clip Ken Burns từ từng ảnh zoom rồi concat.</summary>
+        private async Task<(bool Success, string FailureReason)> TryAssembleZoomImageBackgroundAsync(
+            PhilosophyRenderOptions renderOptions,
+            string outputPath,
+            double backgroundTargetSeconds,
+            AppSettings settings,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            var images = (renderOptions?.ZoomImagePaths ?? new List<string>())
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .Where(PhilosophyBRollSelection.IsImageFile)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (images.Count == 0)
+            {
+                return (false, "Chưa chọn ảnh zoom — bấm cột «Zoom ảnh» trong popup Nền.");
+            }
+
+            await VideoReupRemixService.EnsureFfmpegToolkitAsync(settings, log, cancellationToken).ConfigureAwait(false);
+            if (!FfmpegToolkitService.TryResolve(settings, out var toolkit, out var ffErr))
+            {
+                return (false, ffErr);
+            }
+
+            var ffmpeg = renderOptions?.FfmpegExe;
+            if (string.IsNullOrWhiteSpace(ffmpeg) || !File.Exists(ffmpeg))
+            {
+                ffmpeg = toolkit.FfmpegExe;
+            }
+
+            var totalSeconds = Math.Max(8d, backgroundTargetSeconds);
+            var perClip = Math.Max(2.5d, totalSeconds / images.Count);
+            var workDir = Path.Combine(Path.GetTempPath(), "philosophy_zoom_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            Directory.CreateDirectory(workDir);
+            var clipPaths = new List<string>();
+
+            try
+            {
+                for (var i = 0; i < images.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var clipPath = Path.Combine(workDir, "zoom_" + i.ToString("D2") + ".mp4");
+                    var style = i % 2 == 0
+                        ? ShowcaseZoomStyleCatalog.PushIn
+                        : ShowcaseZoomStyleCatalog.Drift;
+                    log?.Invoke("[Quote] Zoom ảnh " + (i + 1) + "/" + images.Count + ": "
+                                + Path.GetFileName(images[i]) + " (" + perClip.ToString("0.0", CultureInfo.InvariantCulture) + "s)");
+                    await ShowcaseZoomClipService.GenerateAsync(
+                        images[i],
+                        clipPath,
+                        i,
+                        style,
+                        ffmpeg,
+                        log,
+                        cancellationToken,
+                        perClip).ConfigureAwait(false);
+
+                    if (File.Exists(clipPath) && new FileInfo(clipPath).Length > 10_000L)
+                    {
+                        clipPaths.Add(clipPath);
+                    }
+                }
+
+                if (clipPaths.Count == 0)
+                {
+                    return (false, "Không tạo được clip zoom từ ảnh đã chọn.");
+                }
+
+                if (clipPaths.Count == 1)
+                {
+                    File.Copy(clipPaths[0], outputPath, overwrite: true);
+                    log?.Invoke("[Quote] Mode 4: 1 ảnh zoom → copy trực tiếp.");
+                    return (true, string.Empty);
+                }
+
+                await FfmpegConcatAsync(ffmpeg, clipPaths, outputPath, log, cancellationToken).ConfigureAwait(false);
+                if (File.Exists(outputPath) && new FileInfo(outputPath).Length > 10_000L)
+                {
+                    log?.Invoke("[Quote] Mode 4: concat " + clipPaths.Count + " ảnh zoom → " + Path.GetFileName(outputPath));
+                    return (true, string.Empty);
+                }
+
+                return (false, "FFmpeg concat zoom xong nhưng file output rỗng.");
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
+            }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(workDir))
+                    {
+                        Directory.Delete(workDir, recursive: true);
+                    }
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+        }
+
+        private async Task<(bool Success, string FailureReason)> TryAssembleSlideshowBackgroundAsync(
+            PhilosophyRenderOptions renderOptions,
+            string outputPath,
+            double backgroundTargetSeconds,
+            AppSettings settings,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            var images = ResolveZoomImagePaths(renderOptions);
+            if (images.Count == 0)
+            {
+                return (false, "Chưa chọn ảnh — dùng cột «Zoom ảnh» (slideshow dùng chung thư viện).");
+            }
+
+            var ffmpeg = await ResolveFfmpegAsync(renderOptions, settings, log, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(ffmpeg))
+            {
+                return (false, "Không tìm thấy FFmpeg.");
+            }
+
+            var totalSeconds = Math.Max(8d, backgroundTargetSeconds);
+            var crossfade = PhilosophySlideshowClipService.DefaultCrossfadeSeconds;
+            var perClip = Math.Max(2.5d, (totalSeconds + crossfade * (images.Count - 1)) / images.Count);
+            var workDir = CreateTempWorkDir("philosophy_slideshow_");
+            var clipPaths = new List<string>();
+            var durations = new List<double>();
+
+            try
+            {
+                for (var i = 0; i < images.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var clipPath = Path.Combine(workDir, "slide_" + i.ToString("D2") + ".mp4");
+                    await PhilosophySlideshowClipService.GenerateHoldClipAsync(
+                        images[i],
+                        clipPath,
+                        perClip,
+                        ffmpeg,
+                        log,
+                        cancellationToken).ConfigureAwait(false);
+                    if (File.Exists(clipPath) && new FileInfo(clipPath).Length > 10_000L)
+                    {
+                        clipPaths.Add(clipPath);
+                        durations.Add(perClip);
+                    }
+                }
+
+                if (clipPaths.Count == 0)
+                {
+                    return (false, "Không tạo được clip slideshow.");
+                }
+
+                if (clipPaths.Count == 1)
+                {
+                    File.Copy(clipPaths[0], outputPath, overwrite: true);
+                    return (true, string.Empty);
+                }
+
+                await PhilosophySlideshowClipService.AssembleCrossfadeAsync(
+                    clipPaths,
+                    durations,
+                    outputPath,
+                    ffmpeg,
+                    crossfade,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+
+                return File.Exists(outputPath) && new FileInfo(outputPath).Length > 10_000L
+                    ? (true, string.Empty)
+                    : (false, "Slideshow xong nhưng file output rỗng.");
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
+            }
+            finally
+            {
+                TryDeleteDirectory(workDir);
+            }
+        }
+
+        private async Task<(bool Success, string FailureReason)> TryAssembleAiStillZoomBackgroundAsync(
+            string motionPrompt,
+            string visualPrompt,
+            string profileName,
+            PhilosophyRenderOptions renderOptions,
+            string outputPath,
+            double backgroundTargetSeconds,
+            AppSettings settings,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(settings?.AiApiKey))
+            {
+                return (false, "Cần AI API Key (Gemini) trong tab Cài đặt.");
+            }
+
+            var refPath = ResolveReferenceImagePath(profileName, renderOptions?.ReferenceImagePath, log);
+            if (string.IsNullOrEmpty(refPath))
+            {
+                return (false, "Cần ảnh mascot hoặc ảnh ref batch cho AI ảnh → zoom.");
+            }
+
+            var ffmpeg = await ResolveFfmpegAsync(renderOptions, settings, log, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(ffmpeg))
+            {
+                return (false, "Không tìm thấy FFmpeg.");
+            }
+
+            var workDir = CreateTempWorkDir("philosophy_ai_still_");
+            try
+            {
+                var stillPath = Path.Combine(workDir, "ai_still.png");
+                var prompt = string.IsNullOrWhiteSpace(motionPrompt) ? visualPrompt : motionPrompt.Trim();
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    prompt = "Cinematic philosophy scene, calm mood, vertical 9:16, same mascot character as reference.";
+                }
+
+                log?.Invoke("[Quote] Mode 6: Gemini sinh ảnh tĩnh từ prompt…");
+                var gemini = new GeminiService();
+                await gemini.GenerateHookSceneImageAsync(
+                    prompt,
+                    refPath,
+                    settings.AiApiKey,
+                    stillPath,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (!File.Exists(stillPath))
+                {
+                    return (false, "Gemini không trả ảnh tĩnh.");
+                }
+
+                var totalSeconds = Math.Max(8d, backgroundTargetSeconds);
+                await ShowcaseZoomClipService.GenerateAsync(
+                    stillPath,
+                    outputPath,
+                    0,
+                    ShowcaseZoomStyleCatalog.PushIn,
+                    ffmpeg,
+                    log,
+                    cancellationToken,
+                    totalSeconds).ConfigureAwait(false);
+
+                return File.Exists(outputPath) && new FileInfo(outputPath).Length > 10_000L
+                    ? (true, string.Empty)
+                    : (false, "Zoom từ AI ảnh thất bại.");
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
+            }
+            finally
+            {
+                TryDeleteDirectory(workDir);
+            }
+        }
+
+        private async Task<(bool Success, string FailureReason)> TryAssembleZoomBrollHybridBackgroundAsync(
+            string profileName,
+            PhilosophyRenderOptions renderOptions,
+            string outputPath,
+            double backgroundTargetSeconds,
+            AppSettings settings,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            var images = ResolveZoomImagePaths(renderOptions);
+            if (images.Count == 0)
+            {
+                return (false, "Chưa chọn ảnh zoom cho phần chính.");
+            }
+
+            var brollPath = PhilosophyBRollSelection.ResolveBrollVideoPath(renderOptions?.BRollFolder, profileName);
+            if (string.IsNullOrEmpty(brollPath))
+            {
+                return (false, "Chưa chọn B-roll outro — bấm cột «B-roll».");
+            }
+
+            var ffmpeg = await ResolveFfmpegAsync(renderOptions, settings, log, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(ffmpeg))
+            {
+                return (false, "Không tìm thấy FFmpeg.");
+            }
+
+            var outroSeconds = Math.Max(
+                PhilosophyRenderOptions.OutroPadMinSeconds,
+                Math.Min(PhilosophyRenderOptions.OutroPadMaxSeconds, 4.5d));
+            var totalSeconds = Math.Max(8d, backgroundTargetSeconds);
+            var mainSeconds = Math.Max(4d, totalSeconds - outroSeconds);
+            var workDir = CreateTempWorkDir("philosophy_hybrid_");
+
+            try
+            {
+                var mainPath = Path.Combine(workDir, "main_zoom.mp4");
+                var mainOptions = new PhilosophyRenderOptions
+                {
+                    ZoomImagePaths = images,
+                    FfmpegExe = ffmpeg
+                };
+                var (okMain, reasonMain) = await TryAssembleZoomImageBackgroundAsync(
+                    mainOptions,
+                    mainPath,
+                    mainSeconds,
+                    settings,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+                if (!okMain)
+                {
+                    return (false, reasonMain);
+                }
+
+                var outroPath = Path.Combine(workDir, "outro_broll.mp4");
+                await PhilosophySlideshowClipService.TrimVideoSegmentAsync(
+                    brollPath,
+                    outroPath,
+                    outroSeconds,
+                    ffmpeg,
+                    log,
+                    cancellationToken).ConfigureAwait(false);
+
+                await FfmpegConcatAsync(ffmpeg, new List<string> { mainPath, outroPath }, outputPath, log, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return File.Exists(outputPath) && new FileInfo(outputPath).Length > 10_000L
+                    ? (true, string.Empty)
+                    : (false, "Hybrid concat xong nhưng file output rỗng.");
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
+            }
+            finally
+            {
+                TryDeleteDirectory(workDir);
+            }
+        }
+
+        private static List<string> ResolveZoomImagePaths(PhilosophyRenderOptions renderOptions)
+        {
+            return (renderOptions?.ZoomImagePaths ?? new List<string>())
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .Where(PhilosophyBRollSelection.IsImageFile)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string ResolveReferenceImagePath(
+            string profileName,
+            string batchReferencePath,
+            Action<string> log)
+        {
+            var refPath = (batchReferencePath ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(refPath) && File.Exists(refPath))
+            {
+                return refPath;
+            }
+
+            var mascot = PhilosophyGeminiBackgroundContext.BuildMascotContext(profileName, null);
+            if (mascot.HasMascotImage)
+            {
+                log?.Invoke("[Quote] Dùng ảnh mascot profile «" + mascot.ProfileName + "».");
+                return mascot.MascotImagePath;
+            }
+
+            return string.Empty;
+        }
+
+        private static async Task<string> ResolveFfmpegAsync(
+            PhilosophyRenderOptions renderOptions,
+            AppSettings settings,
+            Action<string> log,
+            CancellationToken cancellationToken)
+        {
+            await VideoReupRemixService.EnsureFfmpegToolkitAsync(settings, log, cancellationToken).ConfigureAwait(false);
+            if (!FfmpegToolkitService.TryResolve(settings, out var toolkit, out _))
+            {
+                return string.Empty;
+            }
+
+            var ffmpeg = renderOptions?.FfmpegExe;
+            return !string.IsNullOrWhiteSpace(ffmpeg) && File.Exists(ffmpeg) ? ffmpeg : toolkit.FfmpegExe;
+        }
+
+        private static string CreateTempWorkDir(string prefix)
+        {
+            var workDir = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N").Substring(0, 8));
+            Directory.CreateDirectory(workDir);
+            return workDir;
+        }
+
+        private static void TryDeleteDirectory(string workDir)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(workDir) && Directory.Exists(workDir))
+                {
+                    Directory.Delete(workDir, recursive: true);
+                }
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+
         /// <summary>Ghép danh sách file video thành 1 bằng FFmpeg concat demuxer.</summary>
         private static async Task FfmpegConcatAsync(
             string ffmpeg,
@@ -568,8 +1161,8 @@ namespace tiktok_Omni.Services
         private static string BuildBrollMissingHelpMessage(string profileName, PhilosophyRenderOptions renderOptions)
         {
             var folder = (renderOptions?.BRollFolder ?? string.Empty).Trim();
-            var assetsBroll = Path.Combine(PhilosophyProfileAssets.GetAssetsRoot(profileName), "broll");
-            var sharedNature = Path.Combine(ProfileScopedPaths.GetSharedBackgroundsDirectory(), "Nature");
+            var sharedBackgrounds = ProfileScopedPaths.GetSharedBackgroundsDirectory();
+            var sharedNature = Path.Combine(sharedBackgrounds, "Nature");
             var lines = new List<string>
             {
                 "Bước 1/4 — chế độ B-Roll nhưng không tìm thấy file video .mp4."
@@ -589,10 +1182,10 @@ namespace tiktok_Omni.Services
 
             lines.Add(string.Empty);
             lines.Add("Cách thêm B-Roll:");
-            lines.Add("1. Bấm «Mở Assets» → copy file .mp4 vào:");
-            lines.Add("   " + assetsBroll);
-            lines.Add("2. Hoặc dùng kho chung: " + sharedNature);
-            lines.Add("3. Bấm cột «Nền» trên bảng → «Chọn video…».");
+            lines.Add("1. Bấm «Thư viện B-roll» → copy file .mp4 vào:");
+            lines.Add("   " + sharedBackgrounds);
+            lines.Add("2. Hoặc tạo thư mục con theo mood: " + sharedNature);
+            lines.Add("3. Bấm cột «Nền» trên bảng → «Chọn video…» hoặc «Ngẫu nhiên».");
             return string.Join("\r\n", lines);
         }
 
@@ -770,8 +1363,8 @@ namespace tiktok_Omni.Services
         private static (int Min, int Max) NormalizeDurationBounds(PhilosophyRenderOptions renderOptions)
         {
             return PhilosophyRenderOptions.NormalizeDurationBounds(
-                renderOptions?.MinDurationSeconds ?? 15,
-                renderOptions?.MaxDurationSeconds ?? 60);
+                renderOptions?.MinDurationSeconds ?? PhilosophyRenderOptions.QuotesDefaultMinSeconds,
+                renderOptions?.MaxDurationSeconds ?? PhilosophyRenderOptions.QuotesDefaultMaxSeconds);
         }
 
         private static string ResolveMotionPrompt(PhilosophyScriptItem item, string visualPrompt)
@@ -790,6 +1383,14 @@ namespace tiktok_Omni.Services
                     return "2 — AI có Nhân vật (Veo Image-to-Video)";
                 case PhilosophyVisualModes.PreRendered:
                     return "3 — Video phân cảnh tự làm sẵn";
+                case PhilosophyVisualModes.ImageZoom:
+                    return "4 — Zoom ảnh (Ken Burns)";
+                case PhilosophyVisualModes.ImageSlideshow:
+                    return "5 — Slideshow ảnh (crossfade)";
+                case PhilosophyVisualModes.AiStillZoom:
+                    return "6 — AI ảnh tĩnh → zoom";
+                case PhilosophyVisualModes.ZoomBrollHybrid:
+                    return "7 — Zoom ảnh + B-roll outro";
                 default:
                     return "0 — Kho B-Roll có sẵn (Tiết kiệm)";
             }
@@ -1084,6 +1685,7 @@ namespace tiktok_Omni.Services
             if (!string.IsNullOrEmpty(musicPath) && File.Exists(musicPath))
             {
                 var musicPct = renderOptions?.MusicVolumePercent ?? PhilosophyBatchHelper.DefaultMusicVolumePercent;
+                var ambientPct = PhilosophyBatchHelper.ResolveAmbientVolumePercent();
                 log?.Invoke("[Quote] Nhạc nền (" + musicPct + "%): " + Path.GetFileName(musicPath));
                 await BuildVoicePlusMusicWavAsync(
                     ffmpeg,
@@ -1094,12 +1696,14 @@ namespace tiktok_Omni.Services
                     outputDuration,
                     fullAudio,
                     PhilosophyBatchHelper.ResolveMusicBedLinearVolume(musicPct),
+                    PhilosophyBatchHelper.ResolveAmbientBedLinearVolume(ambientPct),
                     log,
                     cancellationToken).ConfigureAwait(false);
             }
             else if (!string.IsNullOrEmpty(ambientPath) && File.Exists(ambientPath))
             {
-                log?.Invoke("[Quote] Chỉ voice + ambient (~5%): " + Path.GetFileName(ambientPath));
+                var ambientPct = PhilosophyBatchHelper.ResolveAmbientVolumePercent();
+                log?.Invoke("[Quote] Chỉ voice + ambient (" + ambientPct + "%): " + Path.GetFileName(ambientPath));
                 await BuildVoicePlusMusicWavAsync(
                     ffmpeg,
                     voiceWav,
@@ -1109,6 +1713,7 @@ namespace tiktok_Omni.Services
                     outputDuration,
                     fullAudio,
                     0d,
+                    PhilosophyBatchHelper.ResolveAmbientBedLinearVolume(ambientPct),
                     log,
                     cancellationToken).ConfigureAwait(false);
             }
@@ -1365,13 +1970,14 @@ namespace tiktok_Omni.Services
             double outputSeconds,
             string outputWav,
             double musicBedVolume,
+            double ambientBedVolume,
             Action<string> log,
             CancellationToken cancellationToken)
         {
             var voiceStr = voiceSourceSeconds.ToString("0.#####", CultureInfo.InvariantCulture);
             var outStr = outputSeconds.ToString("0.#####", CultureInfo.InvariantCulture);
             var musicVol = musicBedVolume.ToString("0.###", CultureInfo.InvariantCulture);
-            var ambientVol = AmbientBedVolume.ToString("0.###", CultureInfo.InvariantCulture);
+            var ambientVol = ambientBedVolume.ToString("0.###", CultureInfo.InvariantCulture);
             var voiceGain = VoiceMixGain.ToString("0.###", CultureInfo.InvariantCulture);
             var hasMusic = !string.IsNullOrWhiteSpace(musicMp3) && File.Exists(musicMp3);
             var hasAmbient = !string.IsNullOrWhiteSpace(ambientPath) && File.Exists(ambientPath);

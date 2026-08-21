@@ -45,13 +45,12 @@ namespace tiktok_Omni.Services
             var trimmed = (value ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(trimmed))
             {
-                return "Bấm để chọn: Ngẫu nhiên hoặc duyệt video trong Assets\\Backgrounds / Assets\\" +
-                       ProfileScopedPaths.ResolveProfileName(profileName) + "\\broll";
+                return "Bấm để chọn: Ngẫu nhiên hoặc duyệt video trong kho chung Assets\\Backgrounds (Thư viện B-roll).";
             }
 
             if (IsRandomToken(trimmed))
             {
-                return "Render sẽ chọn ngẫu nhiên một video .mp4 từ kho Assets (Backgrounds + broll profile).";
+                return "Render sẽ chọn ngẫu nhiên một video .mp4 từ kho chung Assets\\Backgrounds.";
             }
 
             if (File.Exists(trimmed))
@@ -77,9 +76,7 @@ namespace tiktok_Omni.Services
                 }
             }
 
-            var fallback = Path.Combine(PhilosophyProfileAssets.GetAssetsRoot(profileName), "broll");
-            Directory.CreateDirectory(fallback);
-            return fallback;
+            return ProfileScopedPaths.GetSharedBackgroundsDirectory(ensureExists: true);
         }
 
         public static string PickRandomVideoPath(string profileName)
@@ -110,8 +107,7 @@ namespace tiktok_Omni.Services
             {
                 if (CollectVideoFiles(profileName).Count == 0)
                 {
-                    error = "Không có video nền — copy file .mp4 vào Assets\\Backgrounds hoặc Assets\\" +
-                            ProfileScopedPaths.ResolveProfileName(profileName) + "\\broll.";
+                    error = "Không có video nền — bấm «Thư viện B-roll» và copy file .mp4 vào Assets\\Backgrounds.";
                     return false;
                 }
 
@@ -232,6 +228,37 @@ namespace tiktok_Omni.Services
             return RandomToken;
         }
 
+        /// <summary>Resolve B-roll selection → đường dẫn file video (không copy).</summary>
+        public static string ResolveBrollVideoPath(string selection, string profileName)
+        {
+            var path = (selection ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(path))
+            {
+                return string.Empty;
+            }
+
+            if (IsRandomToken(path))
+            {
+                return PickRandomVideoPath(profileName);
+            }
+
+            if (File.Exists(path) && IsValidVideoFile(path))
+            {
+                return path;
+            }
+
+            if (Directory.Exists(path))
+            {
+                return Directory
+                    .GetFiles(path, "*.mp4", SearchOption.TopDirectoryOnly)
+                    .Concat(Directory.GetFiles(path, "*.mov", SearchOption.TopDirectoryOnly))
+                    .FirstOrDefault(IsValidVideoFile)
+                    ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
         private static string DescribeVideoCategory(string fullPath, string profileName)
         {
             var path = (fullPath ?? string.Empty).Replace('/', '\\');
@@ -259,10 +286,10 @@ namespace tiktok_Omni.Services
         {
             var nick = ProfileScopedPaths.ResolveProfileName(profileName);
             var sharedRoot = ProfileScopedPaths.GetSharedBackgroundsDirectory();
-            yield return Path.Combine(PhilosophyProfileAssets.GetAssetsRoot(nick), "broll");
+            yield return sharedRoot;
             yield return Path.Combine(sharedRoot, "Nature");
             yield return Path.Combine(sharedRoot, "Minimal");
-            yield return sharedRoot;
+            yield return Path.Combine(PhilosophyProfileAssets.GetAssetsRoot(nick), "broll");
             yield return PhilosophyProfileAssets.GetAssetsRoot(nick);
         }
 
@@ -376,6 +403,143 @@ namespace tiktok_Omni.Services
             }
 
             return DescribeTooltip(value, profileName);
+        }
+
+        /// <summary>Thư mục mặc định khi chọn ảnh zoom (mode 4).</summary>
+        public static string GetZoomImageBrowseInitialDirectory(string profileName)
+        {
+            var nick = ProfileScopedPaths.ResolveProfileName(profileName);
+            var zoomDir = PhilosophyProfileAssets.EnsureZoomImageLibraryDirectory(nick);
+            if (DirectoryContainsImage(zoomDir))
+            {
+                return zoomDir;
+            }
+
+            return GetImageBrowseInitialDirectory(profileName);
+        }
+
+        /// <summary>Liệt kê ảnh trong thư viện zoom-images cho Gemini gợi ý.</summary>
+        public static List<BrollCatalogEntry> EnumerateZoomImageCatalog(string profileName)
+        {
+            var nick = ProfileScopedPaths.ResolveProfileName(profileName);
+            var dir = PhilosophyProfileAssets.EnsureZoomImageLibraryDirectory(nick);
+            if (!Directory.Exists(dir))
+            {
+                return new List<BrollCatalogEntry>();
+            }
+
+            return Directory.GetFiles(dir, "*.*", SearchOption.TopDirectoryOnly)
+                .Where(IsImageFile)
+                .Select(path => new BrollCatalogEntry
+                {
+                    FileName = Path.GetFileName(path) ?? string.Empty,
+                    FullPath = path,
+                    Category = "zoom-images"
+                })
+                .OrderBy(e => e.FileName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        /// <summary>Ánh xạ danh sách tên file Gemini → đường dẫn ảnh hợp lệ.</summary>
+        public static List<string> ResolveGeminiZoomImageNames(string profileName, IEnumerable<string> suggestedNames)
+        {
+            var results = new List<string>();
+            if (suggestedNames == null)
+            {
+                return results;
+            }
+
+            var catalog = EnumerateZoomImageCatalog(profileName);
+            foreach (var raw in suggestedNames)
+            {
+                var suggestion = (raw ?? string.Empty).Trim().Trim('"');
+                if (string.IsNullOrEmpty(suggestion))
+                {
+                    continue;
+                }
+
+                suggestion = Path.GetFileName(suggestion);
+                if (File.Exists(suggestion) && IsImageFile(suggestion))
+                {
+                    results.Add(Path.GetFullPath(suggestion));
+                    continue;
+                }
+
+                if (catalog.Count == 0)
+                {
+                    continue;
+                }
+
+                var exact = catalog.FirstOrDefault(e =>
+                    string.Equals(e.FileName, suggestion, StringComparison.OrdinalIgnoreCase));
+                if (exact != null)
+                {
+                    results.Add(exact.FullPath);
+                    continue;
+                }
+
+                var stem = Path.GetFileNameWithoutExtension(suggestion) ?? string.Empty;
+                exact = catalog.FirstOrDefault(e =>
+                    string.Equals(Path.GetFileNameWithoutExtension(e.FileName), stem, StringComparison.OrdinalIgnoreCase));
+                if (exact != null)
+                {
+                    results.Add(exact.FullPath);
+                    continue;
+                }
+
+                var partial = catalog.FirstOrDefault(e =>
+                    e.FileName.IndexOf(stem, StringComparison.OrdinalIgnoreCase) >= 0
+                    || (!string.IsNullOrEmpty(stem)
+                        && stem.IndexOf(Path.GetFileNameWithoutExtension(e.FileName) ?? string.Empty,
+                            StringComparison.OrdinalIgnoreCase) >= 0));
+                if (partial != null)
+                {
+                    results.Add(partial.FullPath);
+                }
+            }
+
+            return results
+                .Where(p => !string.IsNullOrWhiteSpace(p) && IsImageFile(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        public static bool TryValidateZoomImages(IList<string> paths, string profileName, out string error)
+        {
+            error = string.Empty;
+            _ = profileName;
+            if (paths == null || paths.Count == 0)
+            {
+                error = "Chưa chọn ảnh zoom — bấm cột «Zoom ảnh» hoặc «Thư viện ảnh zoom».";
+                return false;
+            }
+
+            foreach (var path in paths)
+            {
+                var trimmed = (path ?? string.Empty).Trim();
+                if (!IsImageFile(trimmed))
+                {
+                    error = "Ảnh zoom không tồn tại: " + trimmed;
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        public static string DescribeZoomImagesSummary(IList<string> paths)
+        {
+            if (paths == null || paths.Count == 0)
+            {
+                return "Chọn…";
+            }
+
+            if (paths.Count == 1)
+            {
+                return Path.GetFileName(paths[0]) ?? "1 ảnh";
+            }
+
+            return paths.Count + " ảnh";
         }
 
         private static bool DirectoryContainsImage(string directory)

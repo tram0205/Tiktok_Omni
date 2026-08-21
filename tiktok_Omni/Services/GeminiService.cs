@@ -82,14 +82,26 @@ namespace tiktok_Omni.Services
 
             var mascot = PhilosophyGeminiBackgroundContext.BuildMascotContext(profileName, settings);
             var brollSection = PhilosophyGeminiBackgroundContext.BuildBrollCatalogPromptSection(profileName);
+            var zoomSection = PhilosophyGeminiBackgroundContext.BuildZoomImageCatalogPromptSection(profileName);
             var musicSection = PhilosophyGeminiBackgroundContext.BuildMusicCatalogPromptSection(settings);
             var ambientSection = PhilosophyGeminiBackgroundContext.BuildSharedSfxCatalogPromptSection(settings);
+            var edgeStyleSection = PhilosophyGeminiBackgroundContext.BuildEdgeStylePromptSection();
+            var subtitleSection = PhilosophyGeminiSubtitleContext.BuildSubtitlePromptSection();
+            var edgeTtsSection = PhilosophyGeminiTtsContext.GeminiEdgeTtsWritingSection;
             var motionRules = PhilosophyGeminiBackgroundContext.BuildMotionPromptRules(mascot);
             var templateHint = (preset?.PromptHint ?? string.Empty).Trim();
 
             var prompt = isStory
-                ? BuildPhilosophyStoryPrompt(subject, minSec, maxSec, motionRules, brollSection, musicSection, ambientSection, templateHint)
-                : BuildPhilosophyQuotesPrompt(subject, itemCount, minSec, maxSec, motionRules, brollSection, musicSection, ambientSection, templateHint);
+                ? BuildPhilosophyStoryPrompt(subject, minSec, maxSec, motionRules, brollSection, zoomSection, musicSection, ambientSection, edgeStyleSection, subtitleSection, edgeTtsSection, templateHint)
+                : BuildPhilosophyQuotesPrompt(subject, itemCount, minSec, maxSec, motionRules, brollSection, zoomSection, musicSection, ambientSection, edgeStyleSection, subtitleSection, edgeTtsSection, templateHint);
+
+            if (mascot.HasMascotImage)
+            {
+                prompt = "REFERENCE IMAGE ATTACHED: this is the canonical mascot for profile «" + mascot.ProfileName +
+                         "». Study the character's visible appearance before writing JSON. " +
+                         "Every motion_prompt must describe THIS exact character (art style, hair, outfit, colors, accessories) — not a generic figure.\r\n\r\n" +
+                         prompt;
+            }
 
             var normalizedProvider = (provider ?? string.Empty).Trim().ToLowerInvariant();
             string raw;
@@ -120,6 +132,130 @@ namespace tiktok_Omni.Services
             return parsed;
         }
 
+        /// <summary>Gợi ý lại B-roll / zoom / motion_prompt cho các quote có sẵn (không đổi content).</summary>
+        public async Task<IReadOnlyList<PhilosophyBackgroundGeminiSuggestion>> GeneratePhilosophyBackgroundSuggestionsAsync(
+            IReadOnlyList<PhilosophyScriptItem> quotes,
+            string topic,
+            string provider,
+            string apiKey,
+            string model = "gemini-2.0-flash",
+            string profileName = null,
+            AppSettings settings = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (quotes == null || quotes.Count == 0)
+            {
+                return Array.Empty<PhilosophyBackgroundGeminiSuggestion>();
+            }
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("AI provider API key is required.");
+            }
+
+            var mascot = PhilosophyGeminiBackgroundContext.BuildMascotContext(profileName, settings);
+            var brollSection = PhilosophyGeminiBackgroundContext.BuildBrollCatalogPromptSection(profileName);
+            var zoomSection = PhilosophyGeminiBackgroundContext.BuildZoomImageCatalogPromptSection(profileName);
+            var motionRules = PhilosophyGeminiBackgroundContext.BuildMotionPromptRules(mascot);
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Bạn gợi ý NỀN VIDEO cho từng quote triết lý TikTok — KHÔNG viết lại content.");
+            sb.AppendLine("CHỦ ĐỀ BATCH: [" + (topic ?? string.Empty).Trim() + "]");
+            sb.AppendLine();
+            sb.AppendLine(motionRules);
+            sb.AppendLine();
+            sb.AppendLine(brollSection);
+            sb.AppendLine();
+            sb.AppendLine(zoomSection);
+            sb.AppendLine();
+            sb.AppendLine("DANH SÁCH QUOTE (giữ đúng thứ tự, trả 1 phần tử JSON cho mỗi quote):");
+            for (var i = 0; i < quotes.Count; i++)
+            {
+                var q = quotes[i];
+                sb.AppendLine((i + 1).ToString(inv) + ". mood=" + (q?.Mood ?? "reflective")
+                              + " | «" + PhilosophyBatchHelper.TrimGridLabel(q?.Content ?? string.Empty, 200, "") + "»");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("Trả DUY NHẤT JSON array cùng số phần tử, không markdown:");
+            sb.AppendLine("[{\"motion_prompt\":\"...\",\"broll_video\":\"file.mp4 hoặc @random\",\"zoom_images\":[\"a.jpg\"]}]");
+            sb.AppendLine("Quy tắc: có zoom_images khớp quote → ưu tiên zoom; không thì broll_video; motion_prompt cho AI Veo nếu cần.");
+
+            var prompt = sb.ToString();
+            string raw;
+            var normalizedProvider = (provider ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalizedProvider.Contains("claude") || normalizedProvider.Contains("anthropic"))
+            {
+                raw = await GenerateScriptAsync(prompt, provider, apiKey, model, cancellationToken).ConfigureAwait(false);
+            }
+            else if (mascot.HasMascotImage)
+            {
+                raw = await SendGeminiJsonWithImageAsync(
+                    prompt,
+                    mascot.MascotImagePath,
+                    model,
+                    apiKey,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                raw = await SendGeminiRequestAsync(prompt, model, apiKey, cancellationToken, jsonResponse: true).ConfigureAwait(false);
+            }
+
+            return ParsePhilosophyBackgroundSuggestionsJson(raw, profileName);
+        }
+
+        private static IReadOnlyList<PhilosophyBackgroundGeminiSuggestion> ParsePhilosophyBackgroundSuggestionsJson(
+            string raw,
+            string profileName)
+        {
+            var text = ExtractJsonArray(raw);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return Array.Empty<PhilosophyBackgroundGeminiSuggestion>();
+            }
+
+            try
+            {
+                var arr = JArray.Parse(text);
+                var result = new List<PhilosophyBackgroundGeminiSuggestion>();
+                foreach (var token in arr)
+                {
+                    var motion = (token["motion_prompt"] ?? token["motionPrompt"])?.ToString()?.Trim() ?? string.Empty;
+                    var broll = (token["broll_video"] ?? token["brollVideo"] ?? token["broll"])?.ToString()?.Trim() ?? string.Empty;
+                    var zoom = ParseGeminiZoomImages(profileName, token["zoom_images"] ?? token["zoomImages"]);
+                    var suggestion = new PhilosophyBackgroundGeminiSuggestion
+                    {
+                        MotionPrompt = motion,
+                        ZoomImagePaths = zoom
+                    };
+
+                    if (!string.IsNullOrWhiteSpace(profileName))
+                    {
+                        suggestion.BRollFolder = PhilosophyBRollSelection.ResolveGeminiBrollFileName(profileName, broll);
+                    }
+                    else
+                    {
+                        suggestion.BRollFolder = broll;
+                    }
+
+                    if (zoom.Count > 0)
+                    {
+                        suggestion.PreferZoomMode = true;
+                    }
+
+                    result.Add(suggestion);
+                }
+
+                return result;
+            }
+            catch
+            {
+                return Array.Empty<PhilosophyBackgroundGeminiSuggestion>();
+            }
+        }
+
         private static string BuildPhilosophyQuotesPrompt(
             string topic,
             int count,
@@ -127,8 +263,12 @@ namespace tiktok_Omni.Services
             int maxSeconds,
             string motionRules,
             string brollSection,
+            string zoomSection,
             string musicSection,
             string ambientSection,
+            string edgeStyleSection,
+            string subtitleSection,
+            string edgeTtsSection,
             string templateHint = null)
         {
             var (minWords, maxWords) = PhilosophyRenderOptions.EstimateSpeechWordCount(minSeconds, maxSeconds);
@@ -139,6 +279,7 @@ namespace tiktok_Omni.Services
             return "Bạn là biên kịch video triết lý TikTok tiếng Việt.\r\n" +
                    styleBlock +
                    "CHỦ ĐỀ: [" + topic + "]\r\n\r\n" +
+                   edgeTtsSection + "\r\n\r\n" +
                    "THỜI LƯỢNG MỖI VIDEO: " + minSeconds.ToString(inv) + "–" + maxSeconds.ToString(inv) +
                    " giây (giọng đọc chậm, trầm, có khoảng dừng sau câu).\r\n" +
                    "Viết đúng " + count.ToString(inv) +
@@ -161,12 +302,15 @@ namespace tiktok_Omni.Services
                    "  • reflective — suy ngẫm, chiêm nghiệm, trầm lắng (chỉ dùng khi câu mang tone suy tư)\r\n" +
                    "Không được để tất cả cùng mood. Với nhiều quote, mood phải đa dạng và khớp nội dung từng câu.\r\n\r\n" +
                    ambientSection + "\r\n\r\n" +
+                   edgeStyleSection + "\r\n\r\n" +
+                   subtitleSection + "\r\n\r\n" +
                    musicSection + "\r\n\r\n" +
                    motionRules + "\r\n\r\n" +
                    brollSection + "\r\n\r\n" +
+                   zoomSection + "\r\n\r\n" +
                    "Trả về DUY NHẤT JSON array hợp lệ, không markdown, không giải thích:\r\n" +
-                   "[{\"content\":\"...\",\"mood\":\"melancholic\",\"ambient_sfx\":\"rain-light.mp3\",\"music_file\":\"sad-piano-bed.mp3\",\"motion_prompt\":\"the profile mascot character standing by a rain-streaked window, same face and outfit as reference, vertical 9:16\",\"broll_video\":\"rain-city-night.mp4\"}," +
-                   "{\"content\":\"...\",\"mood\":\"hopeful\",\"ambient_sfx\":\"none\",\"music_file\":\"hopeful-strings.mp3\",\"motion_prompt\":\"...\",\"broll_video\":\"@random\"}]";
+                   "[{\"content\":\"...\",\"mood\":\"melancholic\",\"edge_style\":\"ke_chuyen\",\"subtitle_look\":\"StoryItalic\",\"subtitle_size\":76,\"subtitle_position\":\"middle\",\"subtitle_effect\":\"Highlight\",\"subtitle_line_bg\":\"Không nền\",\"ambient_sfx\":\"rain-light.mp3\",\"music_file\":\"sad-piano-bed.mp3\",\"motion_prompt\":\"Chibi art style, same profile mascot from reference — medium dark bob hair, light blue floral ao dai, white pants — stands alone looking out a rain-streaked classroom window, melancholic reflective expression, same face and outfit as reference, 9:16 vertical aspect ratio\",\"broll_video\":\"rain-city-night.mp4\",\"zoom_images\":[\"forest-mist.jpg\",\"mountain-sunrise.jpg\"]}," +
+                   "{\"content\":\"...\",\"mood\":\"hopeful\",\"edge_style\":\"ke_chuyen\",\"subtitle_look\":\"TikTokWhite\",\"subtitle_size\":80,\"subtitle_position\":\"middle\",\"subtitle_effect\":\"FadeIn\",\"subtitle_line_bg\":\"Không nền\",\"ambient_sfx\":\"none\",\"music_file\":\"hopeful-strings.mp3\",\"motion_prompt\":\"...\",\"broll_video\":\"@random\",\"zoom_images\":[]}]";
         }
 
         private static string BuildPhilosophyStoryPrompt(
@@ -175,8 +319,12 @@ namespace tiktok_Omni.Services
             int maxSeconds,
             string motionRules,
             string brollSection,
+            string zoomSection,
             string musicSection,
             string ambientSection,
+            string edgeStyleSection,
+            string subtitleSection,
+            string edgeTtsSection,
             string templateHint = null)
         {
             var (minWords, maxWords) = PhilosophyRenderOptions.EstimateSpeechWordCount(minSeconds, maxSeconds);
@@ -187,6 +335,7 @@ namespace tiktok_Omni.Services
             return "Bạn là biên kịch video triết lý TikTok tiếng Việt.\r\n" +
                    styleBlock +
                    "CHỦ ĐỀ / BÀI HỌC: [" + topic + "]\r\n\r\n" +
+                   edgeTtsSection + "\r\n\r\n" +
                    "THỜI LƯỢNG VIDEO: " + minSeconds.ToString(inv) + "–" + maxSeconds.ToString(inv) +
                    " giây (giọng kể chậm, trầm, có khoảng dừng).\r\n" +
                    "Viết MỘT câu chuyện ngắn có 3 phần trong cùng một đoạn: Mở đầu → Thân bài → Kết luận bài học.\r\n" +
@@ -201,11 +350,14 @@ namespace tiktok_Omni.Services
                    "  • reflective — suy ngẫm, chiêm nghiệm, trầm lắng (chỉ dùng khi câu mang tone suy tư)\r\n" +
                    "Không được để tất cả cùng mood. Với nhiều quote, mood phải đa dạng và khớp nội dung từng câu.\r\n\r\n" +
                    ambientSection + "\r\n\r\n" +
+                   edgeStyleSection + "\r\n\r\n" +
+                   subtitleSection + "\r\n\r\n" +
                    musicSection + "\r\n\r\n" +
                    motionRules + "\r\n\r\n" +
                    brollSection + "\r\n\r\n" +
+                   zoomSection + "\r\n\r\n" +
                    "Trả về DUY NHẤT JSON array 1 phần tử, không markdown:\r\n" +
-                   "[{\"content\":\"...\",\"mood\":\"reflective\",\"ambient_sfx\":\"night-crickets.mp3\",\"music_file\":\"calm-ambient.mp3\",\"motion_prompt\":\"...\",\"broll_video\":\"forest-path.mp4\"}]";
+                   "[{\"content\":\"...\",\"mood\":\"reflective\",\"edge_style\":\"ke_chuyen\",\"subtitle_look\":\"StoryItalic\",\"subtitle_size\":76,\"subtitle_position\":\"middle\",\"subtitle_effect\":\"Highlight\",\"subtitle_line_bg\":\"Không nền\",\"ambient_sfx\":\"night-crickets.mp3\",\"music_file\":\"calm-ambient.mp3\",\"motion_prompt\":\"...\",\"broll_video\":\"forest-path.mp4\",\"zoom_images\":[\"lake-sunset.jpg\",\"misty-forest.jpg\",\"autumn-leaves.jpg\"]}]";
         }
 
         private static List<PhilosophyScriptItem> ParsePhilosophyScriptsJson(
@@ -226,7 +378,8 @@ namespace tiktok_Omni.Services
                 var result = new List<PhilosophyScriptItem>();
                 foreach (var token in arr)
                 {
-                    var content = (token["content"] ?? token["quote"] ?? token["text"])?.ToString()?.Trim() ?? string.Empty;
+                    var content = PhilosophyGeminiTtsContext.NormalizeQuoteContent(
+                        (token["content"] ?? token["quote"] ?? token["text"])?.ToString());
                     if (string.IsNullOrEmpty(content))
                     {
                         continue;
@@ -237,16 +390,35 @@ namespace tiktok_Omni.Services
                     var motionPrompt = (token["motion_prompt"] ?? token["motionPrompt"])?.ToString()?.Trim() ?? string.Empty;
                     var brollVideo = (token["broll_video"] ?? token["brollVideo"] ?? token["broll"])?.ToString()?.Trim() ?? string.Empty;
                     var musicFile = (token["music_file"] ?? token["musicFile"] ?? token["background_music"])?.ToString()?.Trim() ?? string.Empty;
+                    var edgeStyle = (token["edge_style"] ?? token["edgeStyle"])?.ToString()?.Trim() ?? string.Empty;
+                    var subtitleLook = (token["subtitle_look"] ?? token["subtitleLook"])?.ToString()?.Trim() ?? string.Empty;
+                    var subtitleSize = (token["subtitle_size"] ?? token["subtitleSize"])?.ToString()?.Trim() ?? string.Empty;
+                    var subtitlePosition = (token["subtitle_position"] ?? token["subtitlePosition"])?.ToString()?.Trim() ?? string.Empty;
+                    var subtitleEffect = (token["subtitle_effect"] ?? token["subtitleEffect"])?.ToString()?.Trim() ?? string.Empty;
+                    var subtitleLineBg = (token["subtitle_line_bg"] ?? token["subtitleLineBg"] ?? token["subtitle_line_background"])?.ToString()?.Trim() ?? string.Empty;
                     var row = new PhilosophyScriptItem
                     {
                         Content = content,
                         Mood = mood,
                         MotionPrompt = motionPrompt,
+                        EdgeStyleKey = edgeStyle,
                         Status = "Nháp"
                     };
+                    PhilosophyGeminiSubtitleContext.ApplyGeminiHints(
+                        row,
+                        subtitleLook,
+                        subtitleSize,
+                        subtitlePosition,
+                        subtitleEffect,
+                        subtitleLineBg);
                     if (!string.IsNullOrWhiteSpace(profileName))
                     {
                         row.BRollFolder = PhilosophyBRollSelection.ResolveGeminiBrollFileName(profileName, brollVideo);
+                        row.ZoomImagePaths = ParseGeminiZoomImages(profileName, token["zoom_images"] ?? token["zoomImages"]);
+                        if (row.ZoomImagePaths.Count > 0)
+                        {
+                            row.VisualMode = PhilosophyVisualModes.ImageZoom;
+                        }
                     }
 
                     if (settings != null)
@@ -269,8 +441,18 @@ namespace tiktok_Omni.Services
                         Mood = mood,
                         MotionPrompt = result[0].MotionPrompt,
                         BRollFolder = result[0].BRollFolder,
+                        ZoomImagePaths = result[0].ZoomImagePaths?.ToList() ?? new List<string>(),
+                        VisualMode = result[0].VisualMode,
                         MusicFolder = result[0].MusicFolder,
                         AmbientKey = result[0].AmbientKey,
+                        EdgeStyleKey = result[0].EdgeStyleKey,
+                        SubtitleLookPreset = result[0].SubtitleLookPreset,
+                        SubtitleFontSize = result[0].SubtitleFontSize,
+                        SubtitlePosition = result[0].SubtitlePosition,
+                        SubtitleDisplayAnimation = result[0].SubtitleDisplayAnimation,
+                        SubtitleHighlightColourAss = result[0].SubtitleHighlightColourAss,
+                        SubtitleAnimation = result[0].SubtitleAnimation,
+                        SubtitleEnabled = result[0].SubtitleEnabled,
                         Status = "Nháp"
                     };
                     PhilosophyAmbientCatalog.ApplyGeminiAmbient(storyRow, ambient);
@@ -283,6 +465,39 @@ namespace tiktok_Omni.Services
             {
                 return new List<PhilosophyScriptItem>();
             }
+        }
+
+        private static List<string> ParseGeminiZoomImages(string profileName, JToken token)
+        {
+            var suggestions = new List<string>();
+            if (token == null)
+            {
+                return suggestions;
+            }
+
+            if (token is JArray arr)
+            {
+                foreach (var item in arr)
+                {
+                    var text = item?.ToString()?.Trim();
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        suggestions.Add(text);
+                    }
+                }
+            }
+            else
+            {
+                var raw = token.ToString().Trim();
+                if (!string.IsNullOrEmpty(raw))
+                {
+                    suggestions.AddRange(raw.Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(s => s.Trim())
+                        .Where(s => s.Length > 0));
+                }
+            }
+
+            return PhilosophyBRollSelection.ResolveGeminiZoomImageNames(profileName, suggestions);
         }
 
         private static string ExtractJsonArray(string raw)

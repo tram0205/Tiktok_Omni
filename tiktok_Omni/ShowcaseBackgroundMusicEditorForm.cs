@@ -102,11 +102,84 @@ namespace tiktok_Omni
             Func<Task> listenFullMixedAudioAsync = null,
             Func<bool> canRenderFullMixedAudio = null,
             Func<bool> canListenFullMixedAudio = null,
-            Func<bool> openScriptEditor = null,
-            bool philosophyMode = false,
-            string philosophyAmbientKey = null,
-            string philosophyMusicLibrarySummary = null,
-            PhilosophyBatchItem philosophyBatch = null)
+            Func<bool> openScriptEditor = null)
+            : this(
+                video,
+                settings,
+                musicFileNames,
+                generateHookNarrationAsync,
+                generateBodyNarrationAsync,
+                listenHookNarrationAsync,
+                listenBodyNarrationAsync,
+                canListenHookNarration,
+                canListenBodyNarration,
+                renderFullMixedAudioAsync,
+                listenFullMixedAudioAsync,
+                canRenderFullMixedAudio,
+                canListenFullMixedAudio,
+                openScriptEditor,
+                philosophyMode: false,
+                philosophyAmbientKey: null,
+                philosophyMusicLibrarySummary: null,
+                philosophyBatch: null)
+        {
+        }
+
+        internal static ShowcaseBackgroundMusicEditorForm CreatePhilosophy(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            IReadOnlyList<string> musicFileNames,
+            Func<Task> generateBodyNarrationAsync,
+            Func<Task> listenBodyNarrationAsync,
+            Func<bool> canListenBodyNarration,
+            Func<Task> renderFullMixedAudioAsync,
+            Func<Task> listenFullMixedAudioAsync,
+            Func<bool> canRenderFullMixedAudio,
+            Func<bool> canListenFullMixedAudio,
+            string philosophyAmbientKey,
+            string philosophyMusicLibrarySummary,
+            PhilosophyBatchItem philosophyBatch)
+        {
+            return new ShowcaseBackgroundMusicEditorForm(
+                video,
+                settings,
+                musicFileNames,
+                generateHookNarrationAsync: null,
+                generateBodyNarrationAsync: generateBodyNarrationAsync,
+                listenHookNarrationAsync: null,
+                listenBodyNarrationAsync: listenBodyNarrationAsync,
+                canListenHookNarration: () => false,
+                canListenBodyNarration: canListenBodyNarration,
+                renderFullMixedAudioAsync: renderFullMixedAudioAsync,
+                listenFullMixedAudioAsync: listenFullMixedAudioAsync,
+                canRenderFullMixedAudio: canRenderFullMixedAudio,
+                canListenFullMixedAudio: canListenFullMixedAudio,
+                openScriptEditor: null,
+                philosophyMode: true,
+                philosophyAmbientKey: philosophyAmbientKey,
+                philosophyMusicLibrarySummary: philosophyMusicLibrarySummary,
+                philosophyBatch: philosophyBatch);
+        }
+
+        internal ShowcaseBackgroundMusicEditorForm(
+            ShowcaseVideoItem video,
+            AppSettings settings,
+            IReadOnlyList<string> musicFileNames,
+            Func<Task> generateHookNarrationAsync,
+            Func<Task> generateBodyNarrationAsync,
+            Func<Task> listenHookNarrationAsync,
+            Func<Task> listenBodyNarrationAsync,
+            Func<bool> canListenHookNarration,
+            Func<bool> canListenBodyNarration,
+            Func<Task> renderFullMixedAudioAsync,
+            Func<Task> listenFullMixedAudioAsync,
+            Func<bool> canRenderFullMixedAudio,
+            Func<bool> canListenFullMixedAudio,
+            Func<bool> openScriptEditor,
+            bool philosophyMode,
+            string philosophyAmbientKey,
+            string philosophyMusicLibrarySummary,
+            PhilosophyBatchItem philosophyBatch)
         {
             _philosophyMode = philosophyMode;
             _philosophyAmbientKey = PhilosophyAmbientCatalog.NormalizeKey(philosophyAmbientKey);
@@ -127,7 +200,14 @@ namespace tiktok_Omni
             _openScriptEditor = openScriptEditor;
             _musicNames = musicFileNames?.Where(x => !string.IsNullOrWhiteSpace(x)).ToList()
                 ?? new List<string>();
-            ShowcaseMusicHelper.EnsureVideoDefaults(_video, _settings);
+            if (_philosophyMode)
+            {
+                PhilosophyAudioDefaults.EnsureVideoDefaults(_video, _settings);
+            }
+            else
+            {
+                ShowcaseMusicHelper.EnsureVideoDefaults(_video, _settings);
+            }
 
             var product = (_video.ProductName ?? string.Empty).Trim();
             Text = "Âm thanh" + (product.Length > 0 ? " — " + product : string.Empty);
@@ -1067,7 +1147,11 @@ namespace tiktok_Omni
             }
 
             _trkMusicVolume?.Value = Math.Max(0,
-                Math.Min(100, _video.ShowcaseMusicVolume >= 0 ? _video.ShowcaseMusicVolume : 14));
+                Math.Min(100, _video.ShowcaseMusicVolume >= 0
+                    ? _video.ShowcaseMusicVolume
+                    : (_philosophyMode
+                        ? PhilosophyAudioDefaults.Resolve(_settings).MusicVolumePercent
+                        : (_settings?.VideoMusicVolume ?? 14))));
             UpdateMusicVolumeLabel();
 
             ShowcaseNarrationSpeedHelper.EnsureSegmentSpeedDefaults(_video);
@@ -1129,6 +1213,11 @@ namespace tiktok_Omni
             }
 
             _video.ShowcaseTtsEngine = _video.ShowcaseBodyTtsEngine;
+
+            if (_philosophyMode)
+            {
+                PhilosophyBatchTtsHelper.SyncBodyVoiceToHookTrack(_video);
+            }
 
             var hookLang = _video.ShowcaseVoiceLanguageId;
             var bodyLang = _video.ShowcaseBodyVoiceLanguageId;

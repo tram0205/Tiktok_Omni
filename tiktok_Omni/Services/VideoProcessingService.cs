@@ -72,6 +72,30 @@ namespace tiktok_Omni.Services
                 cancellationToken);
         }
 
+        /// <summary>Gemini gợi ý B-roll / zoom / motion_prompt cho quote có sẵn.</summary>
+        public Task<IReadOnlyList<PhilosophyBackgroundGeminiSuggestion>> GeneratePhilosophyBackgroundSuggestionsAsync(
+            IReadOnlyList<PhilosophyScriptItem> quotes,
+            string topic,
+            AppSettings settings,
+            string profileName = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (settings == null || string.IsNullOrWhiteSpace(settings.AiApiKey))
+            {
+                throw new InvalidOperationException("Cần AI API Key trong Cài đặt.");
+            }
+
+            return _geminiService.GeneratePhilosophyBackgroundSuggestionsAsync(
+                quotes,
+                topic,
+                settings.AiProvider,
+                settings.AiApiKey,
+                settings.AiModel,
+                profileName,
+                settings,
+                cancellationToken);
+        }
+
         public async Task<List<string>> GenerateProductVideosAsync(
             IList<AiVideoGenInputItem> items,
             string script,
