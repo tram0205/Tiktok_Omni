@@ -6,10 +6,22 @@ using System.Threading.Tasks;
 
 namespace tiktok_Omni.Services
 {
-    /// <summary>Anti-Detection cho Video Reup: metadata giả, lật ngang, tone nhạc +2%, nhiễu frame nhẹ.</summary>
+    /// <summary>
+    /// Anti-Detection cho Video Reup: metadata giả, lật ngang, tone nhạc +2%,
+    /// crop bất đối xứng xóa QR code/watermark, xoay nhẹ, nhiễu tối thiểu (ưu tiên chất lượng).
+    /// </summary>
     public static class RemixScramblerService
     {
         public const double MusicPitchFactor = 1.02d;
+
+        // ── Crop bất đối xứng ────────────────────────────────────────────────
+        // Giữ 95% width và 95% height → duy trì tỉ lệ 9:16 gốc.
+        // Left/Right mỗi bên 2.5%  → xóa logo/watermark cạnh trái-phải
+        // Top 1%   → xóa username TikTok phía trên
+        // Bottom = 1 - 0.95 - 0.01 = 4% → xóa QR code phía dưới
+        private const double CropKeep = 0.95d;       // 95% mỗi chiều (giảm từ 93% để giữ chi tiết hơn)
+        private const double CropLeftFrac = 0.025d;  // x-offset 2.5%
+        private const double CropTopFrac = 0.01d;    // y-offset 1%
 
         /// <summary>Filter FFmpeg cho nhạc nền (+2% pitch).</summary>
         public static string GetMusicPitchFilterChain()
@@ -18,16 +30,42 @@ namespace tiktok_Omni.Services
             return "asetrate=" + rate.ToString(CultureInfo.InvariantCulture) + ",aresample=48000";
         }
 
-        /// <summary>Bổ sung vào chuỗi video filter (sau hflip): nhiễu frame nhẹ chống fingerprint.</summary>
+        /// <summary>
+        /// Crop bất đối xứng: cắt 5% dưới (QR), 2% trên (username), 3.5% mỗi bên,
+        /// rồi scale về kích thước gốc. Tỉ lệ 9:16 được bảo toàn.
+        /// </summary>
+        public static string BuildCropZoomFilter()
+        {
+            var keepS  = CropKeep.ToString("0.####", CultureInfo.InvariantCulture);
+            var leftS  = CropLeftFrac.ToString("0.######", CultureInfo.InvariantCulture);
+            var topS   = CropTopFrac.ToString("0.######", CultureInfo.InvariantCulture);
+            var invS   = (1d / CropKeep).ToString("0.######", CultureInfo.InvariantCulture);
+            // trunc(x/2)*2 → số chẵn bắt buộc cho H.264; flags=lanczos → scale sắc nét hơn bicubic mặc định
+            return $"crop=iw*{keepS}:ih*{keepS}:iw*{leftS}:ih*{topS}," +
+                   $"scale=trunc(iw*{invS}/2)*2:trunc(ih*{invS}/2)*2:flags=lanczos";
+        }
+
+        /// <summary>
+        /// Bổ sung vào chuỗi video filter: crop bất đối xứng xóa QR/watermark,
+        /// xoay nhẹ 0.2° (phá spatial hash), đổi fps→30 (phá temporal hash), nhiễu tối thiểu.
+        /// Thứ tự: cropZoom → [baseFilter] → rotate(0.2°) → fps=30 → noise nhẹ.
+        /// </summary>
         public static string AppendVideoAntiDetectionFilters(string baseVideoFilter)
         {
-            var noise = "noise=c0s=5:allf=t+u:c0f=t";
+            // Xoay 0.2° — đủ phá spatial/perceptual hash, ít nội suy pixel hơn 0.5°
+            const string Rotate = "rotate=0.2*PI/180:fillcolor=black:ow=iw:oh=ih";
+            // Đổi về 30fps — phá temporal fingerprint
+            const string Fps = "fps=30";
+            // Noise tối thiểu: c0s=2 (luminance thấp) — đủ phá pixel-hash, không gây hạt bẩn ảnh
+            const string Noise = "noise=c0s=2:c1s=1:c2s=1:allf=t+u:c0f=t";
+            var cropZoom = BuildCropZoomFilter();
+
             if (string.IsNullOrWhiteSpace(baseVideoFilter))
             {
-                return noise;
+                return cropZoom + "," + Rotate + "," + Fps + "," + Noise;
             }
 
-            return baseVideoFilter + "," + noise;
+            return cropZoom + "," + baseVideoFilter + "," + Rotate + "," + Fps + "," + Noise;
         }
 
         public static string BuildFakeMetadataArgs()
@@ -38,6 +76,54 @@ namespace tiktok_Omni.Services
                    " -metadata artist=omni_render_" + _rnd.Next(1000, 9999) +
                    " -metadata comment=reup_" + token +
                    " -metadata creation_time=" + ts;
+        }
+
+        /// <summary>
+        /// Tạo filter_complex string để blend video nền mờ phía dưới video chính.
+        /// Thứ tự: mainVfChain → [mv]; bg scale2ref → [bvscaled]; blend(3%) → [blended]; [subtitle?] → [vout].
+        /// Trả về null nếu bgVideoPath không tồn tại.
+        /// </summary>
+        /// <param name="mainVfChain">Chuỗi filter cho video chính (không có label, không có subtitles).</param>
+        /// <param name="bgVideoPath">Đường dẫn video nền (input [1:v], cần -stream_loop -1 ở ngoài).</param>
+        /// <param name="subtitleFragment">Fragment subtitles='...' từ karaoke, hoặc null.</param>
+        /// <param name="bgOpacity">Độ mờ video nền (0.03 = 3%).</param>
+        /// <returns>Chuỗi -filter_complex kết thúc bằng label [vout], hoặc null nếu không có bg.</returns>
+        public static string BuildBgBlendFilterComplex(
+            string mainVfChain,
+            string bgVideoPath,
+            string subtitleFragment = null,
+            double bgOpacity = 0.03d)
+        {
+            if (string.IsNullOrWhiteSpace(bgVideoPath) || !File.Exists(bgVideoPath))
+            {
+                return null;
+            }
+
+            var opStr = bgOpacity.ToString("0.##", CultureInfo.InvariantCulture);
+            var sb = new System.Text.StringBuilder();
+
+            // [0:v] = video chính → áp dụng toàn bộ anti-detection filters
+            sb.Append("[0:v]").Append(mainVfChain).Append("[mv];");
+
+            // [1:v] = video nền (stream_loop -1) → reset PTS, scale khớp kích thước [mv]
+            sb.Append("[1:v]setpts=PTS-STARTPTS[bvraw];");
+            sb.Append("[bvraw][mv]scale2ref=flags=lanczos[bvscaled][mv2];");
+
+            // blend: bg (TOP, 3%) + main (BOTTOM, 97%) = subtle temporal noise
+            sb.Append("[bvscaled][mv2]blend=all_mode=normal:all_opacity=").Append(opStr).Append("[blended]");
+
+            // burn-in karaoke subtitle nếu có
+            if (!string.IsNullOrWhiteSpace(subtitleFragment))
+            {
+                sb.Append(";[blended]").Append(subtitleFragment).Append("[vout]");
+            }
+            else
+            {
+                // null filter = pass-through, đặt tên output chuẩn [vout]
+                sb.Append(";[blended]null[vout]");
+            }
+
+            return sb.ToString();
         }
 
         /// <summary>Tạo bản copy nguồn đã scramble (metadata + re-mux nhẹ) trước khi render chính.</summary>
@@ -56,10 +142,11 @@ namespace tiktok_Omni.Services
             Directory.CreateDirectory(stageFolder ?? ".");
             var outPath = Path.Combine(stageFolder, "source_scrambled.mp4");
             var meta = BuildFakeMetadataArgs();
-            var vf = AppendVideoAntiDetectionFilters("hflip,eq=brightness=0.01:contrast=1.02");
-            var args = "-y -i \"" + sourceVideoPath + "\" -vf \"" + vf + "\" -an -c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p" +
+            // Pre-scramble: crop+zoom viền, noise — chỉnh màu ở bước render cuối theo preset dòng
+            var vf = AppendVideoAntiDetectionFilters(string.Empty);
+            var args = "-y -i \"" + sourceVideoPath + "\" -vf \"" + vf + "\" -an -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p" +
                        meta + " \"" + outPath + "\"";
-            log?.Invoke("[RemixScrambler] Chuẩn bị nguồn anti-detection (metadata giả + hflip + noise)…");
+            log?.Invoke("[RemixScrambler] Chuẩn bị nguồn anti-detection (crop+zoom viền, noise, metadata giả — màu + hflip ở render cuối)…");
             await VideoReupRemixService.RunFfmpegPublicAsync(ffmpegExe, args, log, cancellationToken).ConfigureAwait(false);
             return File.Exists(outPath) && new FileInfo(outPath).Length > 4096 ? outPath : sourceVideoPath;
         }

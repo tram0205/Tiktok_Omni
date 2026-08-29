@@ -175,7 +175,7 @@ namespace tiktok_Omni.Services
 
         public async Task LoadAsync()
         {
-            var path = GetPath();
+            var path = AppDataPaths.ResolveReadableJsonPath(MetricsFileName, out var migrateFromLegacy);
             if (!File.Exists(path))
             {
                 _data = new RevenueMetricsFile();
@@ -186,6 +186,10 @@ namespace tiktok_Omni.Services
             {
                 var json = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
                 _data = JsonConvert.DeserializeObject<RevenueMetricsFile>(json) ?? new RevenueMetricsFile();
+                if (migrateFromLegacy && (_data.Keywords?.Count ?? 0) > 0)
+                {
+                    await SaveAsync().ConfigureAwait(false);
+                }
             }
             catch
             {
@@ -196,12 +200,11 @@ namespace tiktok_Omni.Services
         private async Task SaveAsync()
         {
             var json = JsonConvert.SerializeObject(_data, Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(GetPath(), json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
-        }
-
-        private static string GetPath()
-        {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", MetricsFileName);
+            await Task.Run(() =>
+            {
+                AppDataPaths.WriteJson(MetricsFileName, json);
+                AppDataPaths.TryDeleteLegacyJson(MetricsFileName);
+            }).ConfigureAwait(false);
         }
 
         private sealed class RevenueMetricsFile

@@ -5,8 +5,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using tiktok_Omni.Models;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Affiliate;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services.Jobs
 {
@@ -127,6 +129,8 @@ namespace tiktok_Omni.Services.Jobs
                     rankTikTokVideo,
                     mode);
 
+                ui.Log($"[Hunt] «{kw}» — mục tiêu {payload.MaxResultsPerKeyword} video/lưới (thu {collectLimit} ứng viên trước khi chọn top view).");
+
                 var results = await _affiliateHunter.HuntAsync(
                     kw,
                     collectLimit,
@@ -153,6 +157,7 @@ namespace tiktok_Omni.Services.Jobs
                     }
                 }
 
+
                 var huntWindow = TimeSpan.FromDays(7);
                 var freshBatch = new List<AffiliateCandidate>();
                 var skipped = 0;
@@ -164,7 +169,7 @@ namespace tiktok_Omni.Services.Jobs
                     }
 
                     var url = (c.VideoUrl ?? string.Empty).Trim();
-                    
+
                     // Chỉ lọc trùng lịch sử nếu KHÔNG dùng RapidAPI (vì RapidAPI luôn cần ra đúng số lượng yêu cầu)
                     var isRapid = string.Equals(payload.TikTokHuntMethod, "RapidApi", StringComparison.OrdinalIgnoreCase);
                     if (!isRapid && !string.IsNullOrWhiteSpace(url) && _huntHistoryStore.ContainsRecent(url, huntWindow))
@@ -306,10 +311,45 @@ namespace tiktok_Omni.Services.Jobs
             ui.OnRenderFinished(true, outputPaths, string.Empty);
         }
 
+        private static readonly Random _autoPostJitterRng = new Random();
+
         private async Task ExecuteAutoPostAsync(OmniJob job, IJobUiBridge ui, CancellationToken cancellationToken)
         {
             var payload = JsonConvert.DeserializeObject<AutoPostJobPayload>(job.PayloadJson ?? "{}")
                             ?? new AutoPostJobPayload();
+
+            // ── 1. Pre-post jitter (schedule-originated jobs only) ────────────────
+            if (payload.ApplyPrePostJitter)
+            {
+                int jitterSec;
+                lock (_autoPostJitterRng) jitterSec = _autoPostJitterRng.Next(30, 91);
+                ui.Log($"[AutoPost] Jitter {jitterSec}s trước «{job.Title}»…");
+                await Task.Delay(TimeSpan.FromSeconds(jitterSec), cancellationToken).ConfigureAwait(false);
+            }
+
+            // ── 2. Browser-busy check (up to 3 × 60 s) ───────────────────────────
+            if (payload.CheckBrowserBusy)
+            {
+                const int maxBusyRetries  = 3;
+                const int busyWaitSeconds = 60;
+                var profileKey = ProfileScopedPaths.ResolveProfileName(
+                    string.IsNullOrWhiteSpace(payload.Profile) ? job.ProfileName : payload.Profile);
+
+                for (int attempt = 0; attempt < maxBusyRetries; attempt++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (BrowserLockService.Instance.GetLock(profileKey).CurrentCount > 0)
+                        break; // browser is free
+
+                    if (attempt == maxBusyRetries - 1)
+                        throw new InvalidOperationException(
+                            $"Profile «{profileKey}» vẫn bận sau {maxBusyRetries} lần chờ ({maxBusyRetries * busyWaitSeconds}s). Job sẽ được retry sau.");
+
+                    ui.Log($"[AutoPost] Profile «{profileKey}» đang bận (lần {attempt + 1}/{maxBusyRetries}) — đợi {busyWaitSeconds}s…");
+                    await Task.Delay(TimeSpan.FromSeconds(busyWaitSeconds), cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             ProfileScopedPaths.SetConfiguredStorageRoot(payload.StorageRootPath);
             var profile = ProfileScopedPaths.ResolveProfileName(payload.Profile);
             ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(payload.StorageRootPath, profile);
@@ -365,19 +405,34 @@ namespace tiktok_Omni.Services.Jobs
                 profile.VideoStyle = payload.VideoStyle.Trim();
             }
 
-            var quoteInput = (payload.QuoteText ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(quoteInput))
+            var content = (payload.Content ?? payload.QuoteText ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(content))
             {
-                throw new InvalidOperationException("Quote trống.");
+                throw new InvalidOperationException("Script trống.");
             }
 
-            ui.Log("[Job] Triết lý/Quote — nick «" + nick + "»: " +
-                   (quoteInput.Length > 60 ? quoteInput.Substring(0, 60) + "…" : quoteInput));
+            ui.Log("[Job] Quote — nick «" + nick + "»: " +
+                   (content.Length > 60 ? content.Substring(0, 60) + "…" : content));
 
             try
             {
-                var result = await _philosophyVideoService.GenerateAsync(
-                    quoteInput,
+                var scriptItem = new PhilosophyScriptItem
+                {
+                    Content = content,
+                    Mood = string.IsNullOrWhiteSpace(payload.Mood) ? "reflective" : payload.Mood.Trim(),
+                    Status = "Render"
+                };
+                var renderOptions = new PhilosophyRenderOptions
+                {
+                    ProfileName = nick,
+                    BRollFolder = payload.BRollFolder ?? string.Empty,
+                    MusicFolder = payload.MusicFolder ?? string.Empty,
+                    AmbientFolder = payload.AmbientFolder ?? string.Empty
+                };
+
+                var result = await _philosophyVideoService.GenerateFromScriptAsync(
+                    scriptItem,
+                    renderOptions,
                     settings,
                     profile,
                     ui.Log,
@@ -524,6 +579,10 @@ namespace tiktok_Omni.Services.Jobs
             }
         }
 
+        /// <summary>
+        /// Showcase sản phẩm (trước đây "Affiliate Deep") — ghép clip Veo đã tạo TAY theo Excel prompt.
+        /// Không còn tự gọi Veo (hạn chế cũ của Affiliate Deep: Veo tự động bất khả thi/lệch sản phẩm).
+        /// </summary>
         private async Task ExecuteAffiliateDeepRenderAsync(OmniJob job, IJobUiBridge ui, CancellationToken cancellationToken)
         {
             var payload = JsonConvert.DeserializeObject<AffiliateDeepRenderJobPayload>(job.PayloadJson ?? "{}")
@@ -534,17 +593,29 @@ namespace tiktok_Omni.Services.Jobs
 
             var settings = await _configManager.LoadAsync().ConfigureAwait(false);
             var products = payload.Products ?? new List<AiVideoGenInputItem>();
-            if (products.Count < 4)
+            if (!ShowcaseWorkflowConstants.HasEnoughScenes(products.Count))
             {
-                throw new InvalidOperationException("Affiliate Deep render cần ít nhất 4 ảnh cùng sản phẩm.");
+                throw new InvalidOperationException("Showcase render cần ít nhất 1 ảnh/clip cùng sản phẩm.");
             }
 
-            ui.Log("[Job] Affiliate Deep render — «" + profile + "»: " + (payload.ProductName ?? string.Empty));
+            ui.Log("[Job] Showcase render — «" + profile + "»: " + (payload.ProductName ?? string.Empty));
+
+            var renderSettings = payload.RenderSettings ?? new ShowcasePerVideoRenderSettings();
+            settings.VideoTransitionDurationSeconds = renderSettings.TransitionSeconds > 0
+                ? renderSettings.TransitionSeconds
+                : settings.VideoTransitionDurationSeconds;
+            settings.VideoMusicVolume = renderSettings.MusicVolume >= 0
+                ? renderSettings.MusicVolume
+                : settings.VideoMusicVolume;
+            settings.VideoBackgroundMusicFileName = (renderSettings.BackgroundMusicFile ?? string.Empty).Trim();
+            var subtitleOptions = ShowcaseSubtitleStyleHelper.BuildOptions(renderSettings, settings);
 
             try
             {
-                var result = await _videoProcessingService.GenerateAffiliateProductVideoAsync(
+                var result = await _videoProcessingService.GenerateShowcaseVideoFromClipsAsync(
                     products,
+                    payload.HookText,
+                    payload.CtaText,
                     settings,
                     profile,
                     ui.Log,
@@ -552,11 +623,12 @@ namespace tiktok_Omni.Services.Jobs
                     (percent, stage) =>
                     {
                         var mapped = ProductionPipeline.MapRenderStageToStatus(stage, percent);
-                        ui.Log("[Deep Render] " + mapped + " " + percent + "% — " + stage);
+                        ui.Log("[Showcase Render] " + mapped + " " + percent + "% — " + stage);
                     },
                     payload.Category,
                     payload.StorageRootPath,
-                    payload.UseMultiVoiceNarration).ConfigureAwait(false);
+                    renderSettings,
+                    subtitleOptions).ConfigureAwait(false);
 
                 var output = result?.FinalVideoPath ?? string.Empty;
                 ui.OnAffiliateDeepRenderFinished(job.Id, true, output, string.Empty);

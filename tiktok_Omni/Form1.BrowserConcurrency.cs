@@ -1,71 +1,35 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
 
 namespace tiktok_Omni
 {
     public partial class Form1
     {
-        private static readonly AsyncLocal<int> BrowserLockDepth = new AsyncLocal<int>();
-
-        /// <summary>Chỉ cho phép một phiên Chrome/Playwright tại một thời điểm (tránh đè profile / crash).</summary>
-        internal static async Task WithBrowserLockAsync(
+        /// <summary>Chỉ một phiên Chrome/Playwright trên mỗi profile tại một thời điểm.</summary>
+        internal static Task WithBrowserLockAsync(
+            string profileName,
             Func<CancellationToken, Task> action,
-            CancellationToken cancellationToken)
-        {
-            if (action == null)
-            {
-                throw new ArgumentNullException(nameof(action));
-            }
+            CancellationToken cancellationToken) =>
+            BrowserLockService.Instance.WithLockAsync(profileName, action, cancellationToken);
 
-            if (BrowserLockDepth.Value > 0)
-            {
-                await action(cancellationToken).ConfigureAwait(false);
-                return;
-            }
+        internal static Task WithBrowserLockAsync(
+            Func<CancellationToken, Task> action,
+            CancellationToken cancellationToken) =>
+            BrowserLockService.Instance.WithLockAsync("Global", action, cancellationToken);
 
-            KillZombieBrowserProcesses();
-            await _browserSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                BrowserLockDepth.Value++;
-                await action(cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                BrowserLockDepth.Value = Math.Max(0, BrowserLockDepth.Value - 1);
-                _browserSemaphore.Release();
-            }
-        }
-
-        internal static async Task<T> WithBrowserLockAsync<T>(
+        internal static Task<T> WithBrowserLockAsync<T>(
+            string profileName,
             Func<CancellationToken, Task<T>> action,
-            CancellationToken cancellationToken)
-        {
-            if (action == null)
-            {
-                throw new ArgumentNullException(nameof(action));
-            }
+            CancellationToken cancellationToken) =>
+            BrowserLockService.Instance.WithLockAsync(profileName, action, cancellationToken);
 
-            if (BrowserLockDepth.Value > 0)
-            {
-                return await action(cancellationToken).ConfigureAwait(false);
-            }
-
-            KillZombieBrowserProcesses();
-            await _browserSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                BrowserLockDepth.Value++;
-                return await action(cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                BrowserLockDepth.Value = Math.Max(0, BrowserLockDepth.Value - 1);
-                _browserSemaphore.Release();
-            }
-        }
+        internal static Task<T> WithBrowserLockAsync<T>(
+            Func<CancellationToken, Task<T>> action,
+            CancellationToken cancellationToken) =>
+            BrowserLockService.Instance.WithLockAsync("Global", action, cancellationToken);
 
         private static void TryCancel(CancellationTokenSource cts)
         {
@@ -125,6 +89,64 @@ namespace tiktok_Omni
             TryCancel(_autoPostCancellation);
             _globalJobQueue?.CancelWhere(j =>
                 j != null && (j.Kind == OmniJobKind.AutoPost || j.Kind == OmniJobKind.HuntAffiliate));
+        }
+
+        private void CancelRunningWarmupWorkForEmergencyStop()
+        {
+            if (!_isWarmupQueueRunning && _warmupCancellation == null && _warmupQueueCancellation == null)
+            {
+                return;
+            }
+
+            CancelWarmupBrowserWork();
+        }
+
+        /// <summary>Dừng phiên browser đang chạy — không hủy job Pending trong hàng đợi.</summary>
+        private void CancelRunningAffiliateBrowserWorkForEmergencyStop()
+        {
+            TryCancel(_huntCancellation);
+            if (_revenueFetchRunning)
+            {
+                TryCancel(_revenueCancellation);
+            }
+
+            TryCancel(_activeJobCancellation);
+            TryCancel(_autoPostCancellation);
+        }
+
+        /// <summary>Hủy mọi job nền trước khi đóng app (Ctrl+C / nút X).</summary>
+        internal void ShutdownAllAutomationWork()
+        {
+            try
+            {
+                _warmupScheduleTimer?.Stop();
+            }
+            catch
+            {
+            }
+
+            CancelWarmupBrowserWork();
+            CancelAffiliateBrowserWork();
+        }
+
+        /// <summary>Đóng app từ console Ctrl+C (dotnet run).</summary>
+        internal void ShutdownAndClose(bool fromConsole = false)
+        {
+            if (IsDisposed || Disposing)
+            {
+                return;
+            }
+
+            if (fromConsole)
+            {
+                _consoleFastExit = true;
+            }
+
+            _applicationClosing = true;
+            CloseAllAuxiliaryFormsOnExit();
+            ShutdownAllAutomationWork();
+            CancelAllApplicationWorkForEmergencyStop();
+            Close();
         }
     }
 }

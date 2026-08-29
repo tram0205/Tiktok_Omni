@@ -5,7 +5,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Helpers;
 using tiktok_Omni.Services;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni
 {
@@ -30,7 +32,12 @@ namespace tiktok_Omni
 
         private List<AiVideoGenInputItem> GetSlideshowBuffer() => _slideshowBuffer ?? (_slideshowBuffer = new List<AiVideoGenInputItem>());
 
-        private List<AiVideoGenInputItem> GetDeepDiveBuffer() => _deepDiveBuffer ?? (_deepDiveBuffer = new List<AiVideoGenInputItem>());
+        private List<AiVideoGenInputItem> GetDeepDiveBuffer()
+        {
+            EnsureShowcaseVideoBufferMigrated();
+            var video = GetActiveShowcaseVideo();
+            return video?.Scenes ?? _deepDiveBuffer ?? (_deepDiveBuffer = new List<AiVideoGenInputItem>());
+        }
 
         private DataGridView GetActiveProductGrid()
         {
@@ -39,6 +46,9 @@ namespace tiktok_Omni
 
         private void SyncBuffersToGrids()
         {
+            var selectedShowcaseVideoIds = CaptureShowcaseGridSelectedVideoIds();
+            SaveAllProductGridState();
+
             if (dgvAiVideoGenInput != null)
             {
                 dgvAiVideoGenInput.DataSource = null;
@@ -49,11 +59,145 @@ namespace tiktok_Omni
 
             if (dgvDeepDiveInput != null)
             {
+                if (IsDeepDiveModeTab())
+                {
+                    WireShowcaseProductGridLayout();
+                    ApplyDeepDiveGridColumnVisibility(showcaseMode: true);
+                }
+
+                RefreshShowcaseVideoDisplayFields();
                 dgvDeepDiveInput.DataSource = null;
-                dgvDeepDiveInput.DataSource = GetDeepDiveBuffer()
-                    .Where(ShouldShowAiVideoGenItem)
+                var showcaseRows = GetShowcaseVideoBuffer()
+                    .Where(ShouldShowShowcaseVideo)
                     .ToList();
+                dgvDeepDiveInput.DataSource = showcaseRows;
+                if (IsDeepDiveModeTab())
+                {
+                    ApplyShowcaseDeepDiveRowHeights();
+                    RestoreShowcaseGridSelection(selectedShowcaseVideoIds);
+                }
             }
+        }
+
+        /// <summary>Commit ô đang sửa trên lưới Slideshow và ghi ngược vào <see cref="_slideshowBuffer"/>.</summary>
+        public void SaveCurrentGridState()
+        {
+            SaveProductGridStateToBuffer(dgvAiVideoGenInput, GetSlideshowBuffer(), notifySlideshowDraftDirty: true);
+        }
+
+        /// <summary>Commit ô đang sửa trên lưới Affiliate Deep và ghi ngược vào <see cref="_deepDiveBuffer"/>.</summary>
+        public void SaveDeepDiveGridState()
+        {
+            if (dgvDeepDiveInput == null || dgvDeepDiveInput.IsDisposed)
+            {
+                return;
+            }
+
+            if (dgvDeepDiveInput.IsCurrentCellInEditMode)
+            {
+                dgvDeepDiveInput.EndEdit(DataGridViewDataErrorContexts.Commit);
+            }
+
+            SyncAllShowcaseVideoSettingsToScenes();
+        }
+
+        /// <summary>Lưu cả hai lưới sản phẩm trước rebind / render / đổi tab.</summary>
+        public void SaveAllProductGridState()
+        {
+            SaveDeepDiveGridState();
+            SaveCurrentGridState();
+        }
+
+        private void SaveProductGridStateToBuffer(
+            DataGridView grid,
+            List<AiVideoGenInputItem> buffer,
+            bool notifySlideshowDraftDirty)
+        {
+            if (grid == null || grid.IsDisposed || buffer == null)
+            {
+                return;
+            }
+
+            if (grid.IsCurrentCellInEditMode)
+            {
+                grid.EndEdit(DataGridViewDataErrorContexts.Commit);
+            }
+
+            var changed = false;
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                if (!(row.DataBoundItem is AiVideoGenInputItem gridItem))
+                {
+                    continue;
+                }
+
+                var target = buffer.FirstOrDefault(x => ReferenceEquals(x, gridItem))
+                    ?? buffer.FirstOrDefault(x => AiVideoGenItemsMatch(x, gridItem));
+                if (target == null)
+                {
+                    continue;
+                }
+
+                if (ApplyGridRowToAiVideoGenItem(grid, row, target))
+                {
+                    changed = true;
+                }
+            }
+
+            if (changed && notifySlideshowDraftDirty)
+            {
+                NotifySlideshowDraftDirty();
+            }
+        }
+
+        private static bool ApplyGridRowToAiVideoGenItem(DataGridView grid, DataGridViewRow row, AiVideoGenInputItem target)
+        {
+            if (grid == null || row == null || target == null)
+            {
+                return false;
+            }
+
+            var profile = ReadGridCellText(grid, row, "colAiProfile");
+            var product = ReadGridCellText(grid, row, "colAiProduct");
+            var videoUrl = ReadGridCellText(grid, row, "colAiUrl");
+            var hook = ReadGridCellText(grid, row, "colAiHook");
+            var hashtags = ReadGridCellText(grid, row, "colAiHashtag");
+
+            var changed = false;
+            changed |= SetIfDifferent(target.ProfileName, profile, v => target.ProfileName = ProfileScopedPaths.ResolveProfileName(v));
+            changed |= SetIfDifferent(target.ProductName, product, v => target.ProductName = v);
+            changed |= SetIfDifferent(target.VideoUrl, videoUrl, v => target.VideoUrl = v);
+            changed |= SetIfDifferent(target.HookText, hook, v => target.HookText = v);
+            changed |= SetIfDifferent(target.Hashtags, hashtags, v => target.Hashtags = v);
+            return changed;
+        }
+
+        private static string ReadGridCellText(DataGridView grid, DataGridViewRow row, string columnName)
+        {
+            if (grid == null || row == null || !grid.Columns.Contains(columnName))
+            {
+                return string.Empty;
+            }
+
+            var value = row.Cells[columnName].Value;
+            return value == null ? string.Empty : value.ToString().Trim();
+        }
+
+        private static bool SetIfDifferent(string current, string incoming, Action<string> apply)
+        {
+            var normalized = incoming ?? string.Empty;
+            if (string.Equals(current ?? string.Empty, normalized, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            apply(normalized);
+            return true;
         }
 
         private void ReplaceSlideshowBuffer(IEnumerable<AiVideoGenInputItem> items)
@@ -69,12 +213,8 @@ namespace tiktok_Omni
 
         private void ReplaceDeepDiveBuffer(IEnumerable<AiVideoGenInputItem> items)
         {
-            _deepDiveBuffer = items?
-                .Where(x => x != null)
-                .Select(CloneAiVideoGenItem)
-                .Where(x => x != null)
-                .ToList() ?? new List<AiVideoGenInputItem>();
-            SyncBuffersToGrids();
+            ReplaceShowcaseVideoBufferFromScenes(items);
+            RefreshAffiliateDeepStoryboard();
         }
 
         private void PushAffiliateCandidatesToTargetBuffer(IEnumerable<AffiliateCandidate> candidates, bool deepDiveTarget)
@@ -108,7 +248,7 @@ namespace tiktok_Omni
         }
 
         private const int ProductInputGridHeaderHeight = AppGridHeaderHeight;
-        private const int ProductInputGridRowHeight = 30;
+        private const int ProductInputGridRowHeight = AppDefaultRowHeight;
         private static readonly Font ProductInputGridHeaderFont = AppGridHeaderFont;
 
         private DataGridView CreateProductInputGrid(string name)
@@ -121,16 +261,16 @@ namespace tiktok_Omni
                 AutoGenerateColumns = false,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
-                ReadOnly = true,
+                ReadOnly = false,
+                EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = true,
                 BackgroundColor = Color.FromArgb(20, 22, 28),
                 BorderStyle = BorderStyle.FixedSingle,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
                 GridColor = Color.FromArgb(60, 64, 77),
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                ColumnHeadersHeight = ProductInputGridHeaderHeight,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
             };
             grid.DefaultCellStyle.BackColor = Color.FromArgb(20, 22, 28);
             grid.DefaultCellStyle.ForeColor = Color.Gainsboro;
@@ -140,14 +280,137 @@ namespace tiktok_Omni
             grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.WhiteSmoke;
             grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.FromArgb(45, 49, 60);
             grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Color.WhiteSmoke;
-            grid.ColumnHeadersDefaultCellStyle.Font = ProductInputGridHeaderFont;
             grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
-            grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(6, 8, 6, 8);
             grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False;
-            grid.EnableHeadersVisualStyles = false;
-            grid.RowTemplate.Height = ProductInputGridRowHeight;
             ConfigureProductInputGrid(grid);
+            ApplyAppGridChrome(grid);
+            grid.KeyDown += ProductInputGrid_KeyDown;
             return grid;
+        }
+
+        private void ProductInputGrid_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Delete || e.Alt || e.Control)
+            {
+                return;
+            }
+
+            var dgv = sender as DataGridView;
+            if (dgv == null)
+            {
+                return;
+            }
+
+            if (dgv.IsCurrentCellInEditMode)
+            {
+                dgv.EndEdit(DataGridViewDataErrorContexts.Commit);
+            }
+
+            if (!TryDeleteSelectedProductInputGridRows(dgv, out var deletedCount))
+            {
+                return;
+            }
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            if (ReferenceEquals(dgv, dgvDeepDiveInput))
+            {
+                Log("[Grid] Đã xóa " + deletedCount + " dòng — đã chuyển vào thùng rác (giữ 24 giờ).");
+            }
+            else
+            {
+                Log("[Grid] Đã xóa " + deletedCount + " dòng.");
+            }
+        }
+
+        /// <summary>Xóa dòng đã chọn (hoặc dòng hiện tại) trên lưới Slideshow / Showcase — có hộp xác nhận.</summary>
+        private bool TryDeleteSelectedProductInputGridRows(DataGridView dgv, out int deletedCount)
+        {
+            deletedCount = 0;
+            if (dgv == null)
+            {
+                return false;
+            }
+
+            var slideshow = ReferenceEquals(dgv, dgvAiVideoGenInput);
+            if (slideshow)
+            {
+                var items = dgv.SelectedRows
+                    .Cast<DataGridViewRow>()
+                    .Select(r => r.DataBoundItem as AiVideoGenInputItem)
+                    .Where(i => i != null)
+                    .ToList();
+
+                if (items.Count == 0 && dgv.CurrentRow?.DataBoundItem is AiVideoGenInputItem currentItem)
+                {
+                    items.Add(currentItem);
+                }
+
+                if (items.Count == 0)
+                {
+                    return false;
+                }
+
+                if (!UiConfirmHelper.ConfirmDeleteRows(this, items.Count))
+                {
+                    return false;
+                }
+
+                var buffer = GetSlideshowBuffer();
+                foreach (var item in items)
+                {
+                    buffer.Remove(item);
+                }
+
+                deletedCount = items.Count;
+                NotifySlideshowDraftDirty();
+            }
+            else
+            {
+                var videos = dgv.SelectedRows
+                    .Cast<DataGridViewRow>()
+                    .Select(r => r.DataBoundItem as ShowcaseVideoItem)
+                    .Where(v => v != null)
+                    .ToList();
+
+                if (videos.Count == 0 && dgv.CurrentRow?.DataBoundItem is ShowcaseVideoItem currentVideo)
+                {
+                    videos.Add(currentVideo);
+                }
+
+                if (videos.Count == 0)
+                {
+                    return false;
+                }
+
+                if (!UiConfirmHelper.ConfirmDeleteRows(this, videos.Count))
+                {
+                    return false;
+                }
+
+                MoveShowcaseVideosToTrash(videos);
+
+                var showcaseBuffer = GetShowcaseVideoBuffer();
+                foreach (var video in videos)
+                {
+                    if (_activeShowcaseVideoId == video.VideoId)
+                    {
+                        _activeShowcaseVideoId = null;
+                        _showcaseSession = null;
+                    }
+
+                    showcaseBuffer.Remove(video);
+                }
+
+                deletedCount = videos.Count;
+                AllowShowcaseDraftShrinkOnNextSave();
+                NotifyShowcaseDraftDirty();
+                RefreshAffiliateDeepStoryboard();
+            }
+
+            SyncBuffersToGrids();
+            RefreshAiVideoGenModeReadinessLabels();
+            return true;
         }
 
         private async void btnAddManualProduct_Click(object sender, EventArgs e)
@@ -159,9 +422,10 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (!IsProductPipelineModeTab())
+            if (!IsSlideshowModeTab())
             {
-                MessageBox.Show(this, "Chọn «Slideshow» hoặc «Affiliate Deep» trước khi thêm.", "Nhập link", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "Khung dán link chỉ dùng tab Slideshow — tab Showcase thêm ảnh ở cột «Ảnh».", "Nhập link",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -176,38 +440,9 @@ namespace tiktok_Omni
                     return;
                 }
 
-                if (IsSlideshowModeTab())
-                {
-                    GetSlideshowBuffer().Add(CloneAiVideoGenItem(item));
-                    NotifySlideshowDraftDirty();
-                    Log($"Slideshow: đã thêm «{item.ProductName}» từ link.");
-                }
-                else
-                {
-                    var images = (_lastManualProductFetch?.ImageUrls ?? new List<string>())
-                        .Where(u => !string.IsNullOrWhiteSpace(u))
-                        .ToList();
-                    if (images.Count < 4)
-                    {
-                        MessageBox.Show(this, "Affiliate Deep cần ít nhất 4 ảnh. Link này chỉ trả về " + images.Count + " ảnh.", "Không đủ ảnh", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        return;
-                    }
-
-                    foreach (var image in images.Take(4))
-                    {
-                        var scene = CloneAiVideoGenItem(item);
-                        if (scene == null)
-                        {
-                            continue;
-                        }
-
-                        scene.ImageUrl = image;
-                        GetDeepDiveBuffer().Add(scene);
-                    }
-
-                    RefreshAffiliateDeepStoryboard();
-                    Log($"Affiliate Deep: đã thêm 4 cảnh cho «{item.ProductName}».");
-                }
+                GetSlideshowBuffer().Add(CloneAiVideoGenItem(item));
+                NotifySlideshowDraftDirty();
+                Log($"Slideshow: đã thêm «{item.ProductName}» từ link.");
 
                 SyncBuffersToGrids();
                 txtManualProductUrl?.Clear();
@@ -235,6 +470,12 @@ namespace tiktok_Omni
 
         private void DgvDeepDiveInput_SelectionChanged_Production(object sender, EventArgs e)
         {
+            if (dgvDeepDiveInput?.CurrentRow?.DataBoundItem is ShowcaseVideoItem video)
+            {
+                BindProductionPreviewForAiItem(video.Scenes.FirstOrDefault());
+                return;
+            }
+
             if (dgvDeepDiveInput?.CurrentRow?.DataBoundItem is AiVideoGenInputItem item)
             {
                 BindProductionPreviewForAiItem(item);
@@ -257,7 +498,7 @@ namespace tiktok_Omni
                 dgvAiVideoGenInput = CreateProductInputGrid("dgvSlideshow");
                 dgvAiVideoGenInput.SelectionChanged += DgvAiVideoGenInput_SelectionChanged_Production;
                 slideshowGridHost.Controls.Add(dgvAiVideoGenInput);
-                dgvAiVideoGenInput.BringToFront();
+                ApplyAppGridChrome(dgvAiVideoGenInput);
             }
 
             if (deepDiveGridHost != null)
@@ -270,23 +511,27 @@ namespace tiktok_Omni
 
                 dgvDeepDiveInput = CreateProductInputGrid("dgvDeepDive");
                 dgvDeepDiveInput.SelectionChanged += DgvDeepDiveInput_SelectionChanged_Production;
+                dgvDeepDiveInput.SelectionChanged += DgvDeepDiveInput_SelectionChanged_Showcase;
                 deepDiveGridHost.Controls.Add(dgvDeepDiveInput);
+                ApplyAppGridChrome(dgvDeepDiveInput);
             }
 
             SyncBuffersToGrids();
             InitializeSlideshowDraftAutoSave();
+            InitializeShowcaseDraftAutoSave();
+            WireSlideshowProductGridLayout();
+            WireDeepDiveProductGridLayout();
+            RefreshAllProfileSelectors();
         }
 
         public void SyncProductGridVisibilityForMode(int modeTabIndex)
         {
             if (lblAiVideoGenProductsTitle != null)
             {
-                lblAiVideoGenProductsTitle.Text = modeTabIndex == 1
-                    ? "Affiliate Deep — storyboard & dữ liệu cảnh"
-                    : modeTabIndex == 0
-                        ? "Dữ liệu sản phẩm (Slideshow)"
-                        : "Sản xuất video AI";
-                lblAiVideoGenProductsTitle.Visible = modeTabIndex == 0 || modeTabIndex == 1;
+                lblAiVideoGenProductsTitle.Text = modeTabIndex == 0
+                    ? "Dữ liệu sản phẩm — chọn dòng, rồi dùng nút bên dưới"
+                    : "Sản xuất video AI";
+                lblAiVideoGenProductsTitle.Visible = modeTabIndex == 0;
             }
 
             if (modeTabIndex == 1)
@@ -300,6 +545,7 @@ namespace tiktok_Omni
         private Task<AiVideoGenInputItem> ScrapeProductDetailsAsync(string url, CancellationToken cancellationToken = default)
         {
             return WithBrowserLockAsync(
+                GetRunningProfileName(),
                 ct => ScrapeProductDetailsCoreAsync(url, ct),
                 cancellationToken);
         }

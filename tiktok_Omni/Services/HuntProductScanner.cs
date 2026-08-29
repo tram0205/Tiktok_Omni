@@ -19,6 +19,9 @@ namespace tiktok_Omni.Services
         public decimal MinRating { get; set; }
         public bool ScanTikTok { get; set; } = true;
         public bool ScanShopee { get; set; } = true;
+
+        /// <summary>Chỉ áp dụng TikTok RapidAPI — lọc HH &gt; ngưỡng này (mặc định 5%).</summary>
+        public double MinCommissionPercent { get; set; } = TikTokApiService.DefaultMinAffiliateCommissionPercent;
     }
 
     public sealed class HuntProductScanner
@@ -69,7 +72,7 @@ namespace tiktok_Omni.Services
 
             if (request.ScanTikTok)
             {
-                log?.Invoke("[Săn SP] TikTok Shop — từ khoá: «" + keyword + "» (www.tiktok.com, người mua — không cần Affiliate Creator)");
+                log?.Invoke("[Săn SP] TikTok Shop — RapidAPI Get Top Products, từ khoá: «" + keyword + "»");
                 var tikTokRows = await ScanTikTokShopAsync(
                         keyword,
                         request.MaxResults,
@@ -101,7 +104,7 @@ namespace tiktok_Omni.Services
                 }
             }
 
-            var filtered = ApplyFilters(merged, request.MinSales, request.MinRating);
+            var filtered = ApplyFilters(merged, request.MinSales, request.MinRating, request.MinCommissionPercent);
             var sorted = SortBestSellersFirst(filtered);
             log?.Invoke("[Săn SP] Gộp xong: " + sorted.Count + " sản phẩm sau lọc.");
             return sorted;
@@ -115,17 +118,38 @@ namespace tiktok_Omni.Services
             CancellationToken cancellationToken,
             Action<string> log)
         {
-            // TikTok Shop công khai (www.tiktok.com) — giống tìm trên app điện thoại, không cần affiliate.tiktok.com.
-            var affiliates = await _affiliateHunter.HuntTikTokConsumerShopAsync(
+            if (configManager == null)
+            {
+                throw new InvalidOperationException("Chưa có ConfigManager — không thể quét TikTok Shop.");
+            }
+
+            var settings = await configManager.LoadAsync().ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(settings?.TikTokRapidApiKey))
+            {
+                throw new InvalidOperationException(
+                    "TikTok cần RapidAPI key (tab Cài đặt → TikTok RapidAPI, subscribe «Get Top Products»). "
+                    + "Chợ Affiliate trên Chrome máy tính thường không truy cập được — chỉ dùng API.");
+            }
+
+            log?.Invoke("[Săn SP] TikTok — RapidAPI Get Top Products ("
+                + TikTokApiService.TopProductsEndpointPath + "), quốc gia "
+                + (settings.TikTokRapidApiCountryCode ?? "VN")
+                + ", lọc HH > "
+                + TikTokApiService.DefaultMinAffiliateCommissionPercent.ToString("0.##", CultureInfo.InvariantCulture)
+                + "%…");
+
+            var service = new TikTokApiService();
+            var affiliates = await service.SearchAffiliateTrendingProductsAsync(
                     keyword,
                     maxResults,
-                    cancellationToken,
+                    settings.TikTokRapidApiKey,
+                    settings.TikTokRapidApiHost,
+                    settings.TikTokRapidApiCountryCode,
                     log,
-                    configManager,
-                    profile)
+                    cancellationToken)
                 .ConfigureAwait(false);
 
-            return affiliates
+            var mapped = (affiliates ?? new List<AffiliateCandidate>())
                 .Where(a => a != null && !string.IsNullOrWhiteSpace(a.VideoUrl))
                 .Select(a => new HuntProductCandidate
                 {
@@ -134,12 +158,20 @@ namespace tiktok_Omni.Services
                     ProductName = string.IsNullOrWhiteSpace(a.ProductName) ? "TikTok Shop" : a.ProductName.Trim(),
                     ProductLink = a.VideoUrl.Trim(),
                     ImageUrl = a.ImageUrl ?? string.Empty,
-                    SalesVolume = 0,
+                    SalesVolume = a.PlayCount,
                     Rating = 0,
                     Price = a.Price ?? string.Empty,
                     Commission = a.CommissionRate ?? string.Empty
                 })
                 .ToList();
+
+            if (mapped.Count == 0)
+            {
+                log?.Invoke(
+                    "[Săn SP] RapidAPI không có SP sau lọc (thử từ khoá khác, đổi country_code US trong Cài đặt, hoặc từ khoá tiếng Anh).");
+            }
+
+            return mapped;
         }
 
         private static async Task<List<HuntProductCandidate>> ScanShopeeAsync(
@@ -280,7 +312,8 @@ namespace tiktok_Omni.Services
         internal static List<HuntProductCandidate> ApplyFilters(
             IList<HuntProductCandidate> rows,
             long minSales,
-            decimal minRating)
+            decimal minRating,
+            double minCommissionPercent = 0)
         {
             IEnumerable<HuntProductCandidate> q = rows ?? Array.Empty<HuntProductCandidate>();
             if (minSales > 0)
@@ -293,6 +326,19 @@ namespace tiktok_Omni.Services
                 q = q.Where(r => r.Rating >= minRating);
             }
 
+            if (minCommissionPercent > 0)
+            {
+                q = q.Where(r =>
+                {
+                    if (!string.Equals(r.SourcePlatform, "TikTok", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+
+                    return TikTokApiService.ParseCommissionPercent(r.Commission) > minCommissionPercent;
+                });
+            }
+
             return q.ToList();
         }
 
@@ -303,6 +349,26 @@ namespace tiktok_Omni.Services
                 .ThenByDescending(r => r.Rating)
                 .ThenBy(r => r.ProductName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        public static string DeterminePlatform(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return "Web";
+            }
+
+            if (url.IndexOf("shopee", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Shopee";
+            }
+
+            if (url.IndexOf("tiktok", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "TikTok";
+            }
+
+            return "Web";
         }
     }
 }

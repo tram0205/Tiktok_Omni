@@ -59,7 +59,7 @@ namespace tiktok_Omni.Services
         {
 
             return BrowserLock.WithLockAsync(
-
+                ProfileScopedPaths.ResolveProfileName(profileName),
                 ct => FetchRevenueReportCoreAsync(profileName, logAction, ct),
 
                 cancellationToken);

@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using tiktok_Omni.Models;
 
 namespace tiktok_Omni.Services
 {
@@ -14,16 +15,18 @@ namespace tiktok_Omni.Services
             return PhilosophyVideoPipelineService.DescribeBlockers(settings);
         }
 
-        public async Task<PhilosophyVideoResult> GenerateAsync(
-            string inputTextOrUrl,
+        public async Task<PhilosophyVideoResult> GenerateFromScriptAsync(
+            PhilosophyScriptItem item,
+            PhilosophyRenderOptions renderOptions,
             AppSettings settings,
             AutomationProfile profile,
             Action<string> log,
             Action<string, int> progress,
             CancellationToken cancellationToken = default)
         {
-            return await _pipeline.RunAsync(
-                inputTextOrUrl,
+            return await _pipeline.RunScriptAsync(
+                item,
+                renderOptions,
                 settings,
                 profile,
                 log,

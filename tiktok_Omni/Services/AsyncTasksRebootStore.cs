@@ -22,9 +22,7 @@ namespace tiktok_Omni.Services
 
     public sealed class AsyncTasksRebootStore
     {
-        private static readonly string StorePath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "async_tasks_reboot.json");
+        private const string FileName = "async_tasks_reboot.json";
 
         private readonly object _sync = new object();
 
@@ -32,17 +30,24 @@ namespace tiktok_Omni.Services
         {
             lock (_sync)
             {
-                if (!File.Exists(StorePath))
+                var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy);
+                if (!File.Exists(path))
                 {
                     return new List<AsyncVeoTaskEntry>();
                 }
 
                 try
                 {
-                    var json = File.ReadAllText(StorePath, TextFileEncoding.Utf8);
+                    var json = File.ReadAllText(path, TextFileEncoding.Utf8);
                     var list = JsonConvert.DeserializeObject<List<AsyncVeoTaskEntry>>(json);
-                    return list?.Where(e => e != null && !string.IsNullOrWhiteSpace(e.TaskId)).ToList()
+                    var result = list?.Where(e => e != null && !string.IsNullOrWhiteSpace(e.TaskId)).ToList()
                            ?? new List<AsyncVeoTaskEntry>();
+                    if (migrateFromLegacy && result.Count > 0)
+                    {
+                        Save(result);
+                    }
+
+                    return result;
                 }
                 catch
                 {
@@ -60,7 +65,8 @@ namespace tiktok_Omni.Services
             {
                 try
                 {
-                    File.WriteAllText(StorePath, JsonConvert.SerializeObject(list, Formatting.Indented), TextFileEncoding.Utf8NoBom);
+                    AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(list, Formatting.Indented));
+                    AppDataPaths.TryDeleteLegacyJson(FileName);
                 }
                 catch
                 {

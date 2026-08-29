@@ -9,9 +9,7 @@ namespace tiktok_Omni.Services
     /// <summary>Lịch sử URL đã săn — tránh quét trùng trong cửa sổ 7 ngày (hunt_history.json).</summary>
     public sealed class HuntHistoryStore
     {
-        private static readonly string HistoryPath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "hunt_history.json");
+        private const string FileName = "hunt_history.json";
 
         private readonly object _sync = new object();
         private List<HuntHistoryEntry> _entries = new List<HuntHistoryEntry>();
@@ -21,17 +19,22 @@ namespace tiktok_Omni.Services
             lock (_sync)
             {
                 _entries = new List<HuntHistoryEntry>();
-                if (!File.Exists(HistoryPath))
+                var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy);
+                if (!File.Exists(path))
                 {
                     return;
                 }
 
                 try
                 {
-                    var json = File.ReadAllText(HistoryPath, TextFileEncoding.Utf8);
+                    var json = File.ReadAllText(path, TextFileEncoding.Utf8);
                     _entries = JsonConvert.DeserializeObject<List<HuntHistoryEntry>>(json)
                                ?? new List<HuntHistoryEntry>();
                     PruneExpiredLocked(TimeSpan.FromDays(7));
+                    if (migrateFromLegacy && _entries.Count > 0)
+                    {
+                        SaveLocked();
+                    }
                 }
                 catch
                 {
@@ -94,7 +97,8 @@ namespace tiktok_Omni.Services
         {
             try
             {
-                File.WriteAllText(HistoryPath, JsonConvert.SerializeObject(_entries, Formatting.Indented), TextFileEncoding.Utf8NoBom);
+                AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(_entries, Formatting.Indented));
+                AppDataPaths.TryDeleteLegacyJson(FileName);
             }
             catch
             {

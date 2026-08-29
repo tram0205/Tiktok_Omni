@@ -7,6 +7,9 @@ namespace tiktok_Omni.Services
         AffiliateBed = 0,
 
         /// <summary>Hook Lyria + giữ tiếng gốc video (không nhạc nền).</summary>
-        FilmKeepOriginal = 1
+        FilmKeepOriginal = 1,
+
+        /// <summary>Hook (giọng nhấn) + thuyết minh Gemini/ElevenLabs (giọng kể chuyện); nhạc nền tùy chọn ~10%.</summary>
+        NarrationScript = 2
     }
 }

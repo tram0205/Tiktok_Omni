@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni.Services.Jobs
 {
@@ -70,11 +71,42 @@ namespace tiktok_Omni.Services.Jobs
         public string VideoTypeFolder { get; set; } = "Reup";
         public string AffiliateLink { get; set; }
         public string ProductId { get; set; }
+
+        /// <summary>
+        /// When true (schedule-originated jobs), the executor inserts a random
+        /// 30–90 s jitter before starting the browser session.
+        /// </summary>
+        public bool ApplyPrePostJitter { get; set; } = false;
+
+        /// <summary>
+        /// When true, the executor checks <see cref="BrowserLockService"/> before
+        /// posting. If the profile is busy it waits up to 3 × 60 s before giving up.
+        /// </summary>
+        public bool CheckBrowserBusy { get; set; } = false;
+
+        /// <summary>
+        /// When true, skips the profile-scoped folder check inside TikTokAutomation /
+        /// SocialAutomation so that videos stored outside the profile tree can be posted.
+        /// Set by the manual Auto Post Schedule queue.
+        /// </summary>
+        public bool SkipFolderScopeCheck { get; set; } = false;
     }
 
     public sealed class PhilosophyVideoJobPayload
     {
         public string QuoteText { get; set; } = string.Empty;
+
+        /// <summary>Nội dung kịch bản (ưu tiên hơn QuoteText).</summary>
+        public string Content { get; set; } = string.Empty;
+
+        public string Mood { get; set; } = "reflective";
+
+        public string BRollFolder { get; set; } = string.Empty;
+
+        public string MusicFolder { get; set; } = string.Empty;
+
+        public string AmbientFolder { get; set; } = string.Empty;
+
         public string ProfileName { get; set; } = "default";
         public string VoiceId { get; set; } = string.Empty;
         public string VideoStyle { get; set; } = string.Empty;
@@ -135,6 +167,9 @@ namespace tiktok_Omni.Services.Jobs
 
     public sealed class AffiliateDeepRenderJobPayload
     {
+        /// <summary>Dòng lưới Showcase tương ứng job render (một video = một job).</summary>
+        public Guid ShowcaseVideoId { get; set; }
+
         public string ProfileName { get; set; } = "default";
         public string ProductName { get; set; } = string.Empty;
         public string Category { get; set; } = string.Empty;
@@ -144,5 +179,17 @@ namespace tiktok_Omni.Services.Jobs
         public bool UseMultiVoiceNarration { get; set; }
         public string AffiliateLink { get; set; } = string.Empty;
         public string ProductId { get; set; } = string.Empty;
+
+        /// <summary>Showcase: chủ đề (do người dùng nhập hoặc Gemini tự suy) — chỉ để log/hiển thị.</summary>
+        public string Theme { get; set; } = string.Empty;
+
+        /// <summary>Showcase: câu hook mở đầu (đọc + burn chữ 3s đầu).</summary>
+        public string HookText { get; set; } = string.Empty;
+
+        /// <summary>Showcase: câu CTA kết thúc (đọc + burn chữ 3s cuối).</summary>
+        public string CtaText { get; set; } = string.Empty;
+
+        /// <summary>Cài đặt render theo dòng video (phụ đề, nhạc, chuyển cảnh).</summary>
+        public ShowcasePerVideoRenderSettings RenderSettings { get; set; }
     }
 }

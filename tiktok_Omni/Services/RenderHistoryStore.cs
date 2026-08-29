@@ -6,12 +6,10 @@ using Newtonsoft.Json;
 
 namespace tiktok_Omni.Services
 {
-    /// <summary>Lưu URL video reup đã render thành công — chống render trùng.</summary>
+    /// <summary>Lưu URL video reup đã render thành công (render lại sẽ gỡ URL rồi ghi lại).</summary>
     public sealed class RenderHistoryStore
     {
-        private static readonly string HistoryPath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "render_history.json");
+        private const string FileName = "render_history.json";
 
         private readonly object _sync = new object();
         private HashSet<string> _urls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -21,14 +19,15 @@ namespace tiktok_Omni.Services
             lock (_sync)
             {
                 _urls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (!File.Exists(HistoryPath))
+                var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy);
+                if (!File.Exists(path))
                 {
                     return;
                 }
 
                 try
                 {
-                    var json = File.ReadAllText(HistoryPath, TextFileEncoding.Utf8);
+                    var json = File.ReadAllText(path, TextFileEncoding.Utf8);
                     var list = JsonConvert.DeserializeObject<List<string>>(json) ?? new List<string>();
                     foreach (var u in list)
                     {
@@ -37,6 +36,11 @@ namespace tiktok_Omni.Services
                         {
                             _urls.Add(key);
                         }
+                    }
+
+                    if (migrateFromLegacy && _urls.Count > 0)
+                    {
+                        SaveLocked();
                     }
                 }
                 catch
@@ -75,14 +79,39 @@ namespace tiktok_Omni.Services
                     return;
                 }
 
-                try
+                SaveLocked();
+            }
+        }
+
+        public void Remove(string videoUrl)
+        {
+            var key = NormalizeUrl(videoUrl);
+            if (string.IsNullOrEmpty(key))
+            {
+                return;
+            }
+
+            lock (_sync)
+            {
+                if (!_urls.Remove(key))
                 {
-                    File.WriteAllText(HistoryPath, JsonConvert.SerializeObject(_urls.ToList(), Formatting.Indented), TextFileEncoding.Utf8NoBom);
+                    return;
                 }
-                catch
-                {
-                    // ignored
-                }
+
+                SaveLocked();
+            }
+        }
+
+        private void SaveLocked()
+        {
+            try
+            {
+                AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(_urls.ToList(), Formatting.Indented));
+                AppDataPaths.TryDeleteLegacyJson(FileName);
+            }
+            catch
+            {
+                // ignored
             }
         }
 

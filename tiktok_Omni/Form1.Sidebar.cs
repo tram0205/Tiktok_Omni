@@ -60,63 +60,50 @@ namespace tiktok_Omni
 
 
         private void SwitchToMainTab(TabPage page)
-
         {
-
             if (tabMain == null || page == null)
-
             {
-
                 return;
-
             }
-
-
 
             var index = tabMain.TabPages.IndexOf(page);
-
-            if (index < 0)
-
+            if (index < 0 || tabMain.SelectedIndex == index)
             {
-
                 return;
-
             }
 
-
-
-            tabMain.SelectedIndex = index;
-
-            if (ReferenceEquals(page, tabAiVideoGen))
+            SuspendLayout();
+            tabMain.SuspendLayout();
+            try
             {
-                SetAiVideoGenSubNavExpanded(true);
+                tabMain.SelectedIndex = index;
             }
-            else
+            finally
             {
-                SetAiVideoGenSubNavExpanded(false);
+                tabMain.ResumeLayout(true);
+                ResumeLayout(true);
             }
-
-            HighlightSidebarForSelectedTab();
 
             if (ReferenceEquals(page, tabAffiliateHunter))
             {
-                EnsureAffiliateFiltersLayout();
+                BeginInvoke(new Action(ApplyAffiliateHunterTabDeferredLayout));
+            }
+        }
+
+        private void ApplyAffiliateHunterTabDeferredLayout()
+        {
+            if (!ReferenceEquals(tabMain?.SelectedTab, tabAffiliateHunter))
+            {
+                return;
             }
 
-            BeginInvoke(new Action(() =>
+            EnsureAffiliateFiltersLayout();
+            if (tabCtrlHunter != null && tabHuntProduct != null)
             {
-                if (ReferenceEquals(tabMain?.SelectedTab, tabAffiliateHunter))
-                {
-                    EnsureAffiliateFiltersLayout();
-                    if (tabCtrlHunter != null && tabHuntProduct != null)
-                    {
-                        tabCtrlHunter.SelectedTab = tabHuntProduct;
-                    }
+                tabCtrlHunter.SelectedTab = tabHuntProduct;
+            }
 
-                    ApplyHuntProductTabLayout();
-                }
-            }));
-
+            ApplyHuntProductTabLayout();
         }
 
 

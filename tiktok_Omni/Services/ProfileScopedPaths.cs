@@ -29,6 +29,9 @@ namespace tiktok_Omni.Services
         /// <summary>Kho video hook B-Roll ngắn: <c>Assets\HookBRolls\</c>.</summary>
         public const string HookBRollsFolderName = "HookBRolls";
 
+        /// <summary>Clip quay tay ghép cuối Showcase (CTA): <c>Assets\CtaBRolls\</c>.</summary>
+        public const string CtaBRollsFolderName = "CtaBRolls";
+
         /// <summary>Video nền động dùng chung (Triết lý): <c>Assets\Backgrounds\</c>.</summary>
         public const string SharedBackgroundsFolderName = "Backgrounds";
 
@@ -47,6 +50,18 @@ namespace tiktok_Omni.Services
         public static string GetHookBRollsDirectory(bool ensureExists = false)
         {
             var dir = Path.Combine(AppRoot, AssetsFolderName, HookBRollsFolderName);
+            if (ensureExists)
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            return Path.GetFullPath(dir);
+        }
+
+        /// <summary>Đường dẫn đầy đủ tới <see cref="CtaBRollsFolderName"/>.</summary>
+        public static string GetCtaBRollsDirectory(bool ensureExists = false)
+        {
+            var dir = Path.Combine(AppRoot, AssetsFolderName, CtaBRollsFolderName);
             if (ensureExists)
             {
                 Directory.CreateDirectory(dir);

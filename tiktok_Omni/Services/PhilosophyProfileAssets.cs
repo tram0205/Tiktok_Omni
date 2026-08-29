@@ -27,49 +27,109 @@ namespace tiktok_Omni.Services
             return found ?? new AutomationProfile { Name = target };
         }
 
+        public static IEnumerable<string> GetMusicSearchDirectories(string profileName, AppSettings settings)
+        {
+            _ = profileName;
+            return OmniAudioLibrary.GetMusicSearchDirectories(settings);
+        }
+
+        /// <summary>Liệt kê tên file nhạc từ kho dùng chung Assets\Audio\Music.</summary>
+        public static List<string> EnumerateMusicFileNames(string profileName, AppSettings settings)
+        {
+            _ = profileName;
+            OmniAudioLibrary.EnsureSharedDirectoriesExist(settings);
+            return OmniAudioLibrary.ListMusicFileNames(settings);
+        }
+
+        /// <summary>Giá trị ô Nhạc: tên file, đường dẫn đầy đủ, hoặc thư mục (legacy).</summary>
+        public static string ResolveMusicPath(string selection, string profileName, AppSettings settings, string mood)
+        {
+            var sel = (selection ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(sel))
+            {
+                return string.Empty;
+            }
+
+            if (File.Exists(sel))
+            {
+                return sel;
+            }
+
+            var shared = OmniAudioLibrary.ResolveMusicFilePath(sel, settings);
+            if (!string.IsNullOrWhiteSpace(shared))
+            {
+                return shared;
+            }
+
+            if (Directory.Exists(sel))
+            {
+                return TryPickMusicFromDirectory(sel, mood);
+            }
+
+            return string.Empty;
+        }
+
+        private static string TryPickMusicFromDirectory(string folder, string mood)
+        {
+            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            {
+                return string.Empty;
+            }
+
+            var files = new List<string>();
+            foreach (var ext in new[] { "*.mp3", "*.wav", "*.m4a" })
+            {
+                files.AddRange(Directory.GetFiles(folder, ext, SearchOption.TopDirectoryOnly));
+            }
+
+            if (files.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var key = (mood ?? string.Empty).Trim().ToLowerInvariant();
+            var match = files.FirstOrDefault(f =>
+                Path.GetFileName(f).IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0);
+            return match ?? files[0];
+        }
+
         public static string TryPickMusicFile(string profileName, string mood)
         {
-            var root = GetAssetsRoot(profileName);
-            if (!Directory.Exists(root))
+            _ = profileName;
+            var names = OmniAudioLibrary.ListMusicFileNames(null);
+            if (names.Count == 0)
             {
                 return string.Empty;
             }
 
             var moodKey = (mood ?? string.Empty).Trim().ToLowerInvariant();
-            var candidates = new List<string>();
-
-            void Scan(string dir)
+            foreach (var name in names)
             {
-                if (!Directory.Exists(dir))
+                if (!string.IsNullOrEmpty(moodKey)
+                    && name.IndexOf(moodKey, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    return;
-                }
-
-                foreach (var ext in new[] { "*.mp3", "*.wav", "*.m4a" })
-                {
-                    candidates.AddRange(Directory.GetFiles(dir, ext, SearchOption.TopDirectoryOnly));
+                    var path = OmniAudioLibrary.ResolveMusicFilePath(name, null);
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        return path;
+                    }
                 }
             }
 
-            Scan(Path.Combine(root, "music"));
-            Scan(root);
-
-            if (candidates.Count == 0)
+            foreach (var name in names)
             {
-                return string.Empty;
+                if (name.IndexOf("bed", StringComparison.OrdinalIgnoreCase) >= 0
+                    || name.IndexOf("music", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    var path = OmniAudioLibrary.ResolveMusicFilePath(name, null);
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        return path;
+                    }
+                }
             }
 
-            var moodMatch = candidates.FirstOrDefault(f =>
-                Path.GetFileName(f).IndexOf(moodKey, StringComparison.OrdinalIgnoreCase) >= 0);
-            if (!string.IsNullOrWhiteSpace(moodMatch))
-            {
-                return moodMatch;
-            }
-
-            var generic = candidates.FirstOrDefault(f =>
-                Path.GetFileName(f).IndexOf("bed", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                Path.GetFileName(f).IndexOf("music", StringComparison.OrdinalIgnoreCase) >= 0);
-            return generic ?? candidates[0];
+            return OmniAudioLibrary.ResolveMusicFilePath(names[0], null);
         }
 
         public static string GetSharedBackgroundsRoot()
@@ -182,6 +242,58 @@ namespace tiktok_Omni.Services
             }
 
             return string.Empty;
+        }
+
+        /// <summary>Thư mục mặc định đặt video phân cảnh tự làm (mode 3): Assets\{profile}\philosophy-scenes\</summary>
+        public static string GetPreRenderedScenesDirectory(string profileName)
+        {
+            return Path.Combine(GetAssetsRoot(profileName), "philosophy-scenes");
+        }
+
+        /// <summary>Tạo thư mục philosophy-scenes nếu chưa có và trả đường dẫn tuyệt đối.</summary>
+        public static string EnsurePreRenderedScenesDirectory(string profileName)
+        {
+            var dir = GetPreRenderedScenesDirectory(profileName);
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        /// <summary>Kho B-roll dùng chung mọi profile Video Quote: <c>Assets\Backgrounds\</c>.</summary>
+        public static string GetBrollLibraryDirectory(string profileName = null)
+        {
+            _ = profileName;
+            return ProfileScopedPaths.GetSharedBackgroundsDirectory();
+        }
+
+        public static string EnsureBrollLibraryDirectory(string profileName = null)
+        {
+            return ProfileScopedPaths.GetSharedBackgroundsDirectory(ensureExists: true);
+        }
+
+        /// <summary>Assets\{profile}\background-images\ — ảnh tham chiếu Veo I2V / mascot.</summary>
+        public static string GetMascotImageLibraryDirectory(string profileName)
+        {
+            return Path.Combine(GetAssetsRoot(profileName), "background-images");
+        }
+
+        public static string EnsureMascotImageLibraryDirectory(string profileName)
+        {
+            var dir = GetMascotImageLibraryDirectory(profileName);
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        /// <summary>Assets\{profile}\zoom-images\ — thư viện ảnh Ken Burns zoom (per-quote).</summary>
+        public static string GetZoomImageLibraryDirectory(string profileName)
+        {
+            return Path.Combine(GetAssetsRoot(profileName), "zoom-images");
+        }
+
+        public static string EnsureZoomImageLibraryDirectory(string profileName)
+        {
+            var dir = GetZoomImageLibraryDirectory(profileName);
+            Directory.CreateDirectory(dir);
+            return dir;
         }
     }
 }

@@ -93,7 +93,11 @@ namespace tiktok_Omni
             AddMascotLabeledRow(tbl, 0, "Profile:", () =>
             {
                 cbMascotProfile = new ComboBox { Name = "cbMascotProfile", Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, BackColor = Color.FromArgb(45, 49, 60), ForeColor = Color.WhiteSmoke };
-                cbMascotProfile.SelectedIndexChanged += (_, __) => LoadMascotAvatarVaultForProfile();
+                cbMascotProfile.SelectedIndexChanged += (_, __) =>
+                {
+                    LoadMascotAvatarVaultForProfile();
+                    LoadMascotIdentityPackForSelectedProfile();
+                };
                 return cbMascotProfile;
             });
 
@@ -146,10 +150,19 @@ namespace tiktok_Omni
                 BorderStyle = BorderStyle.FixedSingle,
                 EnableHeadersVisualStyles = false
             };
-            dgvMascotBatches.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(48, 52, 64);
-            dgvMascotBatches.ColumnHeadersDefaultCellStyle.ForeColor = Color.WhiteSmoke;
-            dgvMascotBatches.DefaultCellStyle.BackColor = Color.FromArgb(28, 30, 38);
-            dgvMascotBatches.DefaultCellStyle.ForeColor = Color.WhiteSmoke;
+            dgvMascotBatches.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.FromArgb(48, 52, 64),
+                ForeColor = Color.WhiteSmoke,
+                Alignment = DataGridViewContentAlignment.MiddleLeft,
+                WrapMode = DataGridViewTriState.False
+            };
+            dgvMascotBatches.DefaultCellStyle = new DataGridViewCellStyle
+            {
+                BackColor = Color.FromArgb(28, 30, 38),
+                ForeColor = Color.WhiteSmoke
+            };
+            ApplyAppGridChrome(dgvMascotBatches);
             panel.Controls.Add(dgvMascotBatches);
             return panel;
         }
@@ -196,7 +209,7 @@ namespace tiktok_Omni
         private static void AddMascotLabeledRow(TableLayoutPanel tbl, int row, string caption, Func<Control> create)
         {
             tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            var lbl = new Label { Text = caption, AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.LightGray, Margin = new Padding(0, 6, 8, 6) };
+            var lbl = new Label { Text = caption, AutoSize = true, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Color.LightGray, Font = AppLabelFont, Margin = new Padding(0, 6, 8, 6) };
             var ctrl = create();
             ctrl.Dock = DockStyle.Fill;
             ctrl.Margin = new Padding(0, 6, 0, 6);
@@ -219,8 +232,7 @@ namespace tiktok_Omni
         {
             try
             {
-                var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-                RefreshMascotProfileCombo(settings);
+                RefreshAllProfileSelectors();
                 LoadMascotAvatarVaultForProfile();
             }
             catch (Exception ex)

@@ -56,6 +56,13 @@ namespace tiktok_Omni.Services.Jobs
             }
         }
 
+        public static bool IsRunningStatus(OmniJobStatus status) =>
+            status == OmniJobStatus.Running || status == OmniJobStatus.Processing;
+
+        /// <summary>Hủy job đang chạy — giữ job Pending/RetryPending (hàng đợi, lịch đăng).</summary>
+        public int CancelRunningOnly() =>
+            CancelWhere(j => j != null && IsRunningStatus(j.Status));
+
         /// <summary>Hủy mọi job đang chờ/chạy và xả hàng đợi nội bộ (Emergency Stop).</summary>
         public int ClearAll()
         {

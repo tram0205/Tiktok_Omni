@@ -22,7 +22,7 @@ namespace tiktok_Omni
                 Margin = new Padding(0, 0, 0, 8),
                 ForeColor = Color.FromArgb(200, 205, 215),
                 BackColor = backColor ?? Color.FromArgb(36, 39, 48),
-                Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point),
+                Font = AppCaptionFont,
                 FlatStyle = FlatStyle.Flat
             };
         }
@@ -54,6 +54,282 @@ namespace tiktok_Omni
             };
         }
 
+        /// <summary>Độ rộng cột nhãn Voice/TTS — đủ «TTS · URL» / «Khóa TTS» / «Intense».</summary>
+        private const int SettingsVoiceLabelWidth = 180;
+
+        private Label CreateVoiceFieldCaption(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                AutoSize = false,
+                Width = SettingsVoiceLabelWidth,
+                Height = AppDefaultInputHeight,
+                Font = AppLabelFont,
+                ForeColor = Color.Gainsboro,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 0, 6, 0),
+                Dock = DockStyle.Fill,
+                MinimumSize = new Size(SettingsVoiceLabelWidth, AppDefaultInputHeight)
+            };
+        }
+
+        private TextBox CreateVoiceStretchField(string name, bool isSecret = false)
+        {
+            // Không dùng CreateSettingField (Min 160) — Min thấp để ô co, chừa chỗ label.
+            var field = new TextBox
+            {
+                Name = name,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(45, 49, 60),
+                ForeColor = Color.WhiteSmoke,
+                UseSystemPasswordChar = isSecret,
+                Height = AppDefaultInputHeight,
+                MinimumSize = new Size(40, AppDefaultInputHeight),
+                MaximumSize = Size.Empty,
+                Dock = DockStyle.Fill,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Margin = Padding.Empty
+            };
+            ApplyAppInputChrome(field);
+            field.MinimumSize = new Size(40, AppDefaultInputHeight);
+            field.Height = AppDefaultInputHeight;
+            return field;
+        }
+
+        private TableLayoutPanel CreateVoiceAlignedRow(bool withButtons)
+        {
+            var row = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = withButtons ? 5 : 2,
+                RowCount = 1,
+                Margin = new Padding(0, 0, 0, 4),
+                Padding = Padding.Empty
+            };
+            // Label cố định trước → ô nhập co theo phần còn lại (mép phải thẳng hàng).
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SettingsVoiceLabelWidth));
+            if (withButtons)
+            {
+                // Ô nhập chỉ chiếm 0.5 lần phần còn lại; 2 nút bám sát ngay sau ô nhập;
+                // phần đệm trống (nửa còn lại) đẩy xuống cuối cùng, sau 2 nút.
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            }
+            else
+            {
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            }
+
+            row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            return row;
+        }
+
+        private Control CreateVoiceLabeledStretchField(string caption, TextBox field)
+        {
+            var row = CreateVoiceAlignedRow(withButtons: false);
+            row.Controls.Add(CreateVoiceFieldCaption(caption), 0, 0);
+            row.Controls.Add(field, 1, 0);
+            return row;
+        }
+
+        private Control CreateVoiceSecretStretchRow(
+            string caption,
+            string fieldName,
+            out TextBox field,
+            out Button toggle,
+            out Button test,
+            EventHandler testClick)
+        {
+            field = CreateVoiceStretchField(fieldName, true);
+
+            toggle = CreateSettingsShowToggleButton("btnToggleTtsApiKey", minWidth: 52, height: AppDefaultInputHeight);
+            test = CreateSettingsShowTestButton("btnTestTts", "Test", minWidth: 72, height: AppDefaultInputHeight);
+            var secretField = field;
+            var secretToggle = toggle;
+            toggle.Click += (sender, e) => ToggleSecretVisibility(secretField, secretToggle);
+            test.Click += testClick;
+            toggle.Margin = new Padding(4, 0, 0, 0);
+            test.Margin = new Padding(4, 0, 0, 0);
+            toggle.Anchor = AnchorStyles.Left;
+            test.Anchor = AnchorStyles.Left;
+
+            var row = CreateVoiceAlignedRow(withButtons: true);
+            row.Name = "rowVoice" + fieldName;
+            row.Controls.Add(CreateVoiceFieldCaption(caption), 0, 0);
+            row.Controls.Add(field, 1, 0);
+            row.Controls.Add(toggle, 2, 0);
+            row.Controls.Add(test, 3, 0);
+            return row;
+        }
+
+        /// <summary>
+        /// Nhóm Voice/TTS: Khóa TTS (key) ở hàng đầu, bên dưới là lưới 3 cột x 2 hàng — 6 Voice ID dùng chung mọi tab video.
+        /// </summary>
+        private GroupBox BuildVoiceSettingsGroupBox()
+        {
+            var grp = CreateSettingsGroupBox("Voice / TTS");
+            grp.Name = "grpVoiceSettings";
+            grp.Padding = new Padding(8, 12, 8, 10);
+            grp.Margin = new Padding(0, 0, 0, 8);
+
+            var stack = new TableLayoutPanel
+            {
+                Name = "tblVoiceStack",
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 3,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            for (var i = 0; i < 3; i++)
+            {
+                stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            }
+
+            // —— Hàng 1: Khóa TTS ——
+            var keyRow = CreateVoiceSecretStretchRow(
+                "Khóa TTS",
+                "txtTtsApiKey",
+                out txtTtsApiKey,
+                out btnToggleTtsApiKey,
+                out btnTestTts,
+                btnTestTts_Click);
+            keyRow.Margin = new Padding(0, 0, 0, 12);
+            stack.Controls.Add(keyRow, 0, 0);
+
+            // —— Hàng 2: tiêu đề Voice ID ——
+            stack.Controls.Add(new Label
+            {
+                Text = "Voice ID — ElevenLabs",
+                AutoSize = true,
+                Font = AppCaptionFont,
+                ForeColor = Color.FromArgb(200, 210, 225),
+                Margin = new Padding(0, 0, 0, 6),
+                Dock = DockStyle.Top
+            }, 0, 1);
+
+            // —— Hàng 3: lưới 3 cột x 2 hàng — Nữ | Nam | Trẻ em ——
+            txtVoiceIdFemaleYoung = CreateVoiceStretchField("txtVoiceIdFemaleYoung");
+            txtVoiceIdFemaleMature = CreateVoiceStretchField("txtVoiceIdFemaleMature");
+            txtVoiceIdMaleYoung = CreateVoiceStretchField("txtVoiceIdMaleYoung");
+            txtVoiceIdMaleMature = CreateVoiceStretchField("txtVoiceIdMaleMature");
+            txtVoiceIdGirlChild = CreateVoiceStretchField("txtVoiceIdGirlChild");
+            txtVoiceIdBoyChild = CreateVoiceStretchField("txtVoiceIdBoyChild");
+
+            var tblPersonaIds = new TableLayoutPanel
+            {
+                Name = "tblVoicePersonaIds",
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                RowCount = 2,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            for (var i = 0; i < 3; i++)
+            {
+                tblPersonaIds.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+            }
+
+            tblPersonaIds.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tblPersonaIds.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            const int columnGap = 50;
+
+            void AddPersonaColumn(int col, string topCaption, TextBox topField, string bottomCaption, TextBox bottomField, int rightGap)
+            {
+                var top = CreateVoiceInlineField(topCaption, topField);
+                var bottom = CreateVoiceInlineField(bottomCaption, bottomField);
+                top.Margin = new Padding(0, 0, rightGap, 8);
+                bottom.Margin = new Padding(0, 0, rightGap, 0);
+                tblPersonaIds.Controls.Add(top, col, 0);
+                tblPersonaIds.Controls.Add(bottom, col, 1);
+            }
+
+            AddPersonaColumn(0, "Nữ trẻ (MN)", txtVoiceIdFemaleYoung, "Nữ TN (MN)", txtVoiceIdFemaleMature, columnGap);
+            AddPersonaColumn(1, "Nam trẻ (MN)", txtVoiceIdMaleYoung, "Nam TN (MN)", txtVoiceIdMaleMature, columnGap);
+            AddPersonaColumn(2, "Bé gái (MN)", txtVoiceIdGirlChild, "Bé trai (MN)", txtVoiceIdBoyChild, 0);
+
+            stack.Controls.Add(tblPersonaIds, 0, 2);
+
+            grp.Controls.Add(stack);
+            return grp;
+        }
+
+        /// <summary>6 ô Voice ID persona theo đúng thứ tự ưu tiên fallback (Nữ trẻ → … → Bé trai).</summary>
+        private IEnumerable<TextBox> EnumerateVoicePersonaFields()
+        {
+            if (txtVoiceIdFemaleYoung != null) yield return txtVoiceIdFemaleYoung;
+            if (txtVoiceIdMaleYoung != null) yield return txtVoiceIdMaleYoung;
+            if (txtVoiceIdFemaleMature != null) yield return txtVoiceIdFemaleMature;
+            if (txtVoiceIdMaleMature != null) yield return txtVoiceIdMaleMature;
+            if (txtVoiceIdGirlChild != null) yield return txtVoiceIdGirlChild;
+            if (txtVoiceIdBoyChild != null) yield return txtVoiceIdBoyChild;
+        }
+
+        /// <summary>Voice ID đầu tiên có giá trị trong 6 ô persona — dùng làm endpoint mặc định (TtsEndpoint) nội bộ.</summary>
+        private string ResolveFirstSettingsVoiceId()
+        {
+            foreach (var field in EnumerateVoicePersonaFields())
+            {
+                var trimmed = (field.Text ?? string.Empty).Trim();
+                if (!string.IsNullOrEmpty(trimmed))
+                {
+                    return trimmed;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>Nhãn bên trái + ô nhập bên phải, cùng một dòng — dùng cho lưới 3 cột Voice ID persona.
+        /// Cột nhãn rộng gấp 4 lần mặc định cũ (108 → 432); cột ô nhập chỉ chiếm 0.6 lần phần còn lại
+        /// (40% còn lại bỏ trống làm khoảng đệm) nhờ cột đệm ẩn phía sau.</summary>
+        private Control CreateVoiceInlineField(string caption, TextBox field, int labelWidth = 262)
+        {
+            var row = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                RowCount = 1,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
+            };
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, labelWidth));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 72F));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28F));
+            row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var lbl = new Label
+            {
+                Text = caption,
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                Font = AppLabelFont,
+                ForeColor = Color.Gainsboro,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 0, 6, 0)
+            };
+
+            field.Dock = DockStyle.Fill;
+            field.Margin = new Padding(0, 2, 0, 2);
+
+            row.Controls.Add(lbl, 0, 0);
+            row.Controls.Add(field, 1, 0);
+            return row;
+        }
+
         private TextBox CreateSettingField(string name, bool isSecret)
         {
             var field = new TextBox
@@ -75,22 +351,16 @@ namespace tiktok_Omni
             return CreateSettingsGreenFlatButton(name, text);
         }
 
-        private JellyButton CreateSettingsGreenFlatButton(string name, string text, int minWidth = 70, int height = 32)
+        private JellyButton CreateSettingsGreenFlatButton(string name, string text, int minWidth = 70, int height = 0)
         {
-            var width = Math.Max(minWidth, MeasureProfileButtonTextWidth(text, ProfileToolbarButtonFont, height) + 22);
-            return new JellyButton
-            {
-                Name = name,
-                Text = text,
-                Font = ProfileToolbarButtonFont,
-                JellyTint = SettingsTintGreen,
-                JellyFillOpacity = 1f - JellyButton.DefaultTransparency,
-                ForeColor = SettingsButtonFore,
-                AutoSize = false,
-                Size = new Size(width, height),
-                MinimumSize = new Size(width, height),
-                Margin = new Padding(0, 0, 6, 0)
-            };
+            var resolvedHeight = height > 0 ? height : AppJellyButtonHeight;
+            return CreateAppJellyButton(
+                name,
+                text,
+                SettingsTintGreen,
+                heightOverride: resolvedHeight,
+                minWidth: minWidth,
+                margin: new Padding(0, 0, 6, 0));
         }
 
         private Button CreateSettingsFlatBlueButton(
@@ -138,39 +408,41 @@ namespace tiktok_Omni
             return button;
         }
 
-        private Button CreateSettingsShowTestButton(string name, string englishLabel, int minWidth = 72, int height = 32)
+        private Button CreateSettingsShowTestButton(string name, string englishLabel, int minWidth = 72, int height = 0)
         {
             const int horizontalPad = 18;
+            var resolvedHeight = height > 0 ? height : AppJellyButtonHeight;
             var displayText = LocalizeDisplayText(englishLabel);
             var width = Math.Max(
                 minWidth,
-                MeasureProfileButtonTextWidth(displayText, ProfileToolbarButtonFont, height) + horizontalPad);
+                MeasureProfileButtonTextWidth(displayText, ProfileToolbarButtonFont, resolvedHeight) + horizontalPad);
 
             return CreateSettingsFlatBlueButton(
                 name,
                 englishLabel,
-                height,
+                resolvedHeight,
                 horizontalPad,
                 width,
                 lockWidth: true);
         }
 
-        private Button CreateSettingsShowToggleButton(string name, int minWidth = 72, int height = 32)
+        private Button CreateSettingsShowToggleButton(string name, int minWidth = 72, int height = 0)
         {
             const int horizontalPad = 18;
+            var resolvedHeight = height > 0 ? height : AppJellyButtonHeight;
             var showLabel = LocalizeDisplayText("Show");
             var hideLabel = LocalizeDisplayText("Hide");
             var width = Math.Max(
                 minWidth,
                 Math.Max(
-                    MeasureProfileButtonTextWidth(showLabel, ProfileToolbarButtonFont, height),
-                    MeasureProfileButtonTextWidth(hideLabel, ProfileToolbarButtonFont, height))
+                    MeasureProfileButtonTextWidth(showLabel, ProfileToolbarButtonFont, resolvedHeight),
+                    MeasureProfileButtonTextWidth(hideLabel, ProfileToolbarButtonFont, resolvedHeight))
                 + horizontalPad);
 
-            return CreateSettingsShowTestButton(name, "Show", width, height);
+            return CreateSettingsShowTestButton(name, "Show", width, resolvedHeight);
         }
 
-        private static readonly Font ProfileToolbarButtonFont = new Font("Segoe UI", 10.25F, FontStyle.Bold);
+        private static readonly Font ProfileToolbarButtonFont = AppJellyButtonFont;
         private const string SettingsActionChromeTag = "SettingsActionChrome";
         private static readonly Color SettingsTintGreen = Color.FromArgb(56, 158, 88);
         private static readonly Color ProfileTintLoginAll = Color.FromArgb(88, 101, 242);
@@ -186,63 +458,54 @@ namespace tiktok_Omni
 
         private static int MeasureProfileButtonTextWidth(string text, Font font, int buttonHeight)
         {
-            return TextRenderer.MeasureText(
-                text,
-                font,
-                new Size(int.MaxValue, buttonHeight),
-                TextFormatFlags.SingleLine
-                    | TextFormatFlags.NoPadding
-                    | TextFormatFlags.GlyphOverhangPadding).Width;
+            return MeasureAppJellyButtonTextWidth(text, font, buttonHeight);
         }
 
         private JellyButton CreateProfileJellyButton(string name, string text, Color tint)
         {
-            const int buttonHeight = 34;
-
-            return new JellyButton
-            {
-                Name = name,
-                Text = text,
-                Font = ProfileToolbarButtonFont,
-                JellyTint = tint,
-                JellyFillOpacity = 1f - JellyButton.DefaultTransparency,
-                AutoSize = false,
-                Height = buttonHeight,
-                MinimumSize = new Size(72, buttonHeight),
-                Dock = DockStyle.Fill,
-                Margin = Padding.Empty
-            };
+            // Profile toolbar dùng TableLayout Fill — không khóa width cứng.
+            var btn = CreateAppJellyButton(
+                name,
+                text,
+                tint,
+                heightOverride: AppPrimaryActionHeight,
+                minWidth: AppJellyButtonMinWidth,
+                margin: Padding.Empty,
+                lockSize: false);
+            btn.Dock = DockStyle.Fill;
+            // Bỏ MinWidth theo chữ — nếu giữ, tổng 6 nút dễ tràn khung và cắt nút cuối.
+            btn.MinimumSize = new Size(0, btn.Height);
+            btn.MaximumSize = Size.Empty;
+            return btn;
         }
 
         private JellyButton CreateSettingsSaveButton(string name, string text)
         {
-            const int buttonHeight = 48;
-            const int buttonWidth = 196;
-
-            return new JellyButton
-            {
-                Name = name,
-                Text = text,
-                Font = new Font("Segoe UI", 12F, FontStyle.Bold),
-                ForeColor = Color.White,
-                JellyTint = Color.FromArgb(28, 156, 72),
-                JellyFillOpacity = 1f,
-                AutoSize = false,
-                Size = new Size(buttonWidth, buttonHeight),
-                MinimumSize = new Size(buttonWidth, buttonHeight),
-                Anchor = AnchorStyles.None,
-                Margin = new Padding(8, 0, 8, 2),
-                Cursor = Cursors.Hand
-            };
+            var btn = CreateAppJellyButton(
+                name,
+                text,
+                Color.FromArgb(28, 156, 72),
+                heightOverride: AppJellyButtonHeight,
+                minWidth: 160,
+                horizontalPad: AppJellyButtonHorizontalPad,
+                margin: new Padding(8, 0, 8, 2),
+                lockSize: true,
+                fontOverride: AppJellyButtonFont,
+                fillOpacity: 1f);
+            btn.ForeColor = Color.White;
+            btn.Anchor = AnchorStyles.None;
+            btn.Cursor = Cursors.Hand;
+            return btn;
         }
 
         private TableLayoutPanel CreateProfileToolbarTable(params Control[] buttons)
         {
-            const int buttonHeight = 34;
+            const int buttonHeight = 66;
             const int toolbarTopMargin = 2;
             const int toolbarBottomMargin = 4;
-            const int horizontalPad = 28;
-            const int gap = 6;
+            // Pad chữ nhỏ hơn → nút hẹp hơn, ít bị cắt mép phải khi cửa sổ hẹp.
+            const int horizontalPad = 20;
+            const int gap = 4;
 
             var weights = new float[buttons.Length];
             var totalWeight = 0f;
@@ -253,8 +516,11 @@ namespace tiktok_Omni
                 button.Height = buttonHeight;
                 button.Dock = DockStyle.Fill;
                 button.Margin = new Padding(0, 0, i < buttons.Length - 1 ? gap : 0, 0);
+                // Bỏ MinimumSize cứng theo chữ — để cột Percent co theo chiều rộng khung.
+                button.MinimumSize = new Size(0, buttonHeight);
+                button.MaximumSize = Size.Empty;
 
-                var minWidth = Math.Max(72, MeasureProfileButtonTextWidth(button.Text, button.Font, buttonHeight) + horizontalPad);
+                var minWidth = Math.Max(64, MeasureProfileButtonTextWidth(button.Text, button.Font, buttonHeight) + horizontalPad);
                 weights[i] = minWidth;
                 totalWeight += minWidth;
             }
@@ -268,12 +534,14 @@ namespace tiktok_Omni
                 }
             }
 
+            // Không AutoSize theo tổng min-width nút (dễ tràn cắt nút cuối).
+            // Dock Top + Percent: rộng theo GroupBox, cao cố định theo nút.
             var tbl = new TableLayoutPanel
             {
                 Name = "tblProfileToolbar",
                 Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                AutoSize = false,
+                Height = buttonHeight + toolbarTopMargin + toolbarBottomMargin,
                 ColumnCount = buttons.Length,
                 RowCount = 1,
                 Margin = new Padding(0, toolbarTopMargin, 0, toolbarBottomMargin),
@@ -339,7 +607,6 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnToggleAiApiKey",
                 "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
-                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
                 "txtTtsApiKey" => "btnToggleTtsApiKey",
                 "txtVeoApiKey" => "btnToggleVeoApiKey",
                 _ => "btnToggle" + fieldName.Substring(3)
@@ -349,7 +616,6 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnTestAi",
                 "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
-                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
                 "txtTtsApiKey" => "btnTestTts",
                 "txtVeoApiKey" => "btnTestVeo",
                 _ => "btnTest" + fieldName.Substring(3)
@@ -383,13 +649,12 @@ namespace tiktok_Omni
         {
             field = CreateSettingField(fieldName, true);
             field.Dock = DockStyle.Fill;
-            field.MinimumSize = new Size(80, 28);
+            field.MinimumSize = new Size(80, AppDefaultInputHeight);
 
             var toggleName = fieldName switch
             {
                 "txtAiApiKey" => "btnToggleAiApiKey",
                 "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
-                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
                 "txtTtsApiKey" => "btnToggleTtsApiKey",
                 "txtVeoApiKey" => "btnToggleVeoApiKey",
                 _ => "btnToggle" + fieldName.Substring(3)
@@ -399,7 +664,6 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnTestAi",
                 "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
-                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
                 "txtTtsApiKey" => "btnTestTts",
                 "txtVeoApiKey" => "btnTestVeo",
                 _ => "btnTest" + fieldName.Substring(3)
@@ -449,15 +713,14 @@ namespace tiktok_Omni
             EventHandler testClick)
         {
             field = CreateSettingField(fieldName, true);
-            field.Height = 28;
-            field.MinimumSize = new Size(80, 28);
+            field.Height = AppDefaultInputHeight;
+            field.MinimumSize = new Size(80, AppDefaultInputHeight);
             field.Anchor = AnchorStyles.Left | AnchorStyles.Right;
 
             var toggleName = fieldName switch
             {
                 "txtAiApiKey" => "btnToggleAiApiKey",
                 "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
-                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
                 "txtTtsApiKey" => "btnToggleTtsApiKey",
                 "txtVeoApiKey" => "btnToggleVeoApiKey",
                 _ => "btnToggle" + fieldName.Substring(3)
@@ -467,7 +730,6 @@ namespace tiktok_Omni
             {
                 "txtAiApiKey" => "btnTestAi",
                 "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
-                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
                 "txtTtsApiKey" => "btnTestTts",
                 "txtVeoApiKey" => "btnTestVeo",
                 _ => "btnTest" + fieldName.Substring(3)
@@ -512,146 +774,93 @@ namespace tiktok_Omni
             return cell;
         }
 
-        private Control CreateSettingsCompactSecretKeyInlineCell(
-            string caption,
-            string fieldName,
-            out TextBox field,
-            out Button toggle,
-            out Button test,
-            EventHandler testClick,
-            int fieldWidth = 200)
+        /// <summary>
+        /// Độ rộng cột nhãn trong mỗi cột Gateway — đủ «TikTok RapidAPI» / «Provider»,
+        /// các ô nhập bắt đầu cùng mép trái; mép phải vẫn thẳng hàng nhờ Percent fill.
+        /// </summary>
+        private const int SettingsGatewayLabelWidth = 138;
+
+        private Label CreateGatewayColumnTitle(string text)
         {
-            field = CreateSettingField(fieldName, true);
-            field.Height = 30;
-            field.Width = fieldWidth;
-            field.MinimumSize = new Size(fieldWidth, 30);
-            field.MaximumSize = new Size(fieldWidth, 30);
-            field.Anchor = AnchorStyles.Left;
-
-            var toggleName = fieldName switch
+            return new Label
             {
-                "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
-                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
-                _ => "btnToggle" + fieldName.Substring(3)
-            };
-
-            var testName = fieldName switch
-            {
-                "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
-                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
-                _ => "btnTest" + fieldName.Substring(3)
-            };
-
-            toggle = CreateSettingsShowToggleButton(toggleName, minWidth: 52, height: 32);
-            test = CreateSettingsShowTestButton(testName, "Test", minWidth: 72, height: 32);
-            var secretField = field;
-            var secretToggle = toggle;
-            toggle.Click += (sender, e) => ToggleSecretVisibility(secretField, secretToggle);
-            test.Click += testClick;
-            toggle.Margin = new Padding(4, 0, 0, 0);
-            test.Margin = new Padding(4, 0, 0, 0);
-
-            var cell = new FlowLayoutPanel
-            {
-                Name = "cellCompact" + fieldName,
+                Text = text,
                 AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                Margin = new Padding(0, 0, 8, 0),
-                Padding = new Padding(0, 0, 0, 2)
+                Font = AppCaptionFont,
+                ForeColor = Color.FromArgb(200, 210, 225),
+                Margin = new Padding(0, 0, 0, 4),
+                Dock = DockStyle.Top
             };
-
-            var captionLabel = CreateSettingCaption(caption);
-            captionLabel.AutoSize = true;
-            captionLabel.Margin = new Padding(0, 7, 6, 0);
-
-            cell.Controls.Add(captionLabel);
-            cell.Controls.Add(field);
-            cell.Controls.Add(toggle);
-            cell.Controls.Add(test);
-
-            return cell;
         }
 
-        private Control CreateSettingsGatewaySecondRow(
-            out TextBox captchaField,
-            out Button captchaToggle,
-            out Button captchaTest,
-            EventHandler captchaTestClick,
-            out TextBox tikTokRapidField,
-            out Button tikTokRapidToggle,
-            out Button tikTokRapidTest,
-            EventHandler tikTokRapidTestClick,
-            out JellyButton saveButton,
-            EventHandler saveClick)
+        private TextBox CreateGatewayStretchField(string name, bool isSecret)
         {
-            var captchaCell = CreateSettingsCompactSecretKeyInlineCell(
-                "2Captcha",
-                "txtTwoCaptchaApiKey",
-                out captchaField,
-                out captchaToggle,
-                out captchaTest,
-                captchaTestClick);
-
-            var rapidCell = CreateSettingsCompactSecretKeyInlineCell(
-                "TikTok RapidAPI (tiktok-api23)",
-                "txtTikTokRapidApiKey",
-                out tikTokRapidField,
-                out tikTokRapidToggle,
-                out tikTokRapidTest,
-                tikTokRapidTestClick);
-
-            saveButton = CreateSettingsSaveButton("btnSaveSettings", "L\u01b0u c\u00e0i \u0111\u1eb7t");
-            saveButton.Click += saveClick;
-            var saveBtnLocal = saveButton;
-
-            var row = new Panel
+            // Min width thấp để Absolute label không bị ép cắt chữ.
+            var field = new TextBox
             {
-                Name = "pnlGatewaySecondRow",
+                Name = name,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(45, 49, 60),
+                ForeColor = Color.WhiteSmoke,
+                UseSystemPasswordChar = isSecret,
+                Height = AppDefaultInputHeight,
+                MinimumSize = new Size(40, AppDefaultInputHeight),
+                MaximumSize = Size.Empty,
                 Dock = DockStyle.Fill,
-                AutoSize = false,
-                Margin = new Padding(0, 6, 0, 2),
-                Padding = new Padding(0, 2, 0, 10),
-                MinimumSize = new Size(0, 60)
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Margin = Padding.Empty
             };
+            ApplyAppInputChrome(field);
+            field.MinimumSize = new Size(40, AppDefaultInputHeight);
+            field.Height = AppDefaultInputHeight;
+            return field;
+        }
 
-            var keysFlow = new FlowLayoutPanel
+        private Label CreateGatewayInlineCaption(string caption)
+        {
+            var captionLabel = CreateSettingCaption(caption);
+            captionLabel.AutoSize = false;
+            captionLabel.Dock = DockStyle.Fill;
+            captionLabel.TextAlign = ContentAlignment.MiddleLeft;
+            captionLabel.Margin = new Padding(0, 0, 4, 0);
+            captionLabel.MinimumSize = new Size(SettingsGatewayLabelWidth, AppDefaultInputHeight);
+            return captionLabel;
+        }
+
+        private TableLayoutPanel CreateGatewayAlignedRow(bool withButtons)
+        {
+            var row = new TableLayoutPanel
             {
-                Name = "flpGatewaySecondKeys",
+                Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left
+                ColumnCount = withButtons ? 4 : 2,
+                RowCount = 1,
+                Margin = new Padding(0, 0, 0, 4),
+                Padding = Padding.Empty
             };
-            captchaCell.Margin = new Padding(0, 0, 12, 2);
-            rapidCell.Margin = new Padding(0, 0, 0, 2);
-            keysFlow.Controls.Add(captchaCell);
-            keysFlow.Controls.Add(rapidCell);
-
-            saveBtnLocal.Anchor = AnchorStyles.None;
-            row.Controls.Add(keysFlow);
-            row.Controls.Add(saveBtnLocal);
-
-            void LayoutSecondRow()
+            // Label cố định → ô nhập chiếm hết phần còn lại của cột → nút AutoSize.
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SettingsGatewayLabelWidth));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            if (withButtons)
             {
-                var contentHeight = row.ClientSize.Height;
-                var contentWidth = row.ClientSize.Width;
-                keysFlow.Location = new Point(0, Math.Max(0, (contentHeight - keysFlow.Height) / 2));
-                saveBtnLocal.Location = new Point(
-                    Math.Max(0, (contentWidth - saveBtnLocal.Width) / 2),
-                    Math.Max(0, (contentHeight - saveBtnLocal.Height) / 2));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             }
 
-            row.Resize += (sender, e) => LayoutSecondRow();
-            row.HandleCreated += (sender, e) => LayoutSecondRow();
-            LayoutSecondRow();
-
+            row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             return row;
         }
 
-        private Control CreateSettingsSecretKeyAlignedColumn(
+        private Control CreateGatewayLabeledInlineField(string caption, TextBox field)
+        {
+            var row = CreateGatewayAlignedRow(withButtons: false);
+            row.Controls.Add(CreateGatewayInlineCaption(caption), 0, 0);
+            row.Controls.Add(field, 1, 0);
+            return row;
+        }
+
+        private Control CreateGatewaySecretInlineRow(
             string caption,
             string fieldName,
             out TextBox field,
@@ -659,59 +868,115 @@ namespace tiktok_Omni
             out Button test,
             EventHandler testClick)
         {
-            var keyCell = CreateSettingsSecretKeyInlineCell(caption, fieldName, out field, out toggle, out test, testClick);
+            field = CreateGatewayStretchField(fieldName, true);
 
+            var toggleName = fieldName switch
+            {
+                "txtAiApiKey" => "btnToggleAiApiKey",
+                "txtTwoCaptchaApiKey" => "btnToggleTwoCaptchaApiKey",
+                "txtVeoApiKey" => "btnToggleVeoApiKey",
+                "txtTikTokRapidApiKey" => "btnToggleTikTokRapidApiKey",
+                _ => "btnToggle" + fieldName.Substring(3)
+            };
+
+            var testName = fieldName switch
+            {
+                "txtAiApiKey" => "btnTestAi",
+                "txtTwoCaptchaApiKey" => "btnTestTwoCaptcha",
+                "txtVeoApiKey" => "btnTestVeo",
+                "txtTikTokRapidApiKey" => "btnTestTikTokRapidApi",
+                _ => "btnTest" + fieldName.Substring(3)
+            };
+
+            toggle = CreateSettingsShowToggleButton(toggleName, minWidth: 52, height: AppDefaultInputHeight);
+            test = CreateSettingsShowTestButton(testName, "Test", minWidth: 72, height: AppDefaultInputHeight);
+            var secretField = field;
+            var secretToggle = toggle;
+            toggle.Click += (sender, e) => ToggleSecretVisibility(secretField, secretToggle);
+            test.Click += testClick;
+            toggle.Margin = new Padding(4, 0, 0, 0);
+            test.Margin = new Padding(4, 0, 0, 0);
+            toggle.Anchor = AnchorStyles.Left;
+            test.Anchor = AnchorStyles.Left;
+
+            var row = CreateGatewayAlignedRow(withButtons: true);
+            row.Name = "rowGateway" + fieldName;
+            row.Controls.Add(CreateGatewayInlineCaption(caption), 0, 0);
+            row.Controls.Add(field, 1, 0);
+            row.Controls.Add(toggle, 2, 0);
+            row.Controls.Add(test, 3, 0);
+            return row;
+        }
+
+        private TableLayoutPanel CreateGatewayColumnHost(string name)
+        {
             var col = new TableLayoutPanel
             {
-                Name = "colKey" + fieldName,
+                Name = name,
                 Dock = DockStyle.Fill,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
-                RowCount = 2,
-                Margin = new Padding(0, 0, 6, 0),
-                Padding = Padding.Empty
+                RowCount = 1,
+                Margin = new Padding(0, 0, 30, 0),
+                Padding = new Padding(2, 2, 2, 2)
             };
-            col.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+            col.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             col.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            col.Controls.Add(new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty }, 0, 0);
-            col.Controls.Add(keyCell, 0, 1);
-
             return col;
         }
 
-        private Control CreateSettingsCompactLabeledField(string caption, TextBox field)
+        private Control CreateSettingsGatewayVeoColumn(
+            out TextBox urlField,
+            out TextBox keyField,
+            out Button toggle,
+            out Button test,
+            EventHandler testClick,
+            out TextBox tikTokField,
+            out Button tikTokToggle,
+            out Button tikTokTest,
+            EventHandler tikTokTestClick)
         {
-            field.Height = 26;
-            field.MinimumSize = new Size(60, 26);
-            field.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-
-            var row = new TableLayoutPanel
+            var col = CreateGatewayColumnHost("colGatewayVeo");
+            var stack = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 2,
-                RowCount = 1,
-                Margin = new Padding(0, 0, 0, 4),
+                ColumnCount = 1,
+                RowCount = 4,
+                Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
-            row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            row.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            for (var i = 0; i < 4; i++)
+            {
+                stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            }
 
-            var captionLabel = CreateSettingCaption(caption);
-            captionLabel.AutoSize = true;
-            captionLabel.Anchor = AnchorStyles.Left;
-            captionLabel.Margin = new Padding(0, 5, 6, 0);
+            urlField = CreateGatewayStretchField("txtVeoEndpoint", false);
+            stack.Controls.Add(CreateGatewayColumnTitle("RapidAPI · Veo · TikTok"), 0, 0);
+            stack.Controls.Add(CreateGatewayLabeledInlineField("URL Veo", urlField), 0, 1);
+            stack.Controls.Add(CreateGatewaySecretInlineRow(
+                "Khóa Veo",
+                "txtVeoApiKey",
+                out keyField,
+                out toggle,
+                out test,
+                testClick), 0, 2);
+            stack.Controls.Add(CreateGatewaySecretInlineRow(
+                "TikTok RapidAPI",
+                "txtTikTokRapidApiKey",
+                out tikTokField,
+                out tikTokToggle,
+                out tikTokTest,
+                tikTokTestClick), 0, 3);
 
-            row.Controls.Add(captionLabel, 0, 0);
-            row.Controls.Add(field, 1, 0);
-
-            return row;
+            col.Controls.Add(stack, 0, 0);
+            return col;
         }
 
-        private Control CreateSettingsGeminiColumn(
+        private Control CreateSettingsGatewayGeminiColumn(
             out TextBox providerField,
             out TextBox modelField,
             out TextBox apiKeyField,
@@ -719,103 +984,72 @@ namespace tiktok_Omni
             out Button test,
             EventHandler testClick)
         {
-            providerField = CreateSettingField("txtAiProvider", false);
-            modelField = CreateSettingField("txtAiModel", false);
-
-            var providerRow = CreateSettingsCompactLabeledField("Provider", providerField);
-            var modelRow = CreateSettingsCompactLabeledField("Model", modelField);
-            var keyCell = CreateSettingsSecretKeyInlineCell("Gemini", "txtAiApiKey", out apiKeyField, out toggle, out test, testClick);
-            if (keyCell is TableLayoutPanel keyTbl)
+            var col = CreateGatewayColumnHost("colGatewayGemini");
+            var stack = new TableLayoutPanel
             {
-                keyTbl.Margin = new Padding(0, 0, 6, 0);
-            }
-
-            var col = new TableLayoutPanel
-            {
-                Name = "colGatewayGemini",
                 Dock = DockStyle.Fill,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
-                RowCount = 3,
-                Margin = new Padding(0, 0, 8, 0),
+                RowCount = 4,
+                Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
-            col.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            col.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            col.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            col.Controls.Add(providerRow, 0, 0);
-            col.Controls.Add(modelRow, 0, 1);
-            col.Controls.Add(keyCell, 0, 2);
+            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            for (var i = 0; i < 4; i++)
+            {
+                stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            }
 
+            providerField = CreateGatewayStretchField("txtAiProvider", false);
+            modelField = CreateGatewayStretchField("txtAiModel", false);
+            stack.Controls.Add(CreateGatewayColumnTitle("Gemini"), 0, 0);
+            stack.Controls.Add(CreateGatewayLabeledInlineField("Provider", providerField), 0, 1);
+            stack.Controls.Add(CreateGatewayLabeledInlineField("Model", modelField), 0, 2);
+            stack.Controls.Add(CreateGatewaySecretInlineRow(
+                "Khóa API",
+                "txtAiApiKey",
+                out apiKeyField,
+                out toggle,
+                out test,
+                testClick), 0, 3);
+
+            col.Controls.Add(stack, 0, 0);
             return col;
         }
 
-        private Control CreateSettingsGatewayPairColumn(
-            string serviceTitle,
-            string urlFieldName,
-            out TextBox urlField,
-            string keyCaption,
-            string keyFieldName,
-            out TextBox keyField,
-            out Button toggle,
-            out Button test,
-            EventHandler testClick)
+        private Control CreateSettingsGatewayExtrasColumn(
+            out TextBox captchaField,
+            out Button captchaToggle,
+            out Button captchaTest,
+            EventHandler captchaTestClick)
         {
-            urlField = CreateSettingField(urlFieldName, false);
-            urlField.Height = 28;
-            urlField.MinimumSize = new Size(80, 28);
-            urlField.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-
-            var urlRow = new TableLayoutPanel
+            var col = CreateGatewayColumnHost("colGatewayExtras");
+            col.Margin = new Padding(0, 0, 0, 0);
+            var stack = new TableLayoutPanel
             {
-                Name = "rowUrl" + keyFieldName,
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 2,
-                RowCount = 1,
-                Margin = new Padding(0, 0, 0, 4),
-                Padding = Padding.Empty
-            };
-            urlRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            urlRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            urlRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-            var svcLabel = new Label
-            {
-                Text = serviceTitle,
-                AutoSize = true,
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(200, 210, 225),
-                Margin = new Padding(0, 6, 8, 0),
-                Anchor = AnchorStyles.Left
-            };
-            urlRow.Controls.Add(svcLabel, 0, 0);
-            urlRow.Controls.Add(urlField, 1, 0);
-
-            var keyCell = CreateSettingsSecretKeyInlineCell(keyCaption, keyFieldName, out keyField, out toggle, out test, testClick);
-            if (keyCell is TableLayoutPanel keyTbl)
-            {
-                keyTbl.Margin = new Padding(0, 0, 6, 0);
-            }
-
-            var col = new TableLayoutPanel
-            {
-                Name = "colGateway" + keyFieldName,
                 Dock = DockStyle.Fill,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
                 RowCount = 2,
-                Margin = new Padding(0, 0, 8, 0),
+                Margin = Padding.Empty,
                 Padding = Padding.Empty
             };
-            col.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            col.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            col.Controls.Add(urlRow, 0, 0);
-            col.Controls.Add(keyCell, 0, 1);
+            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
+            stack.Controls.Add(CreateGatewayColumnTitle("2Captcha"), 0, 0);
+            stack.Controls.Add(CreateGatewaySecretInlineRow(
+                "Khóa API",
+                "txtTwoCaptchaApiKey",
+                out captchaField,
+                out captchaToggle,
+                out captchaTest,
+                captchaTestClick), 0, 1);
+
+            col.Controls.Add(stack, 0, 0);
             return col;
         }
 
@@ -831,13 +1065,13 @@ namespace tiktok_Omni
         {
             textBox = CreateSettingField(fieldName, false);
             textBox.Dock = DockStyle.Fill;
-            textBox.MinimumSize = new Size(80, 26);
+            textBox.MinimumSize = new Size(80, AppDefaultInputHeight);
             textBox.Margin = new Padding(0, 0, 4, 0);
 
             browse = CreateSettingBrowseButton(
                 browseName ?? ("btnBrowse" + fieldName.Substring(3)),
                 browseText);
-            browse.MinimumSize = new Size(64, 28);
+            browse.MinimumSize = new Size(64, AppDefaultInputHeight);
             browse.Click += browseClick;
 
             var row = new TableLayoutPanel
@@ -875,7 +1109,7 @@ namespace tiktok_Omni
                     row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
                     var btn = CreateSettingsGreenFlatButton(extra.name, extra.text);
                     btn.Click += extra.click;
-                    btn.MinimumSize = new Size(72, 28);
+                    btn.MinimumSize = new Size(72, AppDefaultInputHeight);
                     row.Controls.Add(btn, col, 0);
                     col++;
                 }
@@ -896,15 +1130,15 @@ namespace tiktok_Omni
             string downloadName)
         {
             textBox = CreateSettingField(fieldName, false);
-            textBox.Height = 26;
-            textBox.MinimumSize = new Size(60, 26);
+            textBox.Height = AppDefaultInputHeight;
+            textBox.MinimumSize = new Size(60, AppDefaultInputHeight);
             textBox.Anchor = AnchorStyles.Left | AnchorStyles.Right;
 
-            browse = CreateSettingsGreenFlatButton(browseName, "Duyệt", minWidth: 52, height: 26);
+            browse = CreateSettingsGreenFlatButton(browseName, "Duyệt", minWidth: 52, height: AppDefaultInputHeight);
             browse.Click += browseClick;
             browse.Margin = new Padding(4, 0, 0, 0);
 
-            download = CreateSettingsGreenFlatButton(downloadName, "\u2B07 T\u1EA3i", minWidth: 52, height: 26);
+            download = CreateSettingsGreenFlatButton(downloadName, "\u2B07 T\u1EA3i", minWidth: 52, height: AppDefaultInputHeight);
             download.Click += downloadClick;
             download.Margin = new Padding(4, 0, 0, 0);
 
@@ -954,7 +1188,7 @@ namespace tiktok_Omni
         {
             textBox = CreateSettingField(fieldName, false);
             textBox.Dock = DockStyle.Fill;
-            textBox.MinimumSize = new Size(200, 28);
+            textBox.MinimumSize = new Size(200, AppDefaultInputHeight);
 
             browse = CreateSettingBrowseButton(
                 browseName ?? ("btnBrowse" + fieldName.Substring(3)),
@@ -966,7 +1200,7 @@ namespace tiktok_Omni
             {
                 foreach (var extra in extraButtons)
                 {
-                    var btn = CreateSettingsGreenFlatButton(extra.name, extra.text, 72, 28);
+                    var btn = CreateSettingsGreenFlatButton(extra.name, extra.text, 72, AppDefaultInputHeight);
                     btn.Click += extra.click;
                     controls.Add(btn);
                 }
@@ -1046,14 +1280,14 @@ namespace tiktok_Omni
             {
                 controlLeft.Dock = DockStyle.Fill;
                 controlLeft.Margin = new Padding(0, 0, 0, 4);
-                controlLeft.MinimumSize = new Size(60, 26);
+                controlLeft.MinimumSize = new Size(60, AppDefaultInputHeight);
             }
 
             if (controlRight != null)
             {
                 controlRight.Dock = DockStyle.Fill;
                 controlRight.Margin = new Padding(0, 0, 0, 4);
-                controlRight.MinimumSize = new Size(60, 26);
+                controlRight.MinimumSize = new Size(60, AppDefaultInputHeight);
             }
 
             tbl.Controls.Add(lblLeft, 0, row);
@@ -1071,24 +1305,10 @@ namespace tiktok_Omni
             row++;
         }
 
-        private static DataGridViewTextBoxColumn CreateProxyProfileStatusColumn(string name, string header, int width)
-        {
-            return new DataGridViewTextBoxColumn
-            {
-                Name = name,
-                HeaderText = header,
-                ReadOnly = true,
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
-                Width = width,
-                MinimumWidth = width,
-                Resizable = DataGridViewTriState.False
-            };
-        }
-
         private void BuildSettingUi()
         {
             tabSetting.SuspendLayout();
-            tabSetting.AutoScroll = false;
+            tabSetting.AutoScroll = true;
             tabSetting.Controls.Clear();
 
             var grpPlatformLogin = CreateSettingsGroupBox("Đăng nhập nền tảng (Chrome profile)");
@@ -1137,31 +1357,17 @@ namespace tiktok_Omni
                 btnLoginFacebook,
                 btnLoginYouTube,
                 btnCheckBrowserProfileHealth);
-            tblPlatformLogin.Dock = DockStyle.Top;
             grpPlatformLogin.Controls.Add(tblPlatformLogin);
 
-            var grpGatewayTtsVeo = CreateSettingsGroupBox("Gateway — TTS · Veo · Gemini · 2Captcha");
+            var grpGatewayTtsVeo = CreateSettingsGroupBox("Gateway — Veo · Gemini · Captcha");
             grpGatewayTtsVeo.Name = "grpGatewayTtsVeo";
-            grpGatewayTtsVeo.Padding = new Padding(6, 10, 6, 12);
+            grpGatewayTtsVeo.Padding = new Padding(6, 10, 6, 10);
 
-            var tblGatewayRoot = new TableLayoutPanel
-            {
-                Name = "tblGatewayRoot",
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1,
-                RowCount = 2,
-                Margin = Padding.Empty,
-                Padding = Padding.Empty
-            };
-            tblGatewayRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tblGatewayRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 70F));
-
+            // 3 cột chia đều full chiều rộng giao diện; ô nhập co giãn theo cột.
             var tblGatewayMain = new TableLayoutPanel
             {
-                Name = "tblGatewayTtsVeo",
-                Dock = DockStyle.Fill,
+                Name = "tblGatewayThreeCols",
+                Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 3,
@@ -1175,58 +1381,63 @@ namespace tiktok_Omni
             tblGatewayMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             tblGatewayMain.Controls.Add(
-                CreateSettingsGatewayPairColumn(
-                    "TTS · URL",
-                    "txtTtsEndpoint",
-                    out txtTtsEndpoint,
-                    "Khóa TTS",
-                    "txtTtsApiKey",
-                    out txtTtsApiKey,
-                    out btnToggleTtsApiKey,
-                    out btnTestTts,
-                    btnTestTts_Click),
-                0,
-                0);
-            tblGatewayMain.Controls.Add(
-                CreateSettingsGatewayPairColumn(
-                    "Veo · URL",
-                    "txtVeoEndpoint",
+                CreateSettingsGatewayVeoColumn(
                     out txtVeoEndpoint,
-                    "Khóa Veo",
-                    "txtVeoApiKey",
                     out txtVeoApiKey,
                     out btnToggleVeoApiKey,
                     out btnTestVeo,
-                    btnTestVeo_Click),
-                1,
+                    btnTestVeo_Click,
+                    out txtTikTokRapidApiKey,
+                    out btnToggleTikTokRapidApiKey,
+                    out btnTestTikTokRapidApi,
+                    btnTestTikTokRapidApi_Click),
+                0,
                 0);
             tblGatewayMain.Controls.Add(
-                CreateSettingsGeminiColumn(
+                CreateSettingsGatewayGeminiColumn(
                     out txtAiProvider,
                     out txtAiModel,
                     out txtAiApiKey,
                     out btnToggleAiApiKey,
                     out btnTestAi,
                     btnTestAi_Click),
+                1,
+                0);
+            tblGatewayMain.Controls.Add(
+                CreateSettingsGatewayExtrasColumn(
+                    out txtTwoCaptchaApiKey,
+                    out btnToggleTwoCaptchaApiKey,
+                    out btnTestTwoCaptcha,
+                    btnTestTwoCaptcha_Click),
                 2,
                 0);
 
-            var pnlGatewaySecond = CreateSettingsGatewaySecondRow(
-                out txtTwoCaptchaApiKey,
-                out btnToggleTwoCaptchaApiKey,
-                out btnTestTwoCaptcha,
-                btnTestTwoCaptcha_Click,
-                out txtTikTokRapidApiKey,
-                out btnToggleTikTokRapidApiKey,
-                out btnTestTikTokRapidApi,
-                btnTestTikTokRapidApi_Click,
-                out var saveBtn,
-                btnSaveSettings_Click);
-            btnSaveSettings = saveBtn;
+            grpGatewayTtsVeo.Controls.Add(tblGatewayMain);
 
-            tblGatewayRoot.Controls.Add(tblGatewayMain, 0, 0);
-            tblGatewayRoot.Controls.Add(pnlGatewaySecond, 0, 1);
-            grpGatewayTtsVeo.Controls.Add(tblGatewayRoot);
+            // Nút Lưu nằm ngoài / phía trên khung Gateway.
+            btnSaveSettings = CreateSettingsSaveButton("btnSaveSettings", "L\u01b0u c\u00e0i \u0111\u1eb7t");
+            btnSaveSettings.Click += btnSaveSettings_Click;
+            btnSaveSettings.Anchor = AnchorStyles.None;
+            btnSaveSettings.Margin = new Padding(0, 4, 0, 8);
+
+            var tblSaveRow = new TableLayoutPanel
+            {
+                Name = "tblSettingsSaveRow",
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                RowCount = 1,
+                Margin = new Padding(0, 0, 0, 6),
+                Padding = Padding.Empty
+            };
+            tblSaveRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            tblSaveRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            tblSaveRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            tblSaveRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tblSaveRow.Controls.Add(btnSaveSettings, 1, 0);
+
+            var grpVoiceSettings = BuildVoiceSettingsGroupBox();
 
             var grpProfiles = CreateSettingsGroupBox("Tài khoản Chrome profile");
             grpProfiles.Name = "grpProfiles";
@@ -1248,7 +1459,7 @@ namespace tiktok_Omni
                 MinimumSize = new Size(200, 80),
                 AutoGenerateColumns = false,
                 AllowUserToAddRows = true,
-                AllowUserToDeleteRows = true,
+                AllowUserToDeleteRows = false,
                 ReadOnly = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
@@ -1265,7 +1476,11 @@ namespace tiktok_Omni
                 BackColor = Color.FromArgb(31, 34, 42),
                 ForeColor = Color.Gainsboro,
                 SelectionBackColor = Color.FromArgb(76, 110, 245),
-                SelectionForeColor = Color.White
+                SelectionForeColor = Color.White,
+                Font = AppGridBodyFont,
+                Alignment = DataGridViewContentAlignment.MiddleLeft,
+                Padding = new Padding(8, 4, 8, 4),
+                WrapMode = DataGridViewTriState.False
             };
             dgvProxyProfiles.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
             {
@@ -1274,25 +1489,20 @@ namespace tiktok_Omni
                 SelectionBackColor = Color.FromArgb(40, 44, 54),
                 SelectionForeColor = Color.WhiteSmoke,
                 Alignment = DataGridViewContentAlignment.MiddleLeft,
-                Font = AppGridHeaderFont,
-                Padding = new Padding(6, 8, 6, 8),
                 WrapMode = DataGridViewTriState.False
             };
-            dgvProxyProfiles.ColumnHeadersHeight = AppGridHeaderHeight;
-            dgvProxyProfiles.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            dgvProxyProfiles.EnableHeadersVisualStyles = false;
 
             dgvProxyProfiles.Columns.Add(new DataGridViewTextBoxColumn
             {
                 DataPropertyName = "Name",
-                HeaderText = "Tên profile (app)",
+                HeaderText = "Tên profile",
                 FillWeight = 12,
                 MinimumWidth = 90
             });
             dgvProxyProfiles.Columns.Add(new DataGridViewTextBoxColumn
             {
                 DataPropertyName = "ChromeUserDataPath",
-                HeaderText = "Thư mục Chrome (user-data)",
+                HeaderText = "Thư mục Chrome",
                 FillWeight = 22,
                 MinimumWidth = 120
             });
@@ -1326,49 +1536,90 @@ namespace tiktok_Omni
             });
             dgvProxyProfiles.Columns.Add(new DataGridViewTextBoxColumn
             {
+                Name = "colProfileTikTokNick",
                 DataPropertyName = "TikTokUniqueId",
                 HeaderText = "TikTok @nick",
                 FillWeight = 12,
-                MinimumWidth = 88
+                MinimumWidth = 88,
+                ReadOnly = true
             });
             dgvProxyProfiles.Columns.Add(new DataGridViewTextBoxColumn
             {
+                Name = "colProfileTikTokName",
                 DataPropertyName = "TikTokNickname",
-                HeaderText = "Tên TikTok",
+                HeaderText = "TikTok",
                 FillWeight = 12,
-                MinimumWidth = 88
+                MinimumWidth = 88,
+                ReadOnly = true
             });
             dgvProxyProfiles.Columns.Add(new DataGridViewTextBoxColumn
             {
+                Name = "colProfileFacebookName",
                 DataPropertyName = "FacebookName",
                 HeaderText = "Facebook",
                 FillWeight = 10,
-                MinimumWidth = 72
+                MinimumWidth = 72,
+                ReadOnly = true
             });
             dgvProxyProfiles.Columns.Add(new DataGridViewTextBoxColumn
             {
+                Name = "colProfileYouTubeName",
                 DataPropertyName = "YouTubeName",
                 HeaderText = "YouTube",
                 FillWeight = 10,
-                MinimumWidth = 72
+                MinimumWidth = 72,
+                ReadOnly = true
             });
             dgvProxyProfiles.Columns.Add(new DataGridViewTextBoxColumn
             {
                 DataPropertyName = "TikTokUserId",
-                HeaderText = "User id (web)",
+                HeaderText = "User ID",
                 FillWeight = 10,
                 MinimumWidth = 72
             });
-            dgvProxyProfiles.Columns.Add(CreateProxyProfileStatusColumn("colProfileIsTTLoggedIn", "TikTok OK", 58));
-            dgvProxyProfiles.Columns.Add(CreateProxyProfileStatusColumn("colProfileIsFBLoggedIn", "FB OK", 52));
-            dgvProxyProfiles.Columns.Add(CreateProxyProfileStatusColumn("colProfileIsYTLoggedIn", "YT OK", 52));
 
+            dgvProxyProfiles.Columns.Add(new DataGridViewButtonColumn
+            {
+                Name = "colProfileMascotImage",
+                HeaderText = "Ảnh profile",
+                Text = "📷 Chọn",
+                UseColumnTextForButtonValue = false,
+                Width = 96,
+                MinimumWidth = 80,
+                FlatStyle = FlatStyle.Flat,
+                ToolTipText = "Ảnh nhân vật cho hook intro Video reup — hover xem thư mục, bấm để chọn/đổi"
+            });
+
+            dgvProxyProfiles.Columns.Add(new DataGridViewButtonColumn
+            {
+                Name = "colProfileHookClips",
+                HeaderText = "Hook Clips",
+                Text = "📁 Video Hook",
+                UseColumnTextForButtonValue = false,
+                Width = 110,
+                MinimumWidth = 90,
+                FlatStyle = FlatStyle.Flat,
+                ToolTipText = "Tạo thư mục 5 style cho profile này và mở trong Explorer để thêm clip (.mp4)"
+            });
+
+            dgvProxyProfiles.ShowCellToolTips = true;
             dgvProxyProfiles.DataSource = _proxyProfileBindingList;
+
+            // Có cột nút (Ảnh profile / Hook Clips) → dùng chiều cao combo chuẩn, áp sau khi đã có cột.
+            ApplyAppComboGridRowHeight(dgvProxyProfiles);
+            ApplyAppGridChrome(dgvProxyProfiles);
+            EnsureAppGridRowHeights(dgvProxyProfiles);
+            dgvProxyProfiles.DataBindingComplete += (_, __) => EnsureAppGridRowHeights(dgvProxyProfiles);
+
             dgvProxyProfiles.SelectionChanged += dgvProxyProfiles_SelectionChanged;
             dgvProxyProfiles.CellFormatting += dgvProxyProfiles_CellFormatting;
+            dgvProxyProfiles.CellToolTipTextNeeded += dgvProxyProfiles_CellToolTipTextNeeded;
+            dgvProxyProfiles.CellContentClick += dgvProxyProfiles_CellContentClick;
             dgvProxyProfiles.DataError += dgvProxyProfiles_DataError;
+            dgvProxyProfiles.KeyDown += dgvProxyProfiles_KeyDown;
 
             pnlProfilesRoot.Controls.Add(dgvProxyProfiles);
+            ApplyAppGridChrome(dgvProxyProfiles);
             grpProfiles.Controls.Add(pnlProfilesRoot);
 
             var profileGridTip = new ToolTip
@@ -1386,7 +1637,7 @@ namespace tiktok_Omni
             profileGridTip.SetToolTip(grpProfiles, profileHintDetail);
             profileGridTip.SetToolTip(
                 dgvProxyProfiles,
-                "Cột «Tên profile (app)» dùng trong app (dropdown). «TikTok @nick» / «Tên TikTok» / «Facebook» / «YouTube» tự điền sau đăng nhập. «Thư mục Chrome»: user-data (vd. ...\\User Data\\Profile 1).");
+                "Cột «Tên profile» dùng trong app (dropdown). «TikTok @nick» / «TikTok» / «Facebook» / «YouTube» chỉ hiện khi đã đăng nhập nền tảng đó. «Thư mục Chrome»: user-data (vd. ...\\User Data\\Profile 1).");
             profileGridTip.SetToolTip(
                 btnOpenTikTokManualBrowser,
                 "Chọn một dòng rồi bấm: mở đăng nhập TikTok đúng profile; sau khi đăng nhập thành công bot đóng trình duyệt và cập nhật @nick.");
@@ -1455,9 +1706,13 @@ namespace tiktok_Omni
                 Margin = new Padding(8, 4, 8, 4)
             };
 
+            // Dock Top: control thêm sau nằm gần mép trên hơn.
+            // Thứ tự: Login → Profiles → Lưu → Gateway → Voice → Media
             tabSetting.Controls.Add(grpPlatformLogin);
             tabSetting.Controls.Add(grpProfiles);
+            tabSetting.Controls.Add(tblSaveRow);
             tabSetting.Controls.Add(grpGatewayTtsVeo);
+            tabSetting.Controls.Add(grpVoiceSettings);
             tabSetting.Controls.Add(grpMedia);
             tabSetting.Controls.Add(lblSettingsValidation);
 
@@ -1477,20 +1732,38 @@ namespace tiktok_Omni
                 ShowAlways = true
             };
 
-            tip.SetToolTip(
-                txtTtsApiKey,
-                "Khóa bí mật (Key) cho Text-to-Speech — cùng cột với URL gateway TTS bên trên.");
+            if (txtTtsApiKey != null)
+            {
+                tip.SetToolTip(
+                    txtTtsApiKey,
+                    "Khóa bí mật (Key) cho Text-to-Speech — nhóm Voice / TTS.");
+            }
+
             tip.SetToolTip(
                 txtVeoApiKey,
-                "Khóa bí mật (Key) cho video AI Veo — cùng cột với URL gateway Veo bên trên.");
-            tip.SetToolTip(
-                txtTtsEndpoint,
-                "URL API gateway TTS (POST JSON → audioUrl).\r\n" +
-                "Cặp với «Khóa API TTS» ngay bên dưới trong cùng cột.");
+                "RapidAPI key (x-rapidapi-key) cho Google Veo 3.1 Text-to-Video — có thể trùng key TikTok RapidAPI nếu cùng tài khoản.");
+
             tip.SetToolTip(
                 txtVeoEndpoint,
-                "URL API gateway Veo.\r\n" +
-                "Cặp với «Khóa API Veo» ngay bên dưới trong cùng cột.");
+                "Base URL RapidAPI Google Veo 3.1 (mặc định " + RapidApiGoogleVeoHelper.DefaultBaseUrl + ").\r\n" +
+                "Cặp với «Khóa RapidAPI Veo» ngay bên dưới trong cùng cột.");
+
+            var personaHint = "Voice ID ElevenLabs cho giọng «{0}» — dùng chung mọi tab video khi chọn " +
+                               "giọng này (Showcase Audio hook/thân, sau này Quote/Reup).";
+            void SetPersonaTip(TextBox field, string label)
+            {
+                if (field != null)
+                {
+                    tip.SetToolTip(field, string.Format(personaHint, label));
+                }
+            }
+
+            SetPersonaTip(txtVoiceIdFemaleYoung, "Nữ trẻ — miền Nam (ElevenLabs)");
+            SetPersonaTip(txtVoiceIdFemaleMature, "Nữ trung niên — miền Nam");
+            SetPersonaTip(txtVoiceIdMaleYoung, "Nam trẻ — miền Nam");
+            SetPersonaTip(txtVoiceIdMaleMature, "Nam trung niên — miền Nam");
+            SetPersonaTip(txtVoiceIdGirlChild, "Bé gái — miền Nam");
+            SetPersonaTip(txtVoiceIdBoyChild, "Bé trai — miền Nam");
         }
 
     }

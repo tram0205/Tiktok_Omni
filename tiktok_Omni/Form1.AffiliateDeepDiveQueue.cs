@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using tiktok_Omni.Services;
 using tiktok_Omni.Services.Jobs;
+using tiktok_Omni.Services.Showcase;
 
 namespace tiktok_Omni
 {
@@ -76,7 +77,7 @@ namespace tiktok_Omni
                 return;
             }
 
-            var minSafety = (int)(numAffiliateMinSafety?.Value ?? 75);
+            const int minSafety = 75;
             var enqueued = 0;
             var skippedScore = 0;
             foreach (var c in selected)
@@ -93,133 +94,6 @@ namespace tiktok_Omni
 
             Log($"[JobQueue] Deep Dive: đã xếp {enqueued} job (bỏ {skippedScore} dòng score ≤ {minSafety}).");
             RefreshAffiliateToolbarButtons();
-        }
-
-        private async void btnAffiliateGenerateScript_Click(object sender, EventArgs e)
-        {
-            if (!IsProductPipelineModeTab())
-            {
-                MessageBox.Show(this,
-                    "Chọn tab Slideshow hoặc Affiliate chuyên sâu trước khi sinh script.",
-                    "Sinh Script",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            if (!TryGetSelectedAiVideoGenItems(out var selected))
-            {
-                MessageBox.Show(this,
-                    "Hãy chọn ít nhất một dòng sản phẩm trên lưới trước khi sinh script.",
-                    "Sinh Script",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            var settings = await _configManager.LoadAsync().ConfigureAwait(true);
-            if (string.IsNullOrWhiteSpace(settings.AiApiKey))
-            {
-                MessageBox.Show(this, "Cần AI API Key.", "Sinh script", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            SetAiGenScriptButtonsEnabled(false);
-            try
-            {
-                var modeLabel = IsDeepDiveModeTab() ? "Affiliate Deep" : "Slideshow";
-                foreach (var item in selected)
-                {
-                    try
-                    {
-                        var script = await _affiliateScriptPreviewService
-                            .GenerateVoiceoverPreviewAsync(item, settings, CancellationToken.None)
-                            .ConfigureAwait(true);
-                        item.ScriptPreview = (script ?? string.Empty).Trim();
-                        Log($"[Script] ({modeLabel}) Đã sinh script: {item.ProductName}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log("[Script] Lỗi: " + ex.Message);
-                    }
-                }
-
-                AfterAiVideoGenScriptEdited();
-            }
-            finally
-            {
-                SetAiGenScriptButtonsEnabled(true);
-            }
-        }
-
-        private void btnAffiliateEditScript_Click(object sender, EventArgs e)
-        {
-            if (!IsProductPipelineModeTab())
-            {
-                MessageBox.Show(this,
-                    "Chọn tab Slideshow hoặc Affiliate chuyên sâu trước khi sửa script.",
-                    "Sửa Script",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            if (!TryGetSingleSelectedAiVideoGenItem(out var item))
-            {
-                MessageBox.Show(this, "Chọn một dòng sản phẩm để sửa script.", "Sửa Script",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            using (var dlg = new Form
-            {
-                Text = "Sửa Voiceover / Script",
-                StartPosition = FormStartPosition.CenterParent,
-                Size = new System.Drawing.Size(720, 480),
-                BackColor = System.Drawing.Color.FromArgb(31, 34, 42),
-                ForeColor = System.Drawing.Color.Gainsboro
-            })
-            {
-                var box = new TextBox
-                {
-                    Multiline = true,
-                    Dock = DockStyle.Fill,
-                    ScrollBars = ScrollBars.Vertical,
-                    Text = item.ScriptPreview ?? string.Empty,
-                    BackColor = System.Drawing.Color.FromArgb(45, 49, 60),
-                    ForeColor = System.Drawing.Color.WhiteSmoke,
-                    BorderStyle = BorderStyle.FixedSingle,
-                    Font = new System.Drawing.Font("Segoe UI", 10F)
-                };
-                var panel = new Panel { Dock = DockStyle.Bottom, Height = 44 };
-                var btnOk = new Button
-                {
-                    Text = "Lưu",
-                    DialogResult = DialogResult.OK,
-                    Location = new System.Drawing.Point(12, 8),
-                    Size = new System.Drawing.Size(100, 28)
-                };
-                var btnCancel = new Button
-                {
-                    Text = "Hủy",
-                    DialogResult = DialogResult.Cancel,
-                    Location = new System.Drawing.Point(120, 8),
-                    Size = new System.Drawing.Size(100, 28)
-                };
-                panel.Controls.Add(btnOk);
-                panel.Controls.Add(btnCancel);
-                dlg.Controls.Add(box);
-                dlg.Controls.Add(panel);
-                dlg.AcceptButton = btnOk;
-                dlg.CancelButton = btnCancel;
-
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    item.ScriptPreview = box.Text?.Trim() ?? string.Empty;
-                    AfterAiVideoGenScriptEdited();
-                    Log("[Script] Đã lưu chỉnh sửa script.");
-                }
-            }
         }
 
         private void AfterAiVideoGenScriptEdited()
@@ -272,6 +146,15 @@ namespace tiktok_Omni
                 }
             }
 
+            if (list.Count == 0 && IsDeepDiveModeTab() && grid?.CurrentRow?.DataBoundItem is ShowcaseVideoItem video)
+            {
+                var scene = video.Scenes.FirstOrDefault();
+                if (scene != null)
+                {
+                    list.Add(scene);
+                }
+            }
+
             return list.Count > 0;
         }
 
@@ -314,7 +197,7 @@ namespace tiktok_Omni
             }
 
             var settings = _configManager.LoadAsync().GetAwaiter().GetResult();
-            var minSafety = (int)(numAffiliateMinSafety?.Value ?? 75);
+            const int minSafety = 75;
             var url = (candidate.VideoUrl ?? string.Empty).Trim();
             CancelAffiliateDeepDiveJobForUrl(url);
             EnqueueAffiliateDeepDiveJob(candidate, settings, minSafety, highPriority: true);

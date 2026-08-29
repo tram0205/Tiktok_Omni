@@ -433,10 +433,16 @@ namespace tiktok_Omni.Services
         public static ChromeDriver CreateLoginChromeDriver(
             string userDataDir,
             string proxyServer,
-            Action<string> logAction)
+            Action<string> logAction,
+            string userAgent = null)
         {
             GuardProfileLaunch(userDataDir, logAction);
-            var options = UndetectedChromeOptionsBuilder.Build(userDataDir, proxyServer ?? string.Empty);
+            var options = UndetectedChromeOptionsBuilder.Build(userDataDir, proxyServer ?? string.Empty, userAgent);
+            if (!string.IsNullOrWhiteSpace(userAgent))
+            {
+                logAction?.Invoke("[SELENIUM] user-agent: " + userAgent);
+            }
+
             var service = ChromeDriverService.CreateDefaultService();
             var driver = CreateDriver(service, options, logAction);
             ConfigureLoginDriverTimeouts(driver);

@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using tiktok_Omni.Services;
+using tiktok_Omni.Services.Affiliate;
 
 namespace tiktok_Omni
 {
@@ -97,7 +98,7 @@ namespace tiktok_Omni
                 if (lblHuntProductStatus != null && !lblHuntProductStatus.IsDisposed)
                 {
                     lblHuntProductStatus.Text = string.IsNullOrWhiteSpace(message)
-                        ? "Sẵn sàng — bấm «Quét sản phẩm» để bắt đầu."
+                        ? "Sẵn sàng — bấm «Săn SP Affiliate» để bắt đầu."
                         : message.Trim();
                     lblHuntProductStatus.ForeColor = busy
                         ? Color.FromArgb(140, 220, 160)
@@ -120,7 +121,7 @@ namespace tiktok_Omni
 
                 if (btnHuntProductAutoScan != null && !btnHuntProductAutoScan.IsDisposed)
                 {
-                    btnHuntProductAutoScan.Text = busy ? "Đang quét…" : "Quét sản phẩm";
+                    btnHuntProductAutoScan.Text = busy ? "Đang quét…" : "Săn SP Affiliate";
                 }
             }
 
@@ -157,6 +158,10 @@ namespace tiktok_Omni
                 {
                     status = "TikTok Shop: " + status.Substring("[Shop/Selenium]".Length).TrimStart(' ', '—', '-', ':');
                 }
+                else if (status.StartsWith("[TikTok API]", StringComparison.Ordinal))
+                {
+                    status = status.Substring("[TikTok API]".Length).TrimStart(' ', '—', '-', ':');
+                }
                 else if (status.StartsWith("[Affiliate]", StringComparison.Ordinal))
                 {
                     status = status.Substring("[Affiliate]".Length).TrimStart(' ', '—', '-', ':');
@@ -186,6 +191,29 @@ namespace tiktok_Omni
                    message.IndexOf("session not created", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private static HuntProductCandidate MapAffiliateToHuntProduct(AffiliateCandidate source, string profileName)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            var link = !string.IsNullOrWhiteSpace(source.VideoUrl)
+                ? source.VideoUrl.Trim()
+                : (source.LinkedProduct ?? string.Empty).Trim();
+
+            return new HuntProductCandidate
+            {
+                ProfileName = profileName ?? string.Empty,
+                SourcePlatform = string.IsNullOrWhiteSpace(source.SourcePlatform) ? "TikTok" : source.SourcePlatform.Trim(),
+                ProductName = string.IsNullOrWhiteSpace(source.ProductName) ? "TikTok Affiliate" : source.ProductName.Trim(),
+                ProductLink = link,
+                ImageUrl = source.ImageUrl ?? string.Empty,
+                Price = source.Price ?? string.Empty,
+                Commission = source.CommissionRate ?? string.Empty
+            };
+        }
+
         private async void btnHuntProductAutoScan_Click(object sender, EventArgs e)
         {
             var keyword = (txtHuntProductKeyword?.Text ?? string.Empty).Trim();
@@ -208,7 +236,7 @@ namespace tiktok_Omni
 
             btnHuntProductAutoScan.Enabled = false;
             EnsureGlobalLogExpanded();
-            SetHuntProductScanStatus("Bước 1/4: Chuẩn bị profile & từ khoá…", busy: true);
+            SetHuntProductScanStatus("Bước 1/4: Chuẩn bị từ khoá…", busy: true);
             try
             {
                 var settings = await _configManager.LoadAsync().ConfigureAwait(true);
@@ -221,7 +249,17 @@ namespace tiktok_Omni
 
                 var progressLog = CreateHuntProductProgressLogger();
                 progressLog("[Săn SP] Bước 2/4: Profile «" + profile + "», từ khoá «" + keyword + "»");
-                progressLog("[Săn SP] Mở Chrome mobile (giống app — tab Cửa hàng). Đóng hết Chrome nếu kẹt quá lâu.");
+                if (chkHuntProductTikTok?.Checked == true)
+                {
+                    if (!string.IsNullOrWhiteSpace(settings?.TikTokRapidApiKey))
+                    {
+                        progressLog("[Săn SP] TikTok: RapidAPI Get Top Products (key tab Cài đặt), lọc HH > 5%.");
+                    }
+                    else
+                    {
+                        progressLog("[Săn SP] TikTok: chưa có RapidAPI key — nhập key tab Cài đặt (bắt buộc, không dùng Chrome Chợ Affiliate).");
+                    }
+                }
 
                 ProfileScopedPaths.EnsureProfileVideoTypeHierarchy(settings.StorageRootPath, profile);
                 _lastHuntProductKeyword = keyword;
@@ -234,6 +272,7 @@ namespace tiktok_Omni
                     MaxResults = (int)(numHuntProductMaxResults?.Value ?? 30),
                     MinSales = (long)(numHuntProductMinSales?.Value ?? 0),
                     MinRating = numHuntProductMinRating?.Value ?? 0,
+                    MinCommissionPercent = TikTokApiService.DefaultMinAffiliateCommissionPercent,
                     ScanTikTok = chkHuntProductTikTok?.Checked == true,
                     ScanShopee = chkHuntProductShopee?.Checked == true
                 };
@@ -268,7 +307,7 @@ namespace tiktok_Omni
                 SetHuntProductScanStatus(
                     rows.Count > 0
                         ? "Xong — tìm thấy " + rows.Count + " sản phẩm."
-                        : "Xong — không có sản phẩm (xem Log phía dưới hoặc kiểm tra đăng nhập Affiliate).",
+                        : "Xong — không có sản phẩm (xem Log phía dưới).",
                     busy: false);
                 if (rows.Count == 0)
                 {
@@ -276,9 +315,10 @@ namespace tiktok_Omni
                         this,
                         "Không tìm thấy sản phẩm nào.\n\n" +
                         "Kiểm tra:\n" +
-                        "• Profile «" + profile + "» nên đăng nhập TikTok thường (Cài đặt → Đăng nhập TikTok thủ công) — không cần Affiliate Creator\n" +
-                        "• Đóng hết Google Chrome trước khi quét\n" +
-                        "• Thử từ khoá khác hoặc bật thêm Shopee\n" +
+                        "• Tab Cài đặt → TikTok RapidAPI key (tiktok-api23) đã Subscribe «Get Top Products»\n" +
+                        "• Thử từ khoá khác (tiếng Anh thường nhiều kết quả hơn) hoặc đổi country_code = US\n" +
+                        "• Lọc tự động chỉ giữ HH > 5% — thử từ khoá rộng hơn\n" +
+                        "• Bật thêm Shopee nếu cần nguồn khác\n" +
                         "• Xem panel Log phía dưới để biết chi tiết",
                         "Săn Link Sản phẩm",
                         MessageBoxButtons.OK,
@@ -294,7 +334,7 @@ namespace tiktok_Omni
             {
                 Log("Quét sản phẩm lỗi: " + ex.Message);
                 SetHuntProductScanStatus("Lỗi: " + ex.Message, busy: false);
-                MessageBox.Show(this, ex.Message, "Không mở được Chrome", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, ex.Message, "Săn SP Affiliate", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             catch (Exception ex)
             {
@@ -327,7 +367,7 @@ namespace tiktok_Omni
                     btnHuntProductAutoScan.Enabled = true;
                     if (btnHuntProductAutoScan.Text == "Đang quét…")
                     {
-                        btnHuntProductAutoScan.Text = "Quét sản phẩm";
+                        btnHuntProductAutoScan.Text = "Săn SP Affiliate";
                     }
                 }
             }

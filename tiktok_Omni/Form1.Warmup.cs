@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using tiktok_Omni.Helpers;
 using tiktok_Omni.Services;
 
 namespace tiktok_Omni
@@ -28,16 +29,19 @@ namespace tiktok_Omni
         private NumericUpDown numVideoCount;
         private NumericUpDown numWatchMin;
         private NumericUpDown numWatchMax;
+        private NumericUpDown numLikeProbability;
+        private NumericUpDown numShareProbability;
+        private NumericUpDown numCommentProbability;
         private CheckBox chkAutoComment;
         private RadioButton rbDryRun;
         private RadioButton rbLiveRun;
-        private Button btnStartWarmup;
         private Button btnQueueWarmup;
         private Button btnStartWarmupQueue;
-        private Button btnStopWarmupQueue;
         private Button btnPauseWarmupQueue;
+        private Button btnStopWarmupQueue;
+        private Button btnMoveQueueJobUp;
+        private Button btnMoveQueueJobDown;
         private Button btnRemoveQueueJob;
-        private CheckBox chkAutoResumeQueueOnStartup;
         private ComboBox cbQueueStatsRange;
         private DateTimePicker dtQueueStatsFrom;
         private DateTimePicker dtQueueStatsTo;
@@ -49,6 +53,7 @@ namespace tiktok_Omni
         private DataGridView dgvWarmupQueue;
         private ProgressBar pbWarmupProgress;
         private Label lblWarmupProgress;
+        private RichTextBox rtbWarmupLog;
         private CheckBox chkEnableWarmupSchedule;
         private DateTimePicker dtpWarmupSchedule;
         private System.Windows.Forms.Timer _warmupScheduleTimer;
@@ -66,149 +71,420 @@ namespace tiktok_Omni
         private bool _isWarmupQueuePaused;
         private bool _pauseNowRequested;
 
-        private const int WatchSecondsUiMax = 600; // must match numWatchMin/numWatchMax Maximum (seconds)
+        private const int WatchPercentageUiMax = 300;
+        private const int DefaultWatchPercentageMin = 80;
+        private const int DefaultWatchPercentageMax = 150;
+        private const int DefaultLikeProbability = 50;
+        private const int DefaultCommentProbability = 10;
+        private const int DefaultShareProbability = 20;
 
-        private static string FormatWatchRangeForQueue(int secMin, int secMax)
+        private static string FormatWatchRangeForQueue(int pctMin, int pctMax)
         {
-            return string.Format(CultureInfo.InvariantCulture, "{0}-{1} s (tổng)", secMin, secMax);
+            var lo = Math.Max(1, pctMin);
+            var hi = Math.Max(lo, pctMax);
+            return string.Format(CultureInfo.InvariantCulture, "{0}-{1}%", lo, hi);
         }
 
-        private static void ParseWatchRangeToSeconds(string watchRange, out int watchMin, out int watchMax)
+        private static void ParseWatchRangeToPercent(string watchRange, out int watchMin, out int watchMax)
         {
-            watchMin = 7;
-            watchMax = 18;
+            watchMin = DefaultWatchPercentageMin;
+            watchMax = DefaultWatchPercentageMax;
             if (string.IsNullOrWhiteSpace(watchRange))
             {
                 return;
             }
 
             var wr = watchRange.Trim();
+            if (wr.EndsWith("%", StringComparison.Ordinal))
+            {
+                wr = wr.Substring(0, wr.Length - 1).Trim();
+            }
+
             const string totalSuffix = " (tổng)";
             if (wr.EndsWith(totalSuffix, StringComparison.OrdinalIgnoreCase))
             {
                 wr = wr.Substring(0, wr.Length - totalSuffix.Length).Trim();
             }
 
-            if (wr.EndsWith(" s", StringComparison.OrdinalIgnoreCase))
+            if (wr.EndsWith(" phút", StringComparison.OrdinalIgnoreCase) ||
+                wr.EndsWith(" s", StringComparison.OrdinalIgnoreCase) ||
+                wr.EndsWith(" m", StringComparison.OrdinalIgnoreCase))
             {
-                var core = wr.Substring(0, wr.Length - 2).Trim();
-                var parts = core.Split('-');
-                if (parts.Length == 2 &&
-                    int.TryParse(parts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var sminS) &&
-                    int.TryParse(parts[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var smaxS))
-                {
-                    watchMin = Math.Max(3, sminS);
-                    watchMax = Math.Max(watchMin, smaxS);
-                }
-
                 return;
             }
 
-            if (wr.EndsWith(" m", StringComparison.OrdinalIgnoreCase))
+            var parts = wr.Split('-');
+            if (parts.Length == 2 &&
+                int.TryParse(parts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var minPct) &&
+                int.TryParse(parts[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxPct))
             {
-                var core = wr.Substring(0, wr.Length - 2).Trim();
-                var parts = core.Split('-');
-                if (parts.Length == 2 &&
-                    decimal.TryParse(parts[0].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var minM) &&
-                    decimal.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var maxM))
-                {
-                    watchMin = Math.Max(3, (int)Math.Round((double)minM * 60));
-                    watchMax = Math.Max(watchMin, (int)Math.Round((double)maxM * 60));
-                }
+                // BẢO VỆ: Chống load nhầm dữ liệu cũ (5-7 phút)
+                if (minPct < 30) minPct = DefaultWatchPercentageMin;
+                if (maxPct < 30) maxPct = DefaultWatchPercentageMax;
 
-                return;
-            }
-
-            var legacy = wr;
-            if (legacy.EndsWith("s", StringComparison.OrdinalIgnoreCase))
-            {
-                legacy = legacy.Substring(0, legacy.Length - 1);
-            }
-
-            var legacyParts = legacy.Split('-');
-            if (legacyParts.Length == 2 &&
-                int.TryParse(legacyParts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var smin) &&
-                int.TryParse(legacyParts[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var smax))
-            {
-                watchMin = Math.Max(3, smin);
-                watchMax = Math.Max(watchMin, smax);
+                watchMin = Math.Max(30, Math.Min(WatchPercentageUiMax, minPct));
+                watchMax = Math.Max(watchMin, Math.Min(WatchPercentageUiMax, maxPct));
             }
         }
 
-        private static int ReadWatchSecondsFromUi(NumericUpDown ctrl)
+        private static int ReadWatchPercentageFromUi(NumericUpDown ctrl, int fallback)
         {
             if (ctrl == null)
             {
-                return 7;
+                return fallback;
             }
 
-            return Math.Max(3, (int)ctrl.Value);
+            var val = (int)ctrl.Value;
+            // BẢO VỆ TỪ UI: Nếu người dùng lỡ nhập bé hơn 30, tự reset về mặc định (80%) để tránh bot bị nhận diện là spam
+            if (val < 30) return fallback;
+
+            return Math.Max(30, Math.Min(WatchPercentageUiMax, val));
         }
 
-        private static int ReadWatchSecondsFromUiOrDefault(NumericUpDown ctrl, int defaultSeconds)
+        private static void ApplyWatchPercentageToUi(NumericUpDown ctrl, int percent)
         {
-            return ctrl == null ? defaultSeconds : ReadWatchSecondsFromUi(ctrl);
-        }
-
-        private static void ApplyWatchSecondsToUi(NumericUpDown ctrl, int seconds)
-        {
-            if (ctrl == null || seconds <= 0)
+            if (ctrl == null)
             {
                 return;
             }
 
-            var sec = Math.Max((int)ctrl.Minimum, Math.Min((int)ctrl.Maximum, seconds));
-            ctrl.Value = sec;
+            // BẢO VỆ: Không cho hiển thị số rác lên UI
+            if (percent < 30) percent = DefaultWatchPercentageMin;
+
+            var value = Math.Max((int)ctrl.Minimum, Math.Min((int)ctrl.Maximum, percent));
+            ctrl.Value = value;
         }
 
-        private async void btnStartWarmup_Click(object sender, EventArgs e)
+        private static int ReadPercentFromUi(NumericUpDown ctrl, int fallback)
         {
-            if (btnStartWarmup != null)
+            if (ctrl == null)
             {
-                btnStartWarmup.Enabled = false;
+                return fallback;
             }
 
-            try
+            return Math.Max(0, Math.Min(100, (int)ctrl.Value));
+        }
+
+        private int ReadLikeProbabilityFromUi()
+        {
+            return ReadPercentFromUi(numLikeProbability, DefaultLikeProbability);
+        }
+
+        private int ReadShareProbabilityFromUi()
+        {
+            return ReadPercentFromUi(numShareProbability, DefaultShareProbability);
+        }
+
+        private int ReadCommentProbabilityFromUi()
+        {
+            if (chkAutoComment != null && !chkAutoComment.Checked)
             {
-                await RunStartWarmupFromUiAsync().ConfigureAwait(true);
+                return 0;
             }
-            finally
+
+            return ReadPercentFromUi(numCommentProbability, DefaultCommentProbability);
+        }
+
+        private static void ApplyPercentToUi(NumericUpDown ctrl, int percent, int fallbackWhenZero)
+        {
+            if (ctrl == null)
             {
-                if (btnStartWarmup != null && !btnStartWarmup.IsDisposed)
+                return;
+            }
+
+            var p = Math.Max(0, Math.Min(100, percent));
+            if (p > 0)
+            {
+                ctrl.Value = p;
+            }
+            else if (ctrl.Value <= 0)
+            {
+                ctrl.Value = fallbackWhenZero;
+            }
+        }
+
+        private void ApplyLikeProbabilityToUi(int percent)
+        {
+            ApplyPercentToUi(numLikeProbability, percent, DefaultLikeProbability);
+        }
+
+        private void ApplyShareProbabilityToUi(int percent)
+        {
+            ApplyPercentToUi(numShareProbability, percent, DefaultShareProbability);
+        }
+
+        private void ApplyCommentProbabilityToUi(int percent)
+        {
+            var p = Math.Max(0, Math.Min(100, percent));
+            if (chkAutoComment != null)
+            {
+                chkAutoComment.Checked = p > 0;
+            }
+
+            if (numCommentProbability != null)
+            {
+                numCommentProbability.Enabled = chkAutoComment == null || chkAutoComment.Checked;
+                // Nếu tắt comment (0) vẫn giữ giá trị ô để bật lại không mất % đã chọn.
+                if (p > 0)
                 {
-                    btnStartWarmup.Enabled = true;
+                    numCommentProbability.Value = p;
+                }
+                else if (numCommentProbability.Value <= 0)
+                {
+                    numCommentProbability.Value = DefaultCommentProbability;
                 }
             }
         }
 
-        private async Task RunStartWarmupFromUiAsync()
+        private static DateTime? ToUtcFromUiLocal(DateTime? local)
+        {
+            if (!local.HasValue)
+            {
+                return null;
+            }
+
+            var dt = local.Value;
+            if (dt.Kind == DateTimeKind.Unspecified)
+            {
+                dt = DateTime.SpecifyKind(dt, DateTimeKind.Local);
+            }
+
+            return dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
+        }
+
+        private static DateTime? ToLocalFromUtc(DateTime? utc)
+        {
+            if (!utc.HasValue)
+            {
+                return null;
+            }
+
+            var dt = utc.Value;
+            if (dt.Kind == DateTimeKind.Unspecified)
+            {
+                dt = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            }
+
+            return dt.ToLocalTime();
+        }
+
+        // Settings (AppSettings) vẫn có WatchSeconds* legacy — không còn bind vào numWatch* (% giữ chân).
+        private const int DefaultWatchMinutesMin = 5;
+        private const int DefaultWatchMinutesMax = 10;
+
+        private async void btnStartWarmupQueue_Click(object sender, EventArgs e)
+        {
+            await ExecuteWarmupRunFlowAsync(WarmupRunChoice.Cancel, skipPrompt: false).ConfigureAwait(true);
+        }
+
+        private async Task ExecuteWarmupRunFlowAsync(WarmupRunChoice forcedChoice, bool skipPrompt)
         {
             if (_isWarmupQueueRunning)
             {
-                Log("Queue is running. Stop queue before manual warm-up.");
                 return;
             }
 
             var saved = await _warmupStateManager.LoadAsync().ConfigureAwait(true);
-            if (saved != null
-                && saved.CompletedCount < saved.VideoCount
-                && btnStartWarmup != null
-                && string.Equals(btnStartWarmup.Text, "Tiếp tục", StringComparison.Ordinal))
+            var canResume = saved != null && saved.CompletedCount < saved.VideoCount;
+            var selectedRows = GetSelectedWarmupQueueItemsInDisplayOrder();
+            var runnableSelectedCount = selectedRows.Count(IsWarmupQueueRowRunnable);
+            var allRunnableCount = CountRunnableQueueRows();
+
+            WarmupRunChoice choice;
+            if (skipPrompt && forcedChoice != WarmupRunChoice.Cancel)
             {
-                ApplyWarmupStateToUi(saved);
-                await RunWarmupAsync(saved, true).ConfigureAwait(true);
+                choice = forcedChoice;
+            }
+            else if (allRunnableCount == 0 && !canResume)
+            {
+                LogWarmup("[QUEUE] Không có dòng sẵn sàng — thêm vào hàng đợi trước khi chạy.");
+                return;
+            }
+            else
+            {
+                using (var dlg = new FormWarmupRunChoice(
+                    canResume,
+                    saved?.CompletedCount ?? 0,
+                    saved?.VideoCount ?? 0,
+                    runnableSelectedCount,
+                    allRunnableCount))
+                {
+                    if (dlg.ShowDialog(this) != DialogResult.OK || dlg.Choice == WarmupRunChoice.Cancel)
+                    {
+                        return;
+                    }
+
+                    choice = dlg.Choice;
+                }
+            }
+
+            switch (choice)
+            {
+                case WarmupRunChoice.Resume:
+                    ApplyWarmupStateToUi(saved);
+                    await RunWarmupAsync(saved, true).ConfigureAwait(true);
+                    break;
+                case WarmupRunChoice.SelectedRows:
+                    await StartWarmupQueueAsync(selectedRows.Where(IsWarmupQueueRowRunnable).ToList()).ConfigureAwait(true);
+                    break;
+                case WarmupRunChoice.AllQueue:
+                    await StartWarmupQueueAsync(null).ConfigureAwait(true);
+                    break;
+            }
+        }
+
+        private async Task StartWarmupQueueAsync(System.Collections.Generic.List<WarmupQueueUiItem> selectedRowsOnly)
+        {
+            if (_isWarmupQueueRunning)
+            {
                 return;
             }
 
-            var state = BuildWarmupStateFromUi();
+            if (selectedRowsOnly != null && selectedRowsOnly.Count > 0)
+            {
+                var skippedNoKeywords = new System.Collections.Generic.List<WarmupQueueUiItem>();
+                var rowsWithKeywords = new System.Collections.Generic.List<WarmupQueueUiItem>();
+                foreach (var row in selectedRowsOnly)
+                {
+                    if (QueueRowHasKeywords(row))
+                    {
+                        rowsWithKeywords.Add(row);
+                    }
+                    else if (row != null)
+                    {
+                        skippedNoKeywords.Add(row);
+                    }
+                }
 
-            await RunWarmupAsync(state, false).ConfigureAwait(true);
+                foreach (var row in skippedNoKeywords)
+                {
+                    LogWarmup($"[QUEUE] WARNING: Dòng «{row.Profile}» chưa có từ khóa — bỏ qua.");
+                }
+
+                if (skippedNoKeywords.Count > 0)
+                {
+                    var skippedProfiles = string.Join(", ", skippedNoKeywords.Select(r => r.Profile));
+                    MessageBox.Show(
+                        $"{skippedNoKeywords.Count} dòng không có từ khóa và đã bỏ qua: {skippedProfiles}.\nBấm ô Keywords trên lưới để thêm rồi chạy lại.",
+                        "Warm-up Queue",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                }
+
+                if (rowsWithKeywords.Count == 0)
+                {
+                    LogWarmup("[QUEUE] Không có dòng đã chọn nào có từ khóa để chạy.");
+                    return;
+                }
+
+                var selectedSnapshots = BuildSnapshotsFromQueueRows(rowsWithKeywords, includeScheduledAsRunnable: true);
+                if (selectedSnapshots.Count == 0)
+                {
+                    LogWarmup("[QUEUE] Không có dòng đã chọn nào có thể chạy.");
+                    return;
+                }
+
+                _warmupQueueScheduler.ReplacePending(selectedSnapshots);
+                LogWarmup($"[QUEUE] Chạy {selectedSnapshots.Count} dòng đã chọn (trên → dưới).");
+            }
+            else
+            {
+                SyncSchedulerFromUi();
+                if (_warmupQueueScheduler.QueueCount == 0)
+                {
+                    LogWarmup("[QUEUE] No jobs to run.");
+                    return;
+                }
+
+                LogWarmup($"[QUEUE] Chạy cả bảng ({_warmupQueueScheduler.QueueCount} job).");
+            }
+
+            _isWarmupQueueRunning = true;
+            _isWarmupQueuePaused = false;
+            _pauseNowRequested = false;
+            _ = _warmupQueueStateManager.SavePausedFlagAsync(false);
+            btnStartWarmupQueue.Enabled = false;
+            btnQueueWarmup.Enabled = false;
+            ApplyWarmupQueueToolbarState();
+            _warmupQueueCancellation?.Dispose();
+            _warmupQueueCancellation = new CancellationTokenSource();
+            RefreshWarmupQueueStatus();
+
+            try
+            {
+                await _warmupQueueScheduler.RunAsync(
+                    RunWarmupQueueJobAsync,
+                    LogWarmup,
+                    _warmupQueueCancellation.Token,
+                    HandleQueueEvent,
+                    _ => SaveWarmupQueueSnapshotAsync(),
+                    WaitIfQueuePausedAsync).ConfigureAwait(true);
+                LogWarmup("[QUEUE] All jobs processed.");
+            }
+            catch (OperationCanceledException)
+            {
+                LogWarmup("[QUEUE] Queue stopped by user.");
+            }
+            finally
+            {
+                _isWarmupQueueRunning = false;
+                _isWarmupQueuePaused = false;
+                _pauseNowRequested = false;
+                btnStartWarmupQueue.Enabled = true;
+                btnQueueWarmup.Enabled = true;
+                ApplyWarmupQueueToolbarState();
+                _warmupQueueCancellation?.Dispose();
+                _warmupQueueCancellation = null;
+                _currentQueueJobCancellation?.Dispose();
+                _currentQueueJobCancellation = null;
+                await _warmupQueueStateManager.SavePausedFlagAsync(false).ConfigureAwait(true);
+                await RefreshResumeStateAsync().ConfigureAwait(true);
+                SyncSchedulerFromUi();
+                RefreshWarmupQueueStatus();
+                _ = SaveWarmupQueueSnapshotAsync();
+            }
+        }
+
+        private static bool QueueRowHasKeywords(WarmupQueueUiItem row) =>
+            !string.IsNullOrWhiteSpace(row?.Keywords);
+
+        private static bool IsWarmupQueueRowRunnable(WarmupQueueUiItem row)
+        {
+            if (row == null)
+            {
+                return false;
+            }
+
+            return row.Status == WarmupStatus.Pending
+                || row.Status == WarmupStatus.Failed
+                || row.Status == WarmupStatus.Skipped
+                || row.Status == WarmupStatus.Scheduled;
+        }
+
+        private int CountRunnableQueueRows()
+        {
+            if (_warmupQueueBindingList == null)
+            {
+                return 0;
+            }
+
+            var count = 0;
+            for (var i = 0; i < _warmupQueueBindingList.Count; i++)
+            {
+                if (IsWarmupQueueRowRunnable(_warmupQueueBindingList[i]))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
         private void btnQueueWarmup_Click(object sender, EventArgs e)
         {
             var state = BuildWarmupStateFromUi();
+
             const int defaultRetries = 2;
-            var isScheduled = state.ScheduledAtLocal.HasValue;
+            var isScheduled = state.ScheduledAtUtc.HasValue;
             if (!isScheduled)
             {
                 _warmupQueueScheduler.Enqueue(state, maxRetries: defaultRetries);
@@ -219,11 +495,13 @@ namespace tiktok_Omni
                 Profile = state.RunningProfileName,
                 Keywords = state.Keywords,
                 Videos = state.VideoCount,
-                WatchRange = FormatWatchRangeForQueue(state.WatchSecondsMin, state.WatchSecondsMax),
-                AutoComment = state.AutoComment,
+                WatchRange = FormatWatchRangeForQueue(state.WatchPercentageMin, state.WatchPercentageMax),
+                LikeProbability = state.LikeProbability,
+                ShareProbability = state.ShareProbability,
+                CommentProbability = state.CommentProbability,
                 DryRun = state.DryRun,
                 Status = isScheduled ? WarmupStatus.Scheduled : WarmupStatus.Pending,
-                ScheduledAtLocal = state.ScheduledAtLocal,
+                ScheduledAtUtc = state.ScheduledAtUtc,
                 RetryCount = 0,
                 MaxRetries = defaultRetries,
                 LastError = string.Empty,
@@ -231,9 +509,11 @@ namespace tiktok_Omni
                 NextRetryAtUtc = null
             });
             RefreshWarmupQueueStatus();
-            Log(isScheduled
-                ? $"[QUEUE] Đã lập lịch warm-up profile '{state.RunningProfileName}' lúc {state.ScheduledAtLocal:dd/MM/yyyy HH:mm}."
-                : $"[QUEUE] Added warm-up job for profile '{state.RunningProfileName}'.");
+            LogWarmup(isScheduled
+                ? $"[QUEUE] Đã lập lịch warm-up profile '{state.RunningProfileName}' lúc {ToLocalFromUtc(state.ScheduledAtUtc):dd/MM/yyyy HH:mm}."
+                : string.IsNullOrWhiteSpace(state.Keywords)
+                    ? $"[QUEUE] Added warm-up job for profile '{state.RunningProfileName}' (For You — chưa có từ khóa)."
+                    : $"[QUEUE] Added warm-up job for profile '{state.RunningProfileName}'.");
             _ = SaveWarmupQueueSnapshotAsync();
         }
 
@@ -244,21 +524,20 @@ namespace tiktok_Omni
                 return;
             }
 
-            var now = DateTime.Now;
             var promoted = false;
             for (var i = 0; i < _warmupQueueBindingList.Count; i++)
             {
                 var item = _warmupQueueBindingList[i];
                 if (item == null ||
                     item.Status != WarmupStatus.Scheduled ||
-                    !item.ScheduledAtLocal.HasValue ||
-                    item.ScheduledAtLocal.Value > now)
+                    !item.ScheduledAtUtc.HasValue ||
+                    item.ScheduledAtUtc.Value > DateTime.UtcNow)
                 {
                     continue;
                 }
 
                 item.Status = WarmupStatus.Pending;
-                item.ScheduledAtLocal = null;
+                item.ScheduledAtUtc = null;
                 promoted = true;
             }
 
@@ -271,85 +550,22 @@ namespace tiktok_Omni
             _ = SaveWarmupQueueSnapshotAsync();
             dgvWarmupQueue?.Refresh();
             RefreshWarmupQueueStatus();
-            Log("[QUEUE] Đã đến giờ — chuyển job lập lịch sang Pending.");
-
-            if (!_isWarmupQueueRunning && (_warmupQueueScheduler?.QueueCount ?? 0) > 0)
-            {
-                btnStartWarmupQueue.PerformClick();
-            }
-        }
-
-        private async void btnStartWarmupQueue_Click(object sender, EventArgs e)
-        {
-            if (_isWarmupQueueRunning)
-            {
-                return;
-            }
-
-            if (_warmupQueueScheduler.QueueCount == 0)
-            {
-                Log("[QUEUE] No jobs to run.");
-                return;
-            }
-            SyncSchedulerFromUi();
-
-            _isWarmupQueueRunning = true;
-            _pauseNowRequested = false;
-            btnStartWarmupQueue.Enabled = false;
-            btnStopWarmupQueue.Enabled = true;
-            ApplyWarmupQueueToolbarState();
-            btnStartWarmup.Enabled = false;
-            btnQueueWarmup.Enabled = false;
-            _warmupQueueCancellation?.Dispose();
-            _warmupQueueCancellation = new CancellationTokenSource();
-            RefreshWarmupQueueStatus();
-
-            try
-            {
-                await _warmupQueueScheduler.RunAsync(
-                    RunWarmupQueueJobAsync,
-                    Log,
-                    _warmupQueueCancellation.Token,
-                    HandleQueueEvent,
-                    _ => SaveWarmupQueueSnapshotAsync());
-                Log("[QUEUE] All jobs processed.");
-            }
-            catch (OperationCanceledException)
-            {
-                Log("[QUEUE] Queue stopped by user.");
-            }
-            finally
-            {
-                _isWarmupQueueRunning = false;
-                _isWarmupQueuePaused = false;
-                _pauseNowRequested = false;
-                btnStartWarmupQueue.Enabled = true;
-                btnStopWarmupQueue.Enabled = false;
-                ApplyWarmupQueueToolbarState();
-                btnStartWarmup.Enabled = true;
-                btnQueueWarmup.Enabled = true;
-                _warmupQueueCancellation?.Dispose();
-                _warmupQueueCancellation = null;
-                _currentQueueJobCancellation?.Dispose();
-                _currentQueueJobCancellation = null;
-                await _warmupQueueStateManager.SavePausedFlagAsync(false);
-                await RefreshResumeStateAsync();
-                RefreshWarmupQueueStatus();
-                _ = SaveWarmupQueueSnapshotAsync();
-            }
+            LogWarmup("[QUEUE] Đã đến giờ — chuyển job lập lịch sang Pending. Bấm «Chạy» để bắt đầu.");
         }
 
         private void btnStopWarmupQueue_Click(object sender, EventArgs e)
         {
-            if (_warmupQueueCancellation == null)
+            if (_warmupQueueCancellation == null && _warmupCancellation == null)
             {
                 return;
             }
 
-            btnStopWarmupQueue.Enabled = false;
             CancelWarmupBrowserWork();
-            Log("[QUEUE] Stopping queue...");
+            _pauseNowRequested = false;
+            _isWarmupQueuePaused = false;
+            LogWarmup(_isWarmupQueueRunning ? "[QUEUE] Dừng hẳn hàng đợi..." : "[QUEUE] Dừng hẳn warm-up.");
             _ = _warmupQueueStateManager.SavePausedFlagAsync(false);
+            ApplyWarmupQueueToolbarState();
         }
 
         private void btnPauseWarmupQueue_Click(object sender, EventArgs e)
@@ -363,15 +579,24 @@ namespace tiktok_Omni
             {
                 _isWarmupQueuePaused = false;
                 RefreshWarmupQueueStatus();
-                Log("[QUEUE] Queue resumed.");
+                LogWarmup("[QUEUE] Queue resumed.");
                 _ = _warmupQueueStateManager.SavePausedFlagAsync(false);
                 ApplyWarmupQueueToolbarState();
                 return;
             }
 
             _isWarmupQueuePaused = true;
+            _pauseNowRequested = true;
+            _currentQueueJobCancellation?.Cancel();
+            var pausedRow = FindQueueRow(_currentWarmupState);
+            if (pausedRow != null)
+            {
+                pausedRow.Status = WarmupStatus.Pending;
+            }
+
+            dgvWarmupQueue?.Refresh();
             RefreshWarmupQueueStatus();
-            Log("[QUEUE] Pause requested. Queue will pause after current job.");
+            LogWarmup("[QUEUE] Tạm dừng — dừng job hiện tại. Bấm «Tiếp tục» để chạy lại (job dở sẽ ở đầu hàng).");
             _ = _warmupQueueStateManager.SavePausedFlagAsync(true);
             ApplyWarmupQueueToolbarState();
         }
@@ -387,55 +612,71 @@ namespace tiktok_Omni
             _isWarmupQueuePaused = true;
             _currentQueueJobCancellation?.Cancel();
             RefreshWarmupQueueStatus();
-            Log("[QUEUE] Pause-now requested. Current job will be re-queued from latest progress.");
+            LogWarmup("[QUEUE] Pause-now requested. Current job will be re-queued from latest progress.");
             _ = _warmupQueueStateManager.SavePausedFlagAsync(true);
             ApplyWarmupQueueToolbarState();
         }
 
         private void btnRemoveQueueJob_Click(object sender, EventArgs e)
         {
-            if (dgvWarmupQueue?.SelectedRows == null || dgvWarmupQueue.SelectedRows.Count == 0)
+            RemoveSelectedWarmupQueueRows();
+        }
+
+        private void dgvWarmupQueue_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Delete || e.Alt || e.Control)
             {
-                Log("[QUEUE] Please select a queue job to remove.");
+                return;
+            }
+
+            RemoveSelectedWarmupQueueRows();
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+        }
+
+        private void RemoveSelectedWarmupQueueRows()
+        {
+            var selected = GetSelectedWarmupQueueItemsInDisplayOrder();
+            if (selected.Count == 0)
+            {
+                LogWarmup("[QUEUE] Please select a queue job to remove.");
                 return;
             }
 
             if (_isWarmupQueueRunning)
             {
-                Log("[QUEUE] Stop queue before removing jobs.");
+                LogWarmup("[QUEUE] Stop queue before removing jobs.");
                 return;
             }
 
-            var selected = dgvWarmupQueue.SelectedRows[0]?.DataBoundItem as WarmupQueueUiItem;
-            if (selected == null)
+            if (!UiConfirmHelper.ConfirmDeleteRows(this, selected.Count))
             {
                 return;
             }
 
-            var state = BuildStateFromQueueRow(selected);
-            var removed = _warmupQueueScheduler.RemoveFirstMatching(state);
-            if (removed)
+            foreach (var item in selected)
             {
-                _warmupQueueBindingList.Remove(selected);
-                SyncSchedulerFromUi();
-                RefreshWarmupQueueStatus();
-                Log($"[QUEUE] Removed job for profile '{selected.Profile}'.");
-                _ = SaveWarmupQueueSnapshotAsync();
+                _warmupQueueBindingList.Remove(item);
             }
+
+            SyncSchedulerFromUi();
+            RefreshWarmupQueueStatus();
+            LogWarmup($"[QUEUE] Removed {selected.Count} job(s).");
+            _ = SaveWarmupQueueSnapshotAsync();
         }
 
         private void btnClearWarmupQueue_Click(object sender, EventArgs e)
         {
             if (_isWarmupQueueRunning)
             {
-                Log("[QUEUE] Stop queue before clearing.");
+                LogWarmup("[QUEUE] Stop queue before clearing.");
                 return;
             }
 
             _warmupQueueScheduler.ClearPending();
             _warmupQueueBindingList?.Clear();
             RefreshWarmupQueueStatus();
-            Log("[QUEUE] Cleared all pending jobs.");
+            LogWarmup("[QUEUE] Cleared all pending jobs.");
             _ = SaveWarmupQueueSnapshotAsync();
         }
 
@@ -453,7 +694,7 @@ namespace tiktok_Omni
         {
             if (!state.DryRun && Services.WarmupBuildInfo.IsRunningStaleBuild(out var staleMsg))
             {
-                Log("[LIVE] ERROR: " + staleMsg);
+                LogWarmup("[LIVE] ERROR: " + staleMsg);
                 MessageBox.Show(
                     staleMsg,
                     "Can restart app",
@@ -462,53 +703,48 @@ namespace tiktok_Omni
                 return;
             }
 
-            btnStartWarmup.Enabled = false;
-            btnStopWarmupQueue.Enabled = true;
+            btnStartWarmupQueue.Enabled = false;
+            btnQueueWarmup.Enabled = false;
             _warmupCancellation?.Dispose();
             _warmupCancellation = RegisterActiveJobCancellation();
+            ApplyWarmupQueueToolbarState();
             _currentWarmupState = state;
             UpdateWarmupProgress(state.CompletedCount, state.VideoCount);
             await _warmupStateManager.SaveAsync(state).ConfigureAwait(true);
 
             try
             {
-                Log(isResume
+                LogWarmup(isResume
                     ? $"Resuming warm-up from {state.CompletedCount}/{state.VideoCount}..."
                     : "Warm-up started...");
                 await _tikTokAutomation.StartWarmupAsync(
-                    state.Keywords,
-                    state.VideoCount,
-                    state.AutoComment,
-                    state.DryRun,
-                    state.CompletedCount,
-                    state.WatchSecondsMin <= 0 ? ReadWatchSecondsFromUi(numWatchMin) : state.WatchSecondsMin,
-                    state.WatchSecondsMax <= 0 ? ReadWatchSecondsFromUi(numWatchMax) : state.WatchSecondsMax,
+                    state,
                     _warmupCancellation.Token,
-                    Log,
-                    HandleWarmupProgressUpdate,
-                    state.RunningProfileName);
-                Log("Warm-up completed.");
+                    LogWarmup,
+                    HandleWarmupProgressUpdate);
+                LogWarmup("Warm-up completed.");
                 await _warmupStateManager.ClearAsync();
                 _currentWarmupState = null;
             }
             catch (OperationCanceledException)
             {
-                Log("Warm-up stopped by user.");
+                LogWarmup("Warm-up stopped by user.");
             }
             catch (Exception ex)
             {
-                Log("Warm-up failed: " + ex.Message);
+                LogWarmup("Warm-up failed: " + ex.Message);
             }
             finally
             {
                 if (!_isWarmupQueueRunning)
                 {
-                    btnStartWarmup.Enabled = true;
+                    btnStartWarmupQueue.Enabled = true;
+                    btnQueueWarmup.Enabled = true;
                 }
 
-                ApplyWarmupQueueToolbarState();
                 _warmupCancellation = null;
                 DisposeActiveJobCancellation();
+                ApplyWarmupQueueToolbarState();
                 await RefreshResumeStateAsync().ConfigureAwait(true);
             }
         }
@@ -520,9 +756,9 @@ namespace tiktok_Omni
                 return;
             }
 
-            btnStopWarmupQueue.Enabled = false;
             CancelWarmupBrowserWork();
-            Log("Stopping warm-up...");
+            ApplyWarmupQueueToolbarState();
+            LogWarmup("Stopping warm-up...");
         }
 
         private async Task RunWarmupQueueJobAsync(WarmupRunState state, CancellationToken cancellationToken)
@@ -532,9 +768,22 @@ namespace tiktok_Omni
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(state.Keywords))
+            {
+                var profile = string.IsNullOrWhiteSpace(state.RunningProfileName) ? "default" : state.RunningProfileName.Trim();
+                var noKeywordsMessage = $"[QUEUE] Dòng «{profile}» chưa có từ khóa — bấm ô Keywords trên lưới để thêm rồi chạy lại.";
+                LogWarmup(noKeywordsMessage);
+                MessageBox.Show(
+                    noKeywordsMessage,
+                    "Warm-up Queue",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                throw new ArgumentException(noKeywordsMessage);
+            }
+
             if (!state.DryRun && Services.WarmupBuildInfo.IsRunningStaleBuild(out var staleQueueMsg))
             {
-                Log("[LIVE] ERROR: " + staleQueueMsg);
+                LogWarmup("[LIVE] ERROR: " + staleQueueMsg);
                 MessageBox.Show(staleQueueMsg, "Can restart app", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -558,40 +807,45 @@ namespace tiktok_Omni
                 _currentQueueJobCancellation?.Dispose();
                 _currentQueueJobCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 await _tikTokAutomation.StartWarmupAsync(
-                    state.Keywords,
-                    state.VideoCount,
-                    state.AutoComment,
-                    state.DryRun,
-                    state.CompletedCount,
-                    state.WatchSecondsMin <= 0 ? 7 : state.WatchSecondsMin,
-                    state.WatchSecondsMax <= 0 ? Math.Max(7, state.WatchSecondsMin) : state.WatchSecondsMax,
+                    state,
                     _currentQueueJobCancellation.Token,
-                    Log,
-                    HandleWarmupProgressUpdate,
-                    state.RunningProfileName);
+                    LogWarmup,
+                    HandleWarmupProgressUpdate);
                 await _warmupStateManager.ClearAsync();
             }
-            catch (OperationCanceledException) when (_pauseNowRequested)
+            catch (OperationCanceledException) when (_pauseNowRequested && !IsWarmupQueueStopRequested())
             {
                 _pauseNowRequested = false;
                 if (state.CompletedCount < state.VideoCount)
                 {
                     var resumeState = CloneWarmupState(state);
                     _warmupQueueScheduler.EnqueueFront(resumeState, 2);
-                    _warmupQueueBindingList?.Insert(0, new WarmupQueueUiItem
+                    var existingRow = FindQueueRow(state);
+                    if (existingRow != null)
                     {
-                        Profile = resumeState.RunningProfileName,
-                        Keywords = resumeState.Keywords,
-                        Videos = resumeState.VideoCount,
-                        WatchRange = FormatWatchRangeForQueue(resumeState.WatchSecondsMin, resumeState.WatchSecondsMax),
-                        AutoComment = resumeState.AutoComment,
-                        DryRun = resumeState.DryRun,
-                        Status = WarmupStatus.Pending,
-                        RetryCount = 0,
-                        MaxRetries = 2,
-                        LastError = string.Empty,
-                        CreatedAtUtc = DateTime.UtcNow
-                    });
+                        existingRow.Status = WarmupStatus.Pending;
+                        existingRow.LastError = string.Empty;
+                    }
+                    else
+                    {
+                        _warmupQueueBindingList?.Insert(0, new WarmupQueueUiItem
+                        {
+                            Profile = resumeState.RunningProfileName,
+                            Keywords = resumeState.Keywords,
+                            Videos = resumeState.VideoCount,
+                            WatchRange = FormatWatchRangeForQueue(resumeState.WatchPercentageMin, resumeState.WatchPercentageMax),
+                            LikeProbability = resumeState.LikeProbability,
+                            ShareProbability = resumeState.ShareProbability,
+                            CommentProbability = resumeState.CommentProbability,
+                            DryRun = resumeState.DryRun,
+                            Status = WarmupStatus.Pending,
+                            RetryCount = 0,
+                            MaxRetries = 2,
+                            LastError = string.Empty,
+                            CreatedAtUtc = DateTime.UtcNow
+                        });
+                    }
+
                     _ = SaveWarmupQueueSnapshotAsync();
                 }
 
@@ -601,9 +855,19 @@ namespace tiktok_Omni
             {
                 _currentQueueJobCancellation?.Dispose();
                 _currentQueueJobCancellation = null;
-                _currentWarmupState = null;
+                if (!_isWarmupQueuePaused)
+                {
+                    _currentWarmupState = null;
+                }
+
                 RefreshWarmupQueueStatus();
             }
+        }
+
+        private bool IsWarmupQueueStopRequested()
+        {
+            return (_warmupQueueCancellation?.IsCancellationRequested ?? false)
+                || (_warmupCancellation?.IsCancellationRequested ?? false);
         }
 
         private async Task WaitIfQueuePausedAsync(CancellationToken cancellationToken)
@@ -645,6 +909,11 @@ namespace tiktok_Omni
                 row.LastError = eventInfo.ErrorMessage ?? string.Empty;
                 row.NextRetryAtUtc = eventInfo.NextRetryAtUtc ?? DateTime.UtcNow.AddMinutes(5);
             }
+            else if (eventInfo.EventType == WarmupQueueEventType.Requeued)
+            {
+                row.Status = WarmupStatus.Pending;
+                row.LastError = string.Empty;
+            }
             else if (eventInfo.EventType == WarmupQueueEventType.Completed ||
                      eventInfo.EventType == WarmupQueueEventType.FailedPermanent ||
                      eventInfo.EventType == WarmupQueueEventType.Skipped)
@@ -654,13 +923,24 @@ namespace tiktok_Omni
                 {
                     row.LastError = eventInfo.ErrorMessage ?? string.Empty;
                 }
-                if (eventInfo.EventType == WarmupQueueEventType.Skipped)
+
+                if (eventInfo.EventType == WarmupQueueEventType.Completed)
+                {
+                    row.Status = WarmupStatus.Completed;
+                    row.LastError = string.Empty;
+                }
+                else if (eventInfo.EventType == WarmupQueueEventType.FailedPermanent)
+                {
+                    row.Status = WarmupStatus.Failed;
+                }
+                else
                 {
                     row.Status = WarmupStatus.Skipped;
                 }
+
+                row.RetryAttempt = 0;
                 row.NextRetryAtUtc = null;
                 _ = AppendQueueHistoryAsync(eventInfo, row);
-                _warmupQueueBindingList.Remove(row);
                 _ = SaveWarmupQueueSnapshotAsync();
             }
 
@@ -705,16 +985,23 @@ namespace tiktok_Omni
             _currentWarmupState.CompletedCount = completed;
             _currentWarmupState.VideoCount = total;
             _currentWarmupState.LastUpdatedUtc = DateTime.UtcNow;
-            await _warmupStateManager.SaveAsync(_currentWarmupState);
+            try
+            {
+                await _warmupStateManager.SaveAsync(_currentWarmupState).ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                LogWarmup("[WARN] Không lưu warmup_state: " + ex.Message);
+            }
         }
 
         private async Task RefreshResumeStateAsync()
         {
             var state = await _warmupStateManager.LoadAsync();
             var canResume = state != null && state.CompletedCount < state.VideoCount;
-            if (!_isWarmupQueueRunning && _warmupCancellation == null)
+            if (canResume && !_isWarmupQueueRunning && _warmupCancellation == null && lblWarmupQueueStatus != null)
             {
-                ApplyWarmupStartButtonResumeState(btnStartWarmup, canResume);
+                RefreshWarmupQueueStatus();
             }
         }
 
@@ -723,16 +1010,14 @@ namespace tiktok_Omni
             txtKeywords.Text = state.Keywords;
             SelectRunningProfileInUi(state.RunningProfileName);
             numVideoCount.Value = Math.Max(numVideoCount.Minimum, Math.Min(numVideoCount.Maximum, state.VideoCount));
-            if (state.WatchSecondsMin > 0)
-            {
-                ApplyWatchSecondsToUi(numWatchMin, state.WatchSecondsMin);
-            }
 
-            if (state.WatchSecondsMax > 0)
-            {
-                ApplyWatchSecondsToUi(numWatchMax, state.WatchSecondsMax);
-            }
-            chkAutoComment.Checked = state.AutoComment;
+            // SỬA CHỖ NÀY: Dùng hàm ApplyWatchPercentageToUi để ép UI hiện đúng số an toàn
+            ApplyWatchPercentageToUi(numWatchMin, state.WatchPercentageMin);
+            ApplyWatchPercentageToUi(numWatchMax, state.WatchPercentageMax);
+            ApplyLikeProbabilityToUi(state.LikeProbability);
+            ApplyShareProbabilityToUi(state.ShareProbability);
+            ApplyCommentProbabilityToUi(state.CommentProbability);
+
             rbDryRun.Checked = state.DryRun;
             rbLiveRun.Checked = !state.DryRun;
             UpdateWarmupProgress(state.CompletedCount, state.VideoCount);
@@ -743,21 +1028,30 @@ namespace tiktok_Omni
             DateTime? scheduledAt = null;
             if (chkEnableWarmupSchedule != null && chkEnableWarmupSchedule.Checked && dtpWarmupSchedule != null)
             {
-                scheduledAt = dtpWarmupSchedule.Value;
+                // CHUYỂN SANG UTC KHI LƯU VÀO STATE
+                scheduledAt = dtpWarmupSchedule.Value.ToUniversalTime();
             }
+
+            var watchMin = ReadWatchPercentageFromUi(numWatchMin, DefaultWatchPercentageMin);
+            var watchMax = Math.Max(watchMin, ReadWatchPercentageFromUi(numWatchMax, DefaultWatchPercentageMax));
 
             return new WarmupRunState
             {
                 Keywords = txtKeywords.Text.Trim(),
                 RunningProfileName = cbRunningProfile?.SelectedItem?.ToString() ?? "default",
                 VideoCount = (int)numVideoCount.Value,
-                WatchSecondsMin = ReadWatchSecondsFromUi(numWatchMin),
-                WatchSecondsMax = Math.Max(ReadWatchSecondsFromUi(numWatchMin), ReadWatchSecondsFromUi(numWatchMax)),
-                AutoComment = chkAutoComment.Checked,
+
+                // Percent và Probability từ UI (numWatchMin/Max = giữ chân %)
+                WatchPercentageMin = watchMin,
+                WatchPercentageMax = watchMax,
+                LikeProbability = ReadLikeProbabilityFromUi(),
+                CommentProbability = ReadCommentProbabilityFromUi(),
+                ShareProbability = ReadShareProbabilityFromUi(),
+
                 DryRun = rbDryRun.Checked,
                 CompletedCount = 0,
                 LastUpdatedUtc = DateTime.UtcNow,
-                ScheduledAtLocal = scheduledAt
+                ScheduledAtUtc = scheduledAt // Đã đổi tên
             };
         }
         private void RefreshWarmupQueueStatus()
@@ -794,6 +1088,30 @@ namespace tiktok_Omni
             ApplyWarmupQueueToolbarState();
         }
 
+        private void PersistWarmupQueueOnAppExit()
+        {
+            try
+            {
+                var saveTask = Task.Run(async () =>
+                {
+                    if ((_warmupQueueScheduler?.QueueCount ?? 0) > 0 || _isWarmupQueueRunning)
+                    {
+                        await _warmupQueueStateManager.SavePausedFlagAsync(true).ConfigureAwait(false);
+                    }
+
+                    await SaveWarmupQueueSnapshotAsync().ConfigureAwait(false);
+                });
+                if (!saveTask.Wait(TimeSpan.FromSeconds(3)))
+                {
+                    // Không chặn thoát app nếu ghi file chậm.
+                }
+            }
+            catch
+            {
+                // Best-effort on exit.
+            }
+        }
+
         private async Task LoadWarmupQueueAsync()
         {
             try
@@ -807,18 +1125,20 @@ namespace tiktok_Omni
                         continue;
                     }
 
-                    var scheduledAt = snapshot.State.ScheduledAtLocal;
-                    var isScheduled = scheduledAt.HasValue && scheduledAt.Value > DateTime.Now;
+                    var scheduledAtUtc = snapshot.State.ScheduledAtUtc;
+                    var isScheduled = scheduledAtUtc.HasValue && scheduledAtUtc.Value > DateTime.UtcNow;
                     _warmupQueueBindingList.Add(new WarmupQueueUiItem
                     {
                         Profile = snapshot.State.RunningProfileName,
                         Keywords = snapshot.State.Keywords,
                         Videos = snapshot.State.VideoCount,
-                        WatchRange = FormatWatchRangeForQueue(snapshot.State.WatchSecondsMin, snapshot.State.WatchSecondsMax),
-                        AutoComment = snapshot.State.AutoComment,
+                        WatchRange = FormatWatchRangeForQueue(snapshot.State.WatchPercentageMin, snapshot.State.WatchPercentageMax),
+                        LikeProbability = snapshot.State.LikeProbability,
+                        ShareProbability = snapshot.State.ShareProbability,
+                        CommentProbability = snapshot.State.CommentProbability,
                         DryRun = snapshot.State.DryRun,
                         Status = isScheduled ? WarmupStatus.Scheduled : WarmupStatus.Pending,
-                        ScheduledAtLocal = isScheduled ? scheduledAt : null,
+                        ScheduledAtUtc = isScheduled ? scheduledAtUtc : null,
                         RetryCount = snapshot.RetryCount,
                         MaxRetries = snapshot.MaxRetries,
                         LastError = snapshot.LastError ?? string.Empty,
@@ -832,7 +1152,7 @@ namespace tiktok_Omni
             }
             catch (Exception ex)
             {
-                Log("[QUEUE] Failed to load queue state: " + ex.Message);
+                LogWarmup("[QUEUE] Failed to load queue state: " + ex.Message);
             }
         }
 
@@ -845,7 +1165,7 @@ namespace tiktok_Omni
             }
             catch (Exception ex)
             {
-                Log("[QUEUE] Failed to persist queue state: " + ex.Message);
+                LogWarmup("[QUEUE] Failed to persist queue state: " + ex.Message);
             }
         }
 
@@ -854,6 +1174,103 @@ namespace tiktok_Omni
             var snapshots = BuildSnapshotsFromUi(includeScheduledRows: false);
             _warmupQueueScheduler.ReplacePending(snapshots);
             RefreshWarmupQueueStatus();
+        }
+
+        private List<WarmupQueueUiItem> GetSelectedWarmupQueueItemsInDisplayOrder()
+        {
+            var result = new List<WarmupQueueUiItem>();
+            if (dgvWarmupQueue?.Rows == null || dgvWarmupQueue.SelectedRows == null || dgvWarmupQueue.SelectedRows.Count == 0)
+            {
+                return result;
+            }
+
+            var selected = new HashSet<WarmupQueueUiItem>();
+            foreach (DataGridViewRow row in dgvWarmupQueue.SelectedRows)
+            {
+                if (row?.DataBoundItem is WarmupQueueUiItem item)
+                {
+                    selected.Add(item);
+                }
+            }
+
+            if (selected.Count == 0)
+            {
+                return result;
+            }
+
+            foreach (DataGridViewRow row in dgvWarmupQueue.Rows)
+            {
+                if (row?.DataBoundItem is WarmupQueueUiItem item && selected.Contains(item))
+                {
+                    result.Add(item);
+                }
+            }
+
+            return result;
+        }
+
+        private List<WarmupQueueSnapshotItem> BuildSnapshotsFromQueueRows(
+            IEnumerable<WarmupQueueUiItem> rows,
+            bool includeScheduledAsRunnable = false)
+        {
+            var snapshots = new List<WarmupQueueSnapshotItem>();
+            if (rows == null)
+            {
+                return snapshots;
+            }
+
+            foreach (var row in rows)
+            {
+                if (row == null)
+                {
+                    continue;
+                }
+
+                if (row.Status == WarmupStatus.Completed || row.Status == WarmupStatus.Running)
+                {
+                    continue;
+                }
+
+                if (row.Status == WarmupStatus.Scheduled)
+                {
+                    if (!includeScheduledAsRunnable)
+                    {
+                        continue;
+                    }
+
+                    row.Status = WarmupStatus.Pending;
+                    row.ScheduledAtUtc = null;
+                }
+                else if (!IsWarmupQueueRunnableStatus(row.Status))
+                {
+                    continue;
+                }
+
+                var state = BuildStateFromQueueRow(row);
+                if (includeScheduledAsRunnable)
+                {
+                    state.ScheduledAtUtc = null;
+                }
+
+                snapshots.Add(new WarmupQueueSnapshotItem
+                {
+                    State = state,
+                    MaxRetries = row.MaxRetries < 0 ? 0 : row.MaxRetries,
+                    CreatedAtUtc = row.CreatedAtUtc == default(DateTime) ? DateTime.UtcNow : row.CreatedAtUtc,
+                    RetryCount = Math.Max(0, row.RetryCount),
+                    LastError = row.LastError ?? string.Empty,
+                    NextRetryAtUtc = row.NextRetryAtUtc
+                });
+            }
+
+            return snapshots;
+        }
+
+        private static bool IsWarmupQueueRunnableStatus(WarmupStatus status)
+        {
+            return status == WarmupStatus.Pending
+                || status == WarmupStatus.Failed
+                || status == WarmupStatus.Skipped;
         }
 
         private List<WarmupQueueSnapshotItem> BuildSnapshotsFromUi(bool includeScheduledRows = true)
@@ -873,15 +1290,18 @@ namespace tiktok_Omni
                 }
 
                 var isScheduledRow = row.Status == WarmupStatus.Scheduled;
-                if (!includeScheduledRows && isScheduledRow)
+                if (!includeScheduledRows)
                 {
-                    continue;
+                    if (isScheduledRow || !IsWarmupQueueRunnableStatus(row.Status))
+                    {
+                        continue;
+                    }
                 }
 
                 var state = BuildStateFromQueueRow(row);
                 if (isScheduledRow)
                 {
-                    state.ScheduledAtLocal = row.ScheduledAtLocal;
+                    state.ScheduledAtUtc = row.ScheduledAtUtc;
                 }
 
                 snapshots.Add(new WarmupQueueSnapshotItem
@@ -913,12 +1333,12 @@ namespace tiktok_Omni
                     continue;
                 }
 
-                ParseWatchRangeToSeconds(row.WatchRange, out var rowWatchMin, out var rowWatchMax);
+                ParseWatchRangeToPercent(row.WatchRange, out var rowWatchMin, out var rowWatchMax);
                 if (string.Equals(row.Profile ?? string.Empty, state.RunningProfileName ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(row.Keywords ?? string.Empty, state.Keywords ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
                     row.Videos == state.VideoCount &&
-                    rowWatchMin == state.WatchSecondsMin &&
-                    rowWatchMax == state.WatchSecondsMax)
+                    rowWatchMin == state.WatchPercentageMin &&
+                    rowWatchMax == state.WatchPercentageMax)
                 {
                     return row;
                 }
@@ -929,22 +1349,20 @@ namespace tiktok_Omni
 
         private WarmupRunState BuildStateFromQueueRow(WarmupQueueUiItem row)
         {
-            ParseWatchRangeToSeconds(row?.WatchRange, out var watchMin, out var watchMax);
-
-            // Use current UI run mode / auto-comment when executing queue (avoids stale Dry Run on old rows).
-            var autoComment = chkAutoComment?.Checked ?? (row?.AutoComment ?? true);
-            var dryRun = rbDryRun?.Checked ?? (row?.DryRun ?? false);
+            ParseWatchRangeToPercent(row?.WatchRange, out var watchMin, out var watchMax);
 
             return new WarmupRunState
             {
                 RunningProfileName = row?.Profile ?? "default",
                 Keywords = row?.Keywords ?? string.Empty,
                 VideoCount = row?.Videos ?? 0,
-                WatchSecondsMin = watchMin,
-                WatchSecondsMax = watchMax,
-                AutoComment = autoComment,
-                DryRun = dryRun,
-                ScheduledAtLocal = row?.ScheduledAtLocal
+                WatchPercentageMin = watchMin,
+                WatchPercentageMax = watchMax,
+                LikeProbability = row?.LikeProbability ?? ReadLikeProbabilityFromUi(),
+                CommentProbability = row?.CommentProbability ?? ReadCommentProbabilityFromUi(),
+                ShareProbability = row?.ShareProbability ?? ReadShareProbabilityFromUi(),
+                DryRun = row?.DryRun ?? false,
+                ScheduledAtUtc = row?.ScheduledAtUtc
             };
         }
 
@@ -960,25 +1378,29 @@ namespace tiktok_Omni
                 Keywords = source.Keywords,
                 RunningProfileName = source.RunningProfileName,
                 VideoCount = source.VideoCount,
-                WatchSecondsMin = source.WatchSecondsMin,
-                WatchSecondsMax = source.WatchSecondsMax,
-                AutoComment = source.AutoComment,
+                WatchPercentageMin = source.WatchPercentageMin,
+                WatchPercentageMax = source.WatchPercentageMax,
+                LikeProbability = source.LikeProbability,
+                CommentProbability = source.CommentProbability,
+                ShareProbability = source.ShareProbability,
                 DryRun = source.DryRun,
                 CompletedCount = source.CompletedCount,
                 LastUpdatedUtc = source.LastUpdatedUtc,
-                ScheduledAtLocal = source.ScheduledAtLocal
+                ScheduledAtUtc = source.ScheduledAtUtc
             };
         }
 
-        private void dgvWarmupQueue_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+        private void dgvWarmupQueue_CellClick(object sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0 || _isWarmupQueueRunning || _warmupQueueBindingList == null)
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || dgvWarmupQueue == null)
             {
                 return;
             }
 
             var column = dgvWarmupQueue.Columns[e.ColumnIndex];
-            if (!string.Equals(column?.DataPropertyName, "MaxRetries", StringComparison.Ordinal))
+            if (column == null ||
+                (!string.Equals(column.Name, "colWarmupScheduledAt", StringComparison.Ordinal) &&
+                 !string.Equals(column.DataPropertyName, "ScheduledAtLabel", StringComparison.Ordinal)))
             {
                 return;
             }
@@ -989,19 +1411,204 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (row.MaxRetries < 0)
+            OpenWarmupSchedulePicker(row, e.RowIndex);
+        }
+
+        private void OpenWarmupSchedulePicker(WarmupQueueUiItem row, int rowIndex)
+        {
+            if (row == null)
             {
-                row.MaxRetries = 0;
-            }
-            else if (row.MaxRetries > 10)
-            {
-                row.MaxRetries = 10;
+                return;
             }
 
-            dgvWarmupQueue.Refresh();
+            if (_isWarmupQueueRunning && row.Status == WarmupStatus.Running)
+            {
+                LogWarmup("[QUEUE] Không đổi lịch khi job đang chạy.");
+                return;
+            }
+
+            using (var dlg = new FormSchedulePicker(ToLocalFromUtc(row.ScheduledAtUtc), row.Profile))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                ApplyWarmupScheduleFromPicker(row, dlg.ResultScheduledAt);
+                if (rowIndex >= 0 && rowIndex < dgvWarmupQueue.Rows.Count)
+                {
+                    dgvWarmupQueue.InvalidateRow(rowIndex);
+                }
+                else
+                {
+                    dgvWarmupQueue.Refresh();
+                }
+
+                var listIndex = _warmupQueueBindingList?.IndexOf(row) ?? -1;
+                if (listIndex >= 0)
+                {
+                    _warmupQueueBindingList.ResetItem(listIndex);
+                }
+
+                SyncSchedulerFromUi();
+                RefreshWarmupQueueStatus();
+                _ = SaveWarmupQueueSnapshotAsync();
+            }
+        }
+
+        private void ApplyWarmupScheduleFromPicker(WarmupQueueUiItem row, DateTime? scheduledAt)
+        {
+            if (row == null)
+            {
+                return;
+            }
+
+            if (row.Status == WarmupStatus.Running ||
+                row.Status == WarmupStatus.Completed)
+            {
+                return;
+            }
+
+            if (!scheduledAt.HasValue || scheduledAt.Value <= DateTime.Now.AddMinutes(1))
+            {
+                row.ScheduledAtUtc = null;
+                if (row.Status == WarmupStatus.Scheduled)
+                {
+                    row.Status = WarmupStatus.Pending;
+                }
+
+                LogWarmup($"[QUEUE] '{row.Profile}' → Đăng ngay.");
+                return;
+            }
+
+            // Picker trả giờ local → lưu UTC
+            row.ScheduledAtUtc = ToUtcFromUiLocal(scheduledAt);
+            row.Status = WarmupStatus.Scheduled;
+            LogWarmup($"[QUEUE] '{row.Profile}' lập lịch lúc {scheduledAt:dd/MM/yyyy HH:mm}.");
+        }
+
+        private void dgvWarmupQueue_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || dgvWarmupQueue == null)
+            {
+                return;
+            }
+
+            var column = dgvWarmupQueue.Columns[e.ColumnIndex];
+            if (column?.ReadOnly == true)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            var row = dgvWarmupQueue.Rows[e.RowIndex]?.DataBoundItem as WarmupQueueUiItem;
+            if (row == null)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            if (row.Status == WarmupStatus.Running || row.Status == WarmupStatus.Completed)
+            {
+                LogWarmup("[QUEUE] Không sửa job đang chạy hoặc đã xong.");
+                e.Cancel = true;
+            }
+        }
+
+        private void dgvWarmupQueue_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            e.ThrowException = false;
+            var columnName = e.ColumnIndex >= 0 && dgvWarmupQueue != null
+                ? dgvWarmupQueue.Columns[e.ColumnIndex]?.HeaderText ?? "?"
+                : "?";
+            LogWarmup("[QUEUE] Giá trị không hợp lệ ở cột «" + columnName + "».");
+        }
+
+        private void dgvWarmupQueue_CellEndEdit(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || dgvWarmupQueue == null || _warmupQueueBindingList == null)
+            {
+                return;
+            }
+
+            var column = dgvWarmupQueue.Columns[e.ColumnIndex];
+            var row = dgvWarmupQueue.Rows[e.RowIndex]?.DataBoundItem as WarmupQueueUiItem;
+            if (column == null || row == null || column.ReadOnly)
+            {
+                return;
+            }
+
+            var prop = column.DataPropertyName ?? string.Empty;
+            NormalizeWarmupQueueRow(row, prop);
+
+            var listIndex = _warmupQueueBindingList.IndexOf(row);
+            if (listIndex >= 0)
+            {
+                _warmupQueueBindingList.ResetItem(listIndex);
+            }
+
+            dgvWarmupQueue.InvalidateRow(e.RowIndex);
             SyncSchedulerFromUi();
+            RefreshWarmupQueueStatus();
             _ = SaveWarmupQueueSnapshotAsync();
-            Log($"[QUEUE] Updated MaxRetries for '{row.Profile}' to {row.MaxRetries}.");
+            LogWarmup("[QUEUE] Đã cập nhật «" + row.Profile + "» — " + column.HeaderText + ".");
+        }
+
+        private static void NormalizeWarmupQueueRow(WarmupQueueUiItem row, string editedProperty)
+        {
+            if (row == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(editedProperty) ||
+                string.Equals(editedProperty, "Profile", StringComparison.Ordinal))
+            {
+                row.Profile = string.IsNullOrWhiteSpace(row.Profile) ? "default" : row.Profile.Trim();
+            }
+
+            if (string.IsNullOrEmpty(editedProperty) ||
+                string.Equals(editedProperty, "Keywords", StringComparison.Ordinal))
+            {
+                row.Keywords = (row.Keywords ?? string.Empty).Trim();
+            }
+
+            if (string.IsNullOrEmpty(editedProperty) ||
+                string.Equals(editedProperty, "Videos", StringComparison.Ordinal))
+            {
+                row.Videos = Math.Max(1, Math.Min(1000, row.Videos));
+            }
+
+            if (string.IsNullOrEmpty(editedProperty) ||
+                string.Equals(editedProperty, "WatchRange", StringComparison.Ordinal))
+            {
+                ParseWatchRangeToPercent(row.WatchRange, out var watchMin, out var watchMax);
+                row.WatchRange = FormatWatchRangeForQueue(watchMin, watchMax);
+            }
+
+            if (string.IsNullOrEmpty(editedProperty) ||
+                string.Equals(editedProperty, "LikeProbability", StringComparison.Ordinal))
+            {
+                row.LikeProbability = Math.Max(0, Math.Min(100, row.LikeProbability));
+            }
+
+            if (string.IsNullOrEmpty(editedProperty) ||
+                string.Equals(editedProperty, "ShareProbability", StringComparison.Ordinal))
+            {
+                row.ShareProbability = Math.Max(0, Math.Min(100, row.ShareProbability));
+            }
+
+            if (string.IsNullOrEmpty(editedProperty) ||
+                string.Equals(editedProperty, "CommentProbability", StringComparison.Ordinal))
+            {
+                row.CommentProbability = Math.Max(0, Math.Min(100, row.CommentProbability));
+            }
+
+            if (string.IsNullOrEmpty(editedProperty) ||
+                string.Equals(editedProperty, "RunModeLabel", StringComparison.Ordinal))
+            {
+                row.RunModeLabel = string.IsNullOrWhiteSpace(row.RunModeLabel) ? "Live" : row.RunModeLabel.Trim();
+            }
         }
         private async Task AppendQueueHistoryAsync(WarmupQueueRunEvent eventInfo, WarmupQueueUiItem row)
         {
@@ -1033,7 +1640,7 @@ namespace tiktok_Omni
             }
             catch (Exception ex)
             {
-                Log("[QUEUE] Failed to append history: " + ex.Message);
+                LogWarmup("[QUEUE] Failed to append history: " + ex.Message);
             }
         }
 
@@ -1041,7 +1648,7 @@ namespace tiktok_Omni
         {
             _warmupQueueHistory = await _warmupQueueHistoryManager.LoadAsync();
             RefreshQueueStatsSummary();
-            Log("[QUEUE] Stats refreshed.");
+            LogWarmup("[QUEUE] Stats refreshed.");
         }
 
         private void btnOpenQueueHistory_Click(object sender, EventArgs e)
@@ -1169,7 +1776,6 @@ namespace tiktok_Omni
                 SelectionForeColor = Color.WhiteSmoke
             };
             grid.EnableHeadersVisualStyles = false;
-            ApplyAppGridHeaderChrome(grid);
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "FinishedAtUtc", HeaderText = "Finished (UTC)", FillWeight = 14 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Profile", HeaderText = "Profile", FillWeight = 12 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Keywords", HeaderText = "Keywords", FillWeight = 20 });
@@ -1177,6 +1783,8 @@ namespace tiktok_Omni
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Attempts", HeaderText = "Attempts", FillWeight = 8 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Result", HeaderText = "Result", FillWeight = 10 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Error", HeaderText = "Error", FillWeight = 28 });
+            ApplyAppGridChrome(grid);
+            EnsureAppGridRowHeights(grid);
 
             Action refreshGrid = () =>
             {
@@ -1192,6 +1800,7 @@ namespace tiktok_Omni
                          (r.Error ?? string.Empty).IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0))
                     .ToList();
                 grid.DataSource = new BindingList<WarmupQueueHistoryRecord>(filtered);
+                EnsureAppGridRowHeights(grid);
             };
 
             txtSearch.TextChanged += (s, a) => refreshGrid();
@@ -1270,13 +1879,15 @@ namespace tiktok_Omni
                             Keywords = item.Keywords,
                             VideoCount = Math.Max(1, item.Videos),
                             CompletedCount = 0,
-                            AutoComment = chkAutoComment?.Checked ?? false,
+                            CommentProbability = ReadCommentProbabilityFromUi(),
+                            LikeProbability = ReadLikeProbabilityFromUi(),
+                            ShareProbability = ReadShareProbabilityFromUi(),
                             DryRun = rbDryRun?.Checked ?? false,
                             RunningProfileName = item.Profile,
-                            WatchSecondsMin = ReadWatchSecondsFromUiOrDefault(numWatchMin, 7),
-                            WatchSecondsMax = Math.Max(
-                                ReadWatchSecondsFromUiOrDefault(numWatchMin, 7),
-                                ReadWatchSecondsFromUiOrDefault(numWatchMax, 18))
+                            WatchPercentageMin = ReadWatchPercentageFromUi(numWatchMin, DefaultWatchPercentageMin),
+                            WatchPercentageMax = Math.Max(
+                                ReadWatchPercentageFromUi(numWatchMin, DefaultWatchPercentageMin),
+                                ReadWatchPercentageFromUi(numWatchMax, DefaultWatchPercentageMax))
                         };
                         _warmupQueueScheduler.Enqueue(state, 2);
                         _warmupQueueBindingList.Add(new WarmupQueueUiItem
@@ -1284,8 +1895,10 @@ namespace tiktok_Omni
                             Profile = state.RunningProfileName,
                             Keywords = state.Keywords,
                             Videos = state.VideoCount,
-                            WatchRange = FormatWatchRangeForQueue(state.WatchSecondsMin, state.WatchSecondsMax),
-                            AutoComment = state.AutoComment,
+                            WatchRange = FormatWatchRangeForQueue(state.WatchPercentageMin, state.WatchPercentageMax),
+                            LikeProbability = state.LikeProbability,
+                            ShareProbability = state.ShareProbability,
+                            CommentProbability = state.CommentProbability,
                             DryRun = state.DryRun,
                             Status = WarmupStatus.Pending,
                             RetryCount = 0,
@@ -1439,14 +2052,15 @@ namespace tiktok_Omni
                 SelectionForeColor = Color.WhiteSmoke
             };
             grid.EnableHeadersVisualStyles = false;
-            ApplyAppGridHeaderChrome(grid);
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Date", HeaderText = "Date", FillWeight = 20 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Success", HeaderText = "Success", FillWeight = 16 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Failed", HeaderText = "Failed", FillWeight = 16 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Total", HeaderText = "Total", FillWeight = 16 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "SuccessRate", HeaderText = "Success Rate", FillWeight = 20 });
+            ApplyAppGridChrome(grid);
 
             grid.DataSource = new BindingList<QueueTrendRow>(rows);
+            EnsureAppGridRowHeights(grid);
             split.Panel1.Controls.Add(pnlChart);
             split.Panel2.Controls.Add(grid);
             form.Controls.Add(split);
@@ -1537,39 +2151,78 @@ namespace tiktok_Omni
         {
             if (_isWarmupQueueRunning)
             {
-                Log("[QUEUE] Stop queue before reordering jobs.");
+                LogWarmup("[QUEUE] Stop queue before reordering jobs.");
                 return;
             }
 
-            if (dgvWarmupQueue?.SelectedRows == null || dgvWarmupQueue.SelectedRows.Count == 0 || _warmupQueueBindingList == null)
+            if (_warmupQueueBindingList == null || dgvWarmupQueue == null)
             {
                 return;
             }
 
-            var selected = dgvWarmupQueue.SelectedRows[0]?.DataBoundItem as WarmupQueueUiItem;
-            if (selected == null)
+            var selected = GetSelectedWarmupQueueItemsInDisplayOrder();
+            if (selected.Count == 0)
             {
                 return;
             }
 
-            var oldIndex = _warmupQueueBindingList.IndexOf(selected);
-            if (oldIndex < 0)
+            var indices = new List<int>(selected.Count);
+            for (var i = 0; i < selected.Count; i++)
+            {
+                var idx = _warmupQueueBindingList.IndexOf(selected[i]);
+                if (idx >= 0)
+                {
+                    indices.Add(idx);
+                }
+            }
+
+            if (indices.Count == 0)
             {
                 return;
             }
 
-            var newIndex = oldIndex + direction;
-            if (newIndex < 0 || newIndex >= _warmupQueueBindingList.Count)
+            indices.Sort();
+            if (direction < 0)
             {
-                return;
+                if (indices[0] <= 0)
+                {
+                    return;
+                }
+
+                for (var i = 0; i < indices.Count; i++)
+                {
+                    var idx = indices[i];
+                    var item = _warmupQueueBindingList[idx];
+                    _warmupQueueBindingList.RemoveAt(idx);
+                    _warmupQueueBindingList.Insert(idx - 1, item);
+                    indices[i] = idx - 1;
+                }
+            }
+            else
+            {
+                if (indices[indices.Count - 1] >= _warmupQueueBindingList.Count - 1)
+                {
+                    return;
+                }
+
+                for (var i = indices.Count - 1; i >= 0; i--)
+                {
+                    var idx = indices[i];
+                    var item = _warmupQueueBindingList[idx];
+                    _warmupQueueBindingList.RemoveAt(idx);
+                    _warmupQueueBindingList.Insert(idx + 1, item);
+                    indices[i] = idx + 1;
+                }
             }
 
-            _warmupQueueBindingList.RemoveAt(oldIndex);
-            _warmupQueueBindingList.Insert(newIndex, selected);
             dgvWarmupQueue.ClearSelection();
-            if (newIndex >= 0 && newIndex < dgvWarmupQueue.Rows.Count)
+            for (var i = 0; i < indices.Count; i++)
             {
-                dgvWarmupQueue.Rows[newIndex].Selected = true;
+                var idx = indices[i];
+                if (idx >= 0 && idx < dgvWarmupQueue.Rows.Count)
+                {
+                    dgvWarmupQueue.Rows[idx].Selected = true;
+                }
             }
 
             SyncSchedulerFromUi();
@@ -1582,25 +2235,47 @@ namespace tiktok_Omni
             public string Keywords { get; set; } = string.Empty;
             public int Videos { get; set; }
             public string WatchRange { get; set; } = string.Empty;
-            public bool AutoComment { get; set; }
+            public int LikeProbability { get; set; } = DefaultLikeProbability;
+            public int ShareProbability { get; set; } = DefaultShareProbability;
+            public int CommentProbability { get; set; }
             public bool DryRun { get; set; }
+            public string RunModeLabel
+            {
+                get => DryRun ? "Dry" : "Live";
+                set => DryRun = string.Equals(value, "Dry", StringComparison.OrdinalIgnoreCase);
+            }
             public WarmupStatus Status { get; set; } = WarmupStatus.Pending;
             public int RetryAttempt { get; set; }
-            public string StatusDisplay =>
-                Status == WarmupStatus.Running && RetryAttempt > 0
-                    ? "Retry " + RetryAttempt + "/" + (MaxRetries + 1)
-                    : Status.ToString();
-            public DateTime? ScheduledAtLocal { get; set; }
+            public string StatusDisplay => Status.ToString();
+            public DateTime? ScheduledAtUtc { get; set; }
             public string ScheduledAtLabel =>
-                ScheduledAtLocal.HasValue ? ScheduledAtLocal.Value.ToString("dd/MM HH:mm") : "Đăng ngay";
+                ScheduledAtUtc.HasValue
+                    ? ScheduledAtUtc.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                    : "Đăng ngay";
             public int RetryCount { get; set; }
             public int MaxRetries { get; set; } = 2;
             public string LastError { get; set; } = string.Empty;
-            public string RetryLabel => RetryCount + "/" + (MaxRetries + 1);
             public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
             public DateTime? NextRetryAtUtc { get; set; }
-            public string CreatedAtLabel => CreatedAtUtc == default(DateTime) ? string.Empty : CreatedAtUtc.ToLocalTime().ToString("HH:mm:ss");
-            public string NextRetryEtaLabel => NextRetryAtUtc.HasValue ? NextRetryAtUtc.Value.ToLocalTime().ToString("HH:mm:ss") : "-";
+            public string RetrySummary
+            {
+                get
+                {
+                    var attempt = Math.Max(RetryCount, RetryAttempt);
+                    var progress = attempt + "/" + (MaxRetries + 1);
+                    if (NextRetryAtUtc.HasValue)
+                    {
+                        return progress + " · " + NextRetryAtUtc.Value.ToLocalTime().ToString("HH:mm");
+                    }
+
+                    if (CreatedAtUtc != default(DateTime))
+                    {
+                        return progress + " · " + CreatedAtUtc.ToLocalTime().ToString("HH:mm");
+                    }
+
+                    return progress;
+                }
+            }
         }
     }
 }

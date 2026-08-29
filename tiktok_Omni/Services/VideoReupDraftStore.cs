@@ -8,14 +8,11 @@ namespace tiktok_Omni.Services
 {
     public sealed class VideoReupDraftStore
     {
-        private static readonly string DraftPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "tiktok_Omni",
-            "draft_reup.json");
+        private const string FileName = "draft_reup.json";
 
         public List<VideoReupRowItem> Load()
         {
-            var path = GetPersistentPath();
+            var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy);
             if (!File.Exists(path))
             {
                 return new List<VideoReupRowItem>();
@@ -25,7 +22,13 @@ namespace tiktok_Omni.Services
             {
                 var json = File.ReadAllText(path, TextFileEncoding.Utf8);
                 var rows = JsonConvert.DeserializeObject<List<VideoReupRowItem>>(json);
-                return rows?.Where(r => r != null).ToList() ?? new List<VideoReupRowItem>();
+                var list = rows?.Where(r => r != null).ToList() ?? new List<VideoReupRowItem>();
+                if (migrateFromLegacy && list.Count > 0)
+                {
+                    Save(list);
+                }
+
+                return list;
             }
             catch
             {
@@ -40,41 +43,13 @@ namespace tiktok_Omni.Services
                 .ToList();
             try
             {
-                var path = GetPersistentPath();
-                var dir = Path.GetDirectoryName(path);
-                if (!string.IsNullOrWhiteSpace(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-                File.WriteAllText(path, JsonConvert.SerializeObject(list, Formatting.Indented), TextFileEncoding.Utf8NoBom);
+                AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(list, Formatting.Indented));
+                AppDataPaths.TryDeleteLegacyJson(FileName);
             }
             catch
             {
                 // ignored
             }
-        }
-
-        private static string GetPersistentPath()
-        {
-            // Tự động migrate từ thư mục cũ cạnh exe nếu có
-            var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "draft_reup.json");
-            if (!File.Exists(DraftPath) && File.Exists(legacyPath))
-            {
-                try
-                {
-                    var dir = Path.GetDirectoryName(DraftPath);
-                    if (!string.IsNullOrWhiteSpace(dir))
-                    {
-                        Directory.CreateDirectory(dir);
-                    }
-                    File.Copy(legacyPath, DraftPath, overwrite: false);
-                }
-                catch
-                {
-                    // ignored
-                }
-            }
-            return DraftPath;
         }
     }
 }

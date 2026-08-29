@@ -60,7 +60,7 @@ namespace tiktok_Omni
                 {
                     var payload = JsonConvert.DeserializeObject<VideoReupJobPayload>(item.PayloadJson ?? "{}");
                     var row = payload?.Row;
-                    if (row != null && row.UseVisualHookSfx)
+                    if (row != null && VideoReupRemixService.ShouldUseVisualHookSfx(row))
                     {
                         var sfx = (row.VisualHookSfxPath ?? payload.VisualHookSfxPath ?? string.Empty).Trim();
                         if (!AssetIntegrityService.CheckAudioFile(sfx, "Hook SFX 3s", out errorMessage))

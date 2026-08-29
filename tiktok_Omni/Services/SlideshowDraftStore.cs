@@ -14,14 +14,11 @@ namespace tiktok_Omni.Services
 
     public sealed class SlideshowDraftStore
     {
-        private static readonly string DraftPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "tiktok_Omni",
-            "draft_slideshow.json");
+        private const string FileName = "draft_slideshow.json";
 
         public SlideshowDraftDocument Load()
         {
-            var path = GetPersistentPath();
+            var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrateFromLegacy);
             if (!File.Exists(path))
             {
                 return new SlideshowDraftDocument();
@@ -40,6 +37,12 @@ namespace tiktok_Omni.Services
                     .Where(p => p != null)
                     .Select(NormalizeProduct)
                     .ToList() ?? new List<AiVideoGenInputItem>();
+
+                if (migrateFromLegacy && doc.Products.Count > 0)
+                {
+                    Save(doc);
+                }
+
                 return doc;
             }
             catch
@@ -50,58 +53,22 @@ namespace tiktok_Omni.Services
 
         public void Save(SlideshowDraftDocument document)
         {
-            if (document == null)
-            {
-                return;
-            }
-
-            var list = (document.Products ?? Enumerable.Empty<AiVideoGenInputItem>())
+            var doc = document ?? new SlideshowDraftDocument();
+            doc.Products = (doc.Products ?? new List<AiVideoGenInputItem>())
                 .Where(p => p != null)
                 .Select(NormalizeProduct)
                 .ToList();
-            var doc = new SlideshowDraftDocument
-            {
-                Products = list,
-                SharedScript = document.SharedScript ?? string.Empty
-            };
+            doc.SharedScript = doc.SharedScript ?? string.Empty;
 
             try
             {
-                var path = GetPersistentPath();
-                var dir = Path.GetDirectoryName(path);
-                if (!string.IsNullOrWhiteSpace(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-                File.WriteAllText(path, JsonConvert.SerializeObject(doc, Formatting.Indented), TextFileEncoding.Utf8NoBom);
+                AppDataPaths.WriteJson(FileName, JsonConvert.SerializeObject(doc, Formatting.Indented));
+                AppDataPaths.TryDeleteLegacyJson(FileName);
             }
             catch
             {
                 // ignored
             }
-        }
-
-        private static string GetPersistentPath()
-        {
-            // Tự động migrate từ thư mục cũ cạnh exe nếu có
-            var legacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "draft_slideshow.json");
-            if (!File.Exists(DraftPath) && File.Exists(legacyPath))
-            {
-                try
-                {
-                    var dir = Path.GetDirectoryName(DraftPath);
-                    if (!string.IsNullOrWhiteSpace(dir))
-                    {
-                        Directory.CreateDirectory(dir);
-                    }
-                    File.Copy(legacyPath, DraftPath, overwrite: false);
-                }
-                catch
-                {
-                    // ignored
-                }
-            }
-            return DraftPath;
         }
 
         private static AiVideoGenInputItem NormalizeProduct(AiVideoGenInputItem item)
@@ -110,22 +77,16 @@ namespace tiktok_Omni.Services
             {
                 return new AiVideoGenInputItem();
             }
-            item.ProfileName = (item.ProfileName ?? string.Empty).Trim();
+
+            item.ProfileName = ProfileScopedPaths.ResolveProfileName(item.ProfileName);
             item.SourceKeyword = (item.SourceKeyword ?? string.Empty).Trim();
             item.ProductName = (item.ProductName ?? string.Empty).Trim();
-            item.Price = (item.Price ?? string.Empty).Trim();
             item.VideoUrl = (item.VideoUrl ?? string.Empty).Trim();
-            item.ImageUrl = (item.ImageUrl ?? string.Empty).Trim();
+            item.HookText = (item.HookText ?? string.Empty).Trim();
             item.Hashtags = (item.Hashtags ?? string.Empty).Trim();
-            item.VideoScript = (item.VideoScript ?? string.Empty).Trim();
-            item.VoiceoverTranscript = (item.VoiceoverTranscript ?? string.Empty).Trim();
+            item.Price = (item.Price ?? string.Empty).Trim();
+            item.ImageUrl = (item.ImageUrl ?? string.Empty).Trim();
             item.CustomerReviews = (item.CustomerReviews ?? string.Empty).Trim();
-            item.VoiceId = (item.VoiceId ?? string.Empty).Trim();
-            item.VideoStyle = (item.VideoStyle ?? string.Empty).Trim();
-            item.MascotStyle = (item.MascotStyle ?? string.Empty).Trim();
-            item.LastRenderOutputPath = (item.LastRenderOutputPath ?? string.Empty).Trim();
-            item.RenderStatus = (item.RemixStatus ?? string.Empty).Trim();
-            item.RenderLastError = (item.RemixLastError ?? string.Empty).Trim();
             return item;
         }
     }

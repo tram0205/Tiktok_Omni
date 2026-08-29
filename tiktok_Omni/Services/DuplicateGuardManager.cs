@@ -72,7 +72,7 @@ namespace tiktok_Omni.Services
 
         private async Task<List<DuplicateGuardRecord>> LoadAsync()
         {
-            var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, FileName);
+            var path = AppDataPaths.ResolveReadableJsonPath(FileName, out var migrate);
             if (!File.Exists(path))
             {
                 return new List<DuplicateGuardRecord>();
@@ -81,7 +81,13 @@ namespace tiktok_Omni.Services
             try
             {
                 var text = await Task.Run(() => File.ReadAllText(path, TextFileEncoding.Utf8)).ConfigureAwait(false);
-                return JsonConvert.DeserializeObject<List<DuplicateGuardRecord>>(text) ?? new List<DuplicateGuardRecord>();
+                var records = JsonConvert.DeserializeObject<List<DuplicateGuardRecord>>(text) ?? new List<DuplicateGuardRecord>();
+                if (migrate && records.Count > 0)
+                {
+                    await SaveAsync(records).ConfigureAwait(false);
+                }
+
+                return records;
             }
             catch
             {
@@ -91,9 +97,12 @@ namespace tiktok_Omni.Services
 
         private static async Task SaveAsync(List<DuplicateGuardRecord> records)
         {
-            var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, FileName);
             var json = JsonConvert.SerializeObject(records ?? new List<DuplicateGuardRecord>(), Formatting.Indented);
-            await Task.Run(() => File.WriteAllText(path, json, TextFileEncoding.Utf8NoBom)).ConfigureAwait(false);
+            await Task.Run(() =>
+            {
+                AppDataPaths.WriteJson(FileName, json);
+                AppDataPaths.TryDeleteLegacyJson(FileName);
+            }).ConfigureAwait(false);
         }
     }
 }

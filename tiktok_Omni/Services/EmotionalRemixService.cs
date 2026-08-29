@@ -15,10 +15,10 @@ namespace tiktok_Omni.Services
     /// </summary>
     public sealed class EmotionalRemixService : IDisposable
     {
-        private const string DefaultElevenLabsVoiceId = "pNInz6obpg8nEmeWscDJ";
         private const double TargetDurationSeconds = 45d;
 
         private readonly HttpClient _httpClient;
+        private readonly VideoService _videoService = new VideoService();
         private readonly LipSyncService _lipSyncService = new LipSyncService();
         private bool _disposed;
 
@@ -86,7 +86,7 @@ namespace tiktok_Omni.Services
 
             logger("Voice: Đang thổi hồn vào lời thoại (ElevenLabs)...");
             var audioPath = Path.Combine(workDir, "voiceover.wav");
-            await GenerateElevenLabsVoiceAsync(script, settings.TtsApiKey, audioPath, cancellationToken)
+            await GenerateElevenLabsVoiceAsync(script, settings, audioPath, cancellationToken)
                 .ConfigureAwait(false);
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -177,13 +177,24 @@ namespace tiktok_Omni.Services
 
         private async Task GenerateElevenLabsVoiceAsync(
             string text,
-            string apiKey,
+            AppSettings settings,
             string outputPath,
             CancellationToken cancellationToken)
         {
-            if (string.IsNullOrWhiteSpace(apiKey))
+            if (string.IsNullOrWhiteSpace(settings?.TtsApiKey))
             {
                 throw new InvalidOperationException("TTS API Key (ElevenLabs) chưa cấu hình trong Cài đặt.");
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.TtsEndpoint))
+            {
+                throw new InvalidOperationException("TTS Endpoint chưa cấu hình trong Cài đặt.");
+            }
+
+            if (!ElevenLabsTtsHelper.EndpointIncludesVoiceId(settings.TtsEndpoint))
+            {
+                throw new InvalidOperationException(
+                    "ElevenLabs: TTS Endpoint phải chứa Voice ID của voice bạn đã tạo (…/text-to-speech/{voice_id}).");
             }
 
             var line = (text ?? string.Empty).Trim();
@@ -194,36 +205,15 @@ namespace tiktok_Omni.Services
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
 
-            var voiceId = DefaultElevenLabsVoiceId;
-            var url = "https://api.elevenlabs.io/v1/text-to-speech/" + voiceId;
-            var body = JsonConvert.SerializeObject(new
-            {
-                text = line,
-                model_id = "eleven_multilingual_v2",
-                voice_settings = new { stability = 0.5, similarity_boost = 0.8 }
-            });
+            var tempMp3 = await _videoService.GenerateAudioAsync(
+                line,
+                settings,
+                cancellationToken,
+                emphaticHook: false).ConfigureAwait(false);
 
-            using (var request = new HttpRequestMessage(HttpMethod.Post, url))
-            {
-                request.Headers.TryAddWithoutValidation("xi-api-key", apiKey.Trim());
-                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-
-                using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
-                {
-                    var responseText = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        throw new InvalidOperationException("Lỗi ElevenLabs: " + responseText);
-                    }
-
-                    var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                    var tempMp3 = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".", "voiceover_elevenlabs.mp3");
-                    File.WriteAllBytes(tempMp3, bytes);
-                    var ffmWav = ResolveFfmpegExecutable(await new ConfigManager().LoadAsync().ConfigureAwait(false));
-                    var wavArgs = "-y -i \"" + tempMp3 + "\" -ar 48000 -ac 2 \"" + outputPath + "\"";
-                    await VideoReupRemixService.RunFfmpegPublicAsync(ffmWav, wavArgs, null, cancellationToken).ConfigureAwait(false);
-                }
-            }
+            var ffmWav = ResolveFfmpegExecutable(await new ConfigManager().LoadAsync().ConfigureAwait(false));
+            var wavArgs = "-y -i \"" + tempMp3 + "\" -ar 48000 -ac 2 \"" + outputPath + "\"";
+            await VideoReupRemixService.RunFfmpegPublicAsync(ffmWav, wavArgs, null, cancellationToken).ConfigureAwait(false);
         }
 
 

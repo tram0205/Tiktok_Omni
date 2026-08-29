@@ -11,12 +11,11 @@ namespace tiktok_Omni
     {
         private static readonly Color WarmupPanelBack = Color.FromArgb(32, 34, 44);
         private static readonly Color WarmupFieldBack = Color.FromArgb(45, 49, 60);
-        private static readonly Font WarmupJellyButtonFont = new Font("Segoe UI", 10.25F, FontStyle.Bold);
         private static readonly Font WarmupFieldFont = AppInputFont;
-        private static readonly Font WarmupLabelFont = AppInputFont;
-        private const int WarmupFieldHeight = AppInputMinHeight;
-        private const int WarmupToolbarButtonHeight = 44;
-        private const int WarmupToolbarRowHeight = 48;
+        private static readonly Font WarmupLabelFont = AppLabelFont;
+        private const int WarmupFieldHeight = AppDefaultInputHeight;
+        private const int WarmupToolbarButtonHeight = AppJellyButtonHeight;
+        private const int WarmupToolbarRowHeight = AppJellyButtonHeight;
         private const int WarmupSectionGap = 6;
 
         private static readonly Color WarmupTintAdd = Color.FromArgb(48, 158, 102);
@@ -39,29 +38,47 @@ namespace tiktok_Omni
 
             tabAutoWarmup.SuspendLayout();
             tabAutoWarmup.Controls.Clear();
-            tabAutoWarmup.AutoScroll = false;
-            tabAutoWarmup.Padding = new Padding(8);
+            tabAutoWarmup.AutoScroll = true;
+            tabAutoWarmup.Padding = new Padding(6, 4, 6, 4);
 
             var tblWarmupMain = new TableLayoutPanel
             {
                 Name = "tblWarmupMain",
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 4,
-                BackColor = WarmupPanelBack
+                RowCount = 6,
+                BackColor = WarmupPanelBack,
+                AutoSize = false,
+                GrowStyle = TableLayoutPanelGrowStyle.FixedSize
             };
             tblWarmupMain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            // row 0: config
             tblWarmupMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // row 1: toolbar (hàng đợi / chạy)
             tblWarmupMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // row 2: lưới (fill)
             tblWarmupMain.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            // row 3: stats (thống kê)
             tblWarmupMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // row 4: monitor strip (status + progress)
+            tblWarmupMain.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            // row 5: log
+            tblWarmupMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 315F));
 
             tblWarmupMain.Controls.Add(BuildWarmupConfigPanel(), 0, 0);
             tblWarmupMain.Controls.Add(BuildWarmupPrimaryActionsPanel(), 0, 1);
             var pnlWarmupGrid = BuildWarmupGridPanel();
-            pnlWarmupGrid.Margin = new Padding(0, WarmupSectionGap, 0, 0);
+            pnlWarmupGrid.Margin = new Padding(0, 2, 0, 0);
             tblWarmupMain.Controls.Add(pnlWarmupGrid, 0, 2);
-            tblWarmupMain.Controls.Add(BuildWarmupBottomActionsPanel(), 0, 3);
+            var pnlWarmupStats = BuildWarmupBottomActionsPanel();
+            pnlWarmupStats.Margin = new Padding(0, 2, 0, 0);
+            tblWarmupMain.Controls.Add(pnlWarmupStats, 0, 3);
+            var pnlWarmupMonitor = BuildWarmupMonitorStrip();
+            pnlWarmupMonitor.Margin = new Padding(0, 2, 0, 0);
+            tblWarmupMain.Controls.Add(pnlWarmupMonitor, 0, 4);
+            var pnlWarmupLog = BuildWarmupLogPanel();
+            pnlWarmupLog.Margin = Padding.Empty;
+            tblWarmupMain.Controls.Add(pnlWarmupLog, 0, 5);
 
             tabAutoWarmup.Controls.Add(tblWarmupMain);
             tabAutoWarmup.AutoScrollMinSize = Size.Empty;
@@ -76,8 +93,9 @@ namespace tiktok_Omni
             {
                 Name = "pnlWarmupConfig",
                 Dock = DockStyle.Fill,
-                AutoSize = false,
-                Padding = new Padding(4, 4, 4, 8),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(4, 4, 4, 0),
                 BackColor = WarmupPanelBack
             };
 
@@ -87,7 +105,9 @@ namespace tiktok_Omni
                 ColumnCount = 1,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                BackColor = WarmupPanelBack
+                BackColor = WarmupPanelBack,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -126,7 +146,7 @@ namespace tiktok_Omni
                 Name = "numVideoCount",
                 Minimum = 1,
                 Maximum = 1000,
-                Value = 20,
+                Value = 5,
                 Dock = DockStyle.Fill,
                 Font = WarmupFieldFont,
                 MinimumSize = new Size(56, WarmupFieldHeight),
@@ -138,12 +158,12 @@ namespace tiktok_Omni
             numWatchMin = new NumericUpDown
             {
                 Name = "numWatchMin",
-                Minimum = 3,
-                Maximum = 600,
-                Value = 7,
+                Minimum = 30,
+                Maximum = 300,
+                Value = 80,
                 Font = WarmupFieldFont,
-                Width = 64,
-                MinimumSize = new Size(64, WarmupFieldHeight),
+                Width = 110,
+                MinimumSize = new Size(110, WarmupFieldHeight),
                 BackColor = WarmupFieldBack,
                 ForeColor = Color.WhiteSmoke,
                 Margin = new Padding(0, 0, 4, 0)
@@ -151,12 +171,12 @@ namespace tiktok_Omni
             numWatchMax = new NumericUpDown
             {
                 Name = "numWatchMax",
-                Minimum = 3,
-                Maximum = 600,
-                Value = 18,
+                Minimum = 30,
+                Maximum = 300,
+                Value = 150,
                 Font = WarmupFieldFont,
-                Width = 64,
-                MinimumSize = new Size(64, WarmupFieldHeight),
+                Width = 110,
+                MinimumSize = new Size(110, WarmupFieldHeight),
                 BackColor = WarmupFieldBack,
                 ForeColor = Color.WhiteSmoke,
                 Margin = new Padding(4, 0, 0, 0)
@@ -210,31 +230,108 @@ namespace tiktok_Omni
             tblTopRow.Controls.Add(txtKeywords, 3, 0);
             tblTopRow.Controls.Add(CreateWarmupInlineLabel("Số video"), 4, 0);
             tblTopRow.Controls.Add(numVideoCount, 5, 0);
-            tblTopRow.Controls.Add(CreateWarmupInlineLabel("Tổng xem (giây)"), 6, 0);
+            tblTopRow.Controls.Add(CreateWarmupInlineLabel("Giữ chân (%)"), 6, 0);
             tblTopRow.Controls.Add(flpWatchInline, 7, 0);
 
             tbl.Controls.Add(tblTopRow, 0, 0);
 
+            numLikeProbability = new NumericUpDown
+            {
+                Name = "numLikeProbability",
+                Minimum = 0,
+                Maximum = 100,
+                Value = 50,
+                Font = WarmupFieldFont,
+                Width = 64,
+                MinimumSize = new Size(64, WarmupFieldHeight),
+                BackColor = WarmupFieldBack,
+                ForeColor = Color.WhiteSmoke,
+                Margin = new Padding(0, 0, 4, 0)
+            };
+            numShareProbability = new NumericUpDown
+            {
+                Name = "numShareProbability",
+                Minimum = 0,
+                Maximum = 100,
+                Value = 20,
+                Font = WarmupFieldFont,
+                Width = 64,
+                MinimumSize = new Size(64, WarmupFieldHeight),
+                BackColor = WarmupFieldBack,
+                ForeColor = Color.WhiteSmoke,
+                Margin = new Padding(0, 0, 4, 0)
+            };
             chkAutoComment = new CheckBox
             {
                 Name = "chkAutoComment",
-                Text = "Bật bình luận AI tự sinh",
+                Text = "Bật bình luận AI",
                 AutoSize = true,
                 Font = WarmupFieldFont,
                 Checked = true,
                 ForeColor = Color.Gainsboro,
-                Margin = new Padding(0, 2, 16, 2)
+                Margin = new Padding(0, 2, 8, 0)
+            };
+            numCommentProbability = new NumericUpDown
+            {
+                Name = "numCommentProbability",
+                Minimum = 0,
+                Maximum = 100,
+                Value = 10,
+                Font = WarmupFieldFont,
+                Width = 64,
+                MinimumSize = new Size(64, WarmupFieldHeight),
+                BackColor = WarmupFieldBack,
+                ForeColor = Color.WhiteSmoke,
+                Margin = new Padding(0, 0, 4, 0)
+            };
+            chkAutoComment.CheckedChanged += (_, __) =>
+            {
+                if (numCommentProbability != null)
+                {
+                    numCommentProbability.Enabled = chkAutoComment.Checked;
+                }
             };
 
             var flpRunMode = new FlowLayoutPanel
             {
                 AutoSize = true,
-                Dock = DockStyle.Fill,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top,
                 WrapContents = true,
-                BackColor = WarmupPanelBack
+                FlowDirection = FlowDirection.LeftToRight,
+                BackColor = WarmupPanelBack,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty
             };
+            flpRunMode.Controls.Add(new Label
+            {
+                Text = "Like %",
+                AutoSize = true,
+                Font = WarmupLabelFont,
+                ForeColor = Color.LightGray,
+                Margin = new Padding(0, 6, 6, 0)
+            });
+            flpRunMode.Controls.Add(numLikeProbability);
+            flpRunMode.Controls.Add(new Label
+            {
+                Text = "Share %",
+                AutoSize = true,
+                Font = WarmupLabelFont,
+                ForeColor = Color.LightGray,
+                Margin = new Padding(12, 6, 6, 0)
+            });
+            flpRunMode.Controls.Add(numShareProbability);
             flpRunMode.Controls.Add(chkAutoComment);
-            flpRunMode.Controls.Add(new Label { Text = "Chế độ chạy:", AutoSize = true, Font = WarmupLabelFont, ForeColor = Color.Gainsboro, Margin = new Padding(0, 4, 8, 4) });
+            flpRunMode.Controls.Add(new Label
+            {
+                Text = "Comment %",
+                AutoSize = true,
+                Font = WarmupLabelFont,
+                ForeColor = Color.LightGray,
+                Margin = new Padding(0, 6, 6, 0)
+            });
+            flpRunMode.Controls.Add(numCommentProbability);
+            flpRunMode.Controls.Add(new Label { Text = "Chế độ chạy:", AutoSize = true, Font = WarmupLabelFont, ForeColor = Color.Gainsboro, Margin = new Padding(12, 4, 8, 0) });
             rbDryRun = new RadioButton
             {
                 Name = "rbDryRun",
@@ -243,7 +340,7 @@ namespace tiktok_Omni
                 Font = WarmupFieldFont,
                 Checked = true,
                 ForeColor = Color.Gainsboro,
-                Margin = new Padding(0, 4, 16, 4)
+                Margin = new Padding(0, 2, 16, 0)
             };
             rbLiveRun = new RadioButton
             {
@@ -252,20 +349,11 @@ namespace tiktok_Omni
                 AutoSize = true,
                 Font = WarmupFieldFont,
                 ForeColor = Color.Gainsboro,
-                Margin = new Padding(0, 4, 0, 4)
+                Margin = new Padding(0, 2, 20, 0)
             };
             flpRunMode.Controls.Add(rbDryRun);
             flpRunMode.Controls.Add(rbLiveRun);
-            tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tbl.Controls.Add(flpRunMode, 0, 1);
 
-            var flpSchedule = new FlowLayoutPanel
-            {
-                AutoSize = true,
-                Dock = DockStyle.Fill,
-                WrapContents = true,
-                BackColor = WarmupPanelBack
-            };
             chkEnableWarmupSchedule = new CheckBox
             {
                 Name = "chkEnableWarmupSchedule",
@@ -273,7 +361,7 @@ namespace tiktok_Omni
                 AutoSize = true,
                 Font = WarmupFieldFont,
                 ForeColor = Color.Gainsboro,
-                Margin = new Padding(0, 6, 12, 4)
+                Margin = new Padding(0, 2, 12, 0)
             };
             chkEnableWarmupSchedule.CheckedChanged += (_, __) =>
             {
@@ -296,25 +384,14 @@ namespace tiktok_Omni
                 CalendarTitleForeColor = Color.WhiteSmoke,
                 CalendarTrailingForeColor = Color.DimGray,
                 Value = DateTime.Now.AddHours(1),
-                Width = 180,
-                MinimumSize = new Size(180, WarmupFieldHeight),
-                Margin = new Padding(0, 4, 0, 4)
+                Width = 320,
+                MinimumSize = new Size(300, WarmupFieldHeight),
+                Margin = new Padding(0, 0, 0, 0)
             };
-            flpSchedule.Controls.Add(chkEnableWarmupSchedule);
-            flpSchedule.Controls.Add(dtpWarmupSchedule);
-            chkAutoResumeQueueOnStartup = new CheckBox
-            {
-                Name = "chkAutoResumeQueueOnStartup",
-                Text = "T\u1ef1 kh\u00f4i ph\u1ee5c h\u00e0ng \u0111\u1ee3i khi m\u1edf app",
-                AutoSize = true,
-                Font = WarmupFieldFont,
-                ForeColor = Color.Gainsboro,
-                Checked = true,
-                Margin = new Padding(12, 6, 0, 4)
-            };
-            flpSchedule.Controls.Add(chkAutoResumeQueueOnStartup);
+            flpRunMode.Controls.Add(chkEnableWarmupSchedule);
+            flpRunMode.Controls.Add(dtpWarmupSchedule);
             tbl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tbl.Controls.Add(flpSchedule, 0, 2);
+            tbl.Controls.Add(flpRunMode, 0, 1);
 
             pnl.Controls.Add(tbl);
             return pnl;
@@ -342,7 +419,7 @@ namespace tiktok_Omni
                 Name = "pnlWarmupMonitorTop",
                 Dock = DockStyle.Top,
                 AutoSize = true,
-                Padding = new Padding(0, WarmupSectionGap, 0, WarmupSectionGap),
+                Padding = new Padding(0, 3, 0, 2),
                 BackColor = WarmupPanelBack,
                 Margin = Padding.Empty
             };
@@ -472,40 +549,123 @@ namespace tiktok_Omni
 
             pnl.Controls.Add(dgvWarmupQueue);
             pnl.Controls.Add(pnlStats);
+            ApplyAppGridChrome(dgvWarmupQueue);
+            return pnl;
+        }
+
+        private Panel BuildWarmupLogPanel()
+        {
+            var pnl = new Panel
+            {
+                Name = "pnlWarmupLog",
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(18, 20, 26),
+                Padding = Padding.Empty,
+                Margin = Padding.Empty
+            };
+
+            var header = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 52,
+                MinimumSize = new Size(0, 52),
+                BackColor = Color.FromArgb(30, 32, 40),
+                Padding = new Padding(6, 8, 6, 8)
+            };
+
+            var lblTitle = new Label
+            {
+                Text = "  LOG — tiến trình Warmup",
+                Dock = DockStyle.Fill,
+                ForeColor = Color.FromArgb(160, 180, 220),
+                Font = AppCaptionFont,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = false,
+                AutoSize = false,
+                Padding = new Padding(4, 0, 8, 0)
+            };
+
+            var btnClear = new Button
+            {
+                Name = "btnClearWarmupLog",
+                Text = "Xóa",
+                Dock = DockStyle.Right,
+                Width = 88,
+                Height = 36,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(45, 48, 58),
+                ForeColor = Color.FromArgb(220, 220, 220),
+                Font = AppLabelFont,
+                Cursor = Cursors.Hand,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Margin = Padding.Empty,
+                Padding = Padding.Empty,
+                Tag = "GlobalLogChrome",
+                AccessibleName = "GlobalLogChrome"
+            };
+            btnClear.FlatAppearance.BorderSize = 0;
+            btnClear.Click += (_, __) =>
+            {
+                if (rtbWarmupLog != null && !rtbWarmupLog.IsDisposed)
+                {
+                    rtbWarmupLog.Clear();
+                }
+            };
+
+            // Dock Right trước, Fill sau — tránh chữ tiêu đề / nút bị che.
+            header.Controls.Add(btnClear);
+            header.Controls.Add(lblTitle);
+
+            rtbWarmupLog = new RichTextBox
+            {
+                Name = "rtbWarmupLog",
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                BackColor = Color.FromArgb(18, 20, 26),
+                ForeColor = Color.FromArgb(200, 205, 215),
+                Font = new Font("Consolas", 9F),
+                BorderStyle = BorderStyle.None,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                WordWrap = true,
+                DetectUrls = false
+            };
+
+            pnl.Controls.Add(rtbWarmupLog);
+            pnl.Controls.Add(header);
             return pnl;
         }
 
         private Control BuildWarmupPrimaryActionsPanel()
         {
-            var tblPrimary = new TableLayoutPanel
+            // Panel Top + AutoSize — tránh FlowLayout WrapContents tính PreferredHeight theo
+            // chiều hẹp (nút xếp nhiều hàng) rồi để trống lớn dưới nút khi layout rộng.
+            var pnl = new Panel
             {
-                Name = "tblWarmupPrimaryActions",
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
+                Name = "pnlWarmupPrimaryActions",
+                Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = WarmupPanelBack,
-                Padding = new Padding(2, 2, 2, 2),
+                Padding = new Padding(2, 0, 2, 2),
                 Margin = Padding.Empty
             };
-            tblPrimary.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            tblPrimary.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tblPrimary.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tblPrimary.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            var lblQueue = CreateWarmupSectionLabel("Thêm profile vào hàng đợi, chạy hàng đợi hoặc chạy ngay một lần");
             btnQueueWarmup = CreateWarmupActionButton("btnQueueWarmup", "Thêm vào hàng đợi", WarmupTintAdd);
             btnQueueWarmup.Click += btnQueueWarmup_Click;
-            btnStartWarmupQueue = CreateWarmupActionButton("btnStartWarmupQueue", "Chạy hàng đợi", WarmupTintRun);
+            btnStartWarmupQueue = CreateWarmupActionButton("btnStartWarmupQueue", "Chạy", WarmupTintRun);
             btnStartWarmupQueue.Click += btnStartWarmupQueue_Click;
-            btnStartWarmup = CreateWarmupActionButton("btnStartWarmup", "Chạy ngay", WarmupTintManual);
-            btnStartWarmup.Click += btnStartWarmup_Click;
             btnPauseWarmupQueue = CreateWarmupActionButton("btnPauseWarmupQueue", "Tạm dừng", WarmupTintPause);
+            btnPauseWarmupQueue.Visible = false;
             btnPauseWarmupQueue.Enabled = false;
             btnPauseWarmupQueue.Click += btnPauseWarmupQueue_Click;
-            btnStopWarmupQueue = CreateWarmupActionButton("btnStopWarmupQueue", "Dừng", WarmupTintStop);
+            btnStopWarmupQueue = CreateWarmupActionButton("btnStopWarmupQueue", "Dừng hẳn", WarmupTintStop);
+            btnStopWarmupQueue.Visible = false;
             btnStopWarmupQueue.Enabled = false;
-            btnStopWarmupQueue.Click += WarmupUnifiedStop_Click;
+            btnStopWarmupQueue.Click += btnStopWarmupQueue_Click;
+            btnMoveQueueJobUp = CreateWarmupActionButton("btnMoveQueueJobUp", "Lên", WarmupTintNeutral);
+            btnMoveQueueJobUp.Click += btnMoveQueueJobUp_Click;
+            btnMoveQueueJobDown = CreateWarmupActionButton("btnMoveQueueJobDown", "Xuống", WarmupTintNeutral);
+            btnMoveQueueJobDown.Click += btnMoveQueueJobDown_Click;
             btnRemoveQueueJob = CreateWarmupActionButton("btnRemoveQueueJob", "Xóa dòng", WarmupTintNeutral);
             btnRemoveQueueJob.Click += btnRemoveQueueJob_Click;
 
@@ -513,41 +673,38 @@ namespace tiktok_Omni
                 "flpWarmupQueueToolbar",
                 btnQueueWarmup,
                 btnStartWarmupQueue,
-                btnStartWarmup,
                 btnPauseWarmupQueue,
                 btnStopWarmupQueue,
+                btnMoveQueueJobUp,
+                btnMoveQueueJobDown,
                 btnRemoveQueueJob);
-
-            tblPrimary.Controls.Add(lblQueue, 0, 0);
-            tblPrimary.Controls.Add(flpQueueToolbar, 0, 1);
-            tblPrimary.Controls.Add(BuildWarmupMonitorStrip(), 0, 2);
-            return tblPrimary;
+            pnl.Controls.Add(flpQueueToolbar);
+            return pnl;
         }
 
         private Control BuildWarmupBottomActionsPanel()
         {
-            var tblBottom = new TableLayoutPanel
+            var pnl = new Panel
             {
-                Name = "tblWarmupBottomActions",
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
+                Name = "pnlWarmupStatsFilterHost",
+                Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 BackColor = WarmupPanelBack,
-                Padding = new Padding(2, 4, 2, 4),
+                Padding = new Padding(4, 2, 4, 2),
                 Margin = Padding.Empty
             };
-            tblBottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            tblBottom.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var flpStatsFilter = new FlowLayoutPanel
             {
                 Name = "flpWarmupStatsFilter",
                 AutoSize = true,
-                WrapContents = false,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                WrapContents = true,
                 FlowDirection = FlowDirection.LeftToRight,
-                Dock = DockStyle.Fill,
-                Padding = new Padding(0, 6, 0, 0),
+                Dock = DockStyle.Top,
+                Padding = new Padding(0, 2, 0, 2),
+                Margin = Padding.Empty,
                 BackColor = WarmupPanelBack
             };
 
@@ -560,9 +717,10 @@ namespace tiktok_Omni
                 Font = WarmupFieldFont,
                 BackColor = WarmupFieldBack,
                 ForeColor = Color.WhiteSmoke,
-                Width = 132,
-                MinimumSize = new Size(132, WarmupFieldHeight),
-                Margin = new Padding(5, 5, 5, 5)
+                Width = 240,
+                Height = WarmupFieldHeight,
+                MinimumSize = new Size(220, WarmupFieldHeight),
+                Margin = new Padding(0, 2, 12, 2)
             };
             cbQueueStatsRange.Items.AddRange(new object[] { "Hôm nay", "7 ngày", "30 ngày", "Tùy chỉnh" });
             cbQueueStatsRange.SelectedIndex = 0;
@@ -594,9 +752,10 @@ namespace tiktok_Omni
                 CalendarTrailingForeColor = Color.DimGray,
                 Enabled = false,
                 Value = DateTime.Today.AddDays(-7),
-                Width = 124,
-                MinimumSize = new Size(124, WarmupFieldHeight),
-                Margin = new Padding(5, 5, 5, 5)
+                Width = 220,
+                Height = WarmupFieldHeight,
+                MinimumSize = new Size(200, WarmupFieldHeight),
+                Margin = new Padding(0, 2, 12, 2)
             };
             dtQueueStatsFrom.ValueChanged += (_, __) => RefreshQueueStatsSummary();
             dtQueueStatsTo = new DateTimePicker
@@ -611,9 +770,10 @@ namespace tiktok_Omni
                 CalendarTrailingForeColor = Color.DimGray,
                 Enabled = false,
                 Value = DateTime.Today,
-                Width = 124,
-                MinimumSize = new Size(124, WarmupFieldHeight),
-                Margin = new Padding(5, 5, 5, 5)
+                Width = 220,
+                Height = WarmupFieldHeight,
+                MinimumSize = new Size(200, WarmupFieldHeight),
+                Margin = new Padding(0, 2, 0, 2)
             };
             dtQueueStatsTo.ValueChanged += (_, __) => RefreshQueueStatsSummary();
 
@@ -622,22 +782,8 @@ namespace tiktok_Omni
                 cbQueueStatsRange, dtQueueStatsFrom, dtQueueStatsTo
             });
 
-            tblBottom.Controls.Add(flpStatsFilter, 0, 0);
-            return tblBottom;
-        }
-
-        private void WarmupUnifiedStop_Click(object sender, EventArgs e)
-        {
-            if (_isWarmupQueueRunning)
-            {
-                btnStopWarmupQueue_Click(sender, e);
-                return;
-            }
-
-            if (_warmupCancellation != null)
-            {
-                btnStopWarmup_Click(sender, e);
-            }
+            pnl.Controls.Add(flpStatsFilter);
+            return pnl;
         }
 
         private void ConfigureWarmupQueueGrid()
@@ -653,7 +799,7 @@ namespace tiktok_Omni
                 ReadOnly = false,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = false,
+                MultiSelect = true,
                 BackgroundColor = Color.FromArgb(20, 22, 28),
                 BorderStyle = BorderStyle.FixedSingle,
                 GridColor = Color.FromArgb(60, 64, 77),
@@ -670,50 +816,137 @@ namespace tiktok_Omni
             };
             dgvWarmupQueue.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
             {
-                Font = AppGridHeaderFont,
                 BackColor = Color.FromArgb(40, 44, 54),
                 ForeColor = Color.WhiteSmoke,
                 SelectionBackColor = Color.FromArgb(40, 44, 54),
                 SelectionForeColor = Color.WhiteSmoke,
                 Alignment = DataGridViewContentAlignment.MiddleLeft,
-                Padding = new Padding(6, 8, 6, 8),
                 WrapMode = DataGridViewTriState.False
             };
-            dgvWarmupQueue.ColumnHeadersHeight = AppGridHeaderHeight;
-            dgvWarmupQueue.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            dgvWarmupQueue.RowTemplate.Height = WarmupFieldHeight + 4;
-            dgvWarmupQueue.EnableHeadersVisualStyles = false;
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Profile", HeaderText = "Profile", FillWeight = 11, MinimumWidth = 84, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Keywords", HeaderText = "Từ khóa", FillWeight = 19, MinimumWidth = 102, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "Videos", HeaderText = "Số video", FillWeight = 11, MinimumWidth = 90, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "WatchRange", HeaderText = "Tổng xem (s)", FillWeight = 21, MinimumWidth = 120, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "StatusDisplay", HeaderText = "Trạng thái", FillWeight = 11, MinimumWidth = 102, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "ScheduledAtLabel", HeaderText = "Lịch chạy", FillWeight = 12, MinimumWidth = 108, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "MaxRetries", HeaderText = "Thử lại tối đa", FillWeight = 13, MinimumWidth = 148 });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "RetryLabel", HeaderText = "Lần thử", FillWeight = 9, MinimumWidth = 78, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "CreatedAtLabel", HeaderText = "Tạo lúc", FillWeight = 13, MinimumWidth = 126, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "NextRetryEtaLabel", HeaderText = "Thử lại lúc", FillWeight = 16, MinimumWidth = 168, ReadOnly = true });
-            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "LastError", HeaderText = "Lỗi cuối", FillWeight = 15, MinimumWidth = 118, ReadOnly = true });
+            dgvWarmupQueue.Columns.Add(new DataGridViewComboBoxColumn
+            {
+                Name = "colWarmupQueueProfile",
+                DataPropertyName = "Profile",
+                HeaderText = "Profile",
+                FlatStyle = FlatStyle.Flat,
+                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
+                FillWeight = 10,
+                MinimumWidth = 84,
+                ToolTipText = "Chọn profile cho job warm-up."
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = "Keywords",
+                HeaderText = "Từ khóa",
+                FillWeight = 16,
+                MinimumWidth = 102,
+                ToolTipText = "Từ khóa ngách — sửa trực tiếp trên lưới."
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = "Videos",
+                HeaderText = "Số video",
+                FillWeight = 8,
+                MinimumWidth = 72,
+                ToolTipText = "Số video warm-up (1–1000)."
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewComboBoxColumn
+            {
+                Name = "colWarmupRunMode",
+                DataPropertyName = "RunModeLabel",
+                HeaderText = "Dry/Live",
+                FlatStyle = FlatStyle.Flat,
+                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
+                FillWeight = 8,
+                MinimumWidth = 72,
+                ToolTipText = "Dry = mô phỏng, Live = hành động thật."
+            });
+            ((DataGridViewComboBoxColumn)dgvWarmupQueue.Columns["colWarmupRunMode"]).Items.AddRange("Dry", "Live");
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = "WatchRange",
+                HeaderText = "Giữ chân (%)",
+                FillWeight = 12,
+                MinimumWidth = 96,
+                ToolTipText = "Dạng 80-150 hoặc 80-150%."
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = "LikeProbability",
+                HeaderText = "Like %",
+                FillWeight = 7,
+                MinimumWidth = 58,
+                ToolTipText = "Số video tim = % × số video (0–100)."
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = "ShareProbability",
+                HeaderText = "Share %",
+                FillWeight = 7,
+                MinimumWidth = 62,
+                ToolTipText = "Số video share = % × số video (0–100)."
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = "CommentProbability",
+                HeaderText = "Comment %",
+                FillWeight = 8,
+                MinimumWidth = 72,
+                ToolTipText = "Số video comment = % × số video (0 = tắt, 1–100)."
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "StatusDisplay", HeaderText = "Trạng thái", FillWeight = 9, MinimumWidth = 88, ReadOnly = true });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "colWarmupScheduledAt",
+                DataPropertyName = "ScheduledAtLabel",
+                HeaderText = "Lịch chạy",
+                FillWeight = 12,
+                MinimumWidth = 118,
+                ReadOnly = true,
+                ToolTipText = "Bấm để chọn ngày/giờ chạy hoặc Đăng ngay"
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = "RetrySummary",
+                HeaderText = "Retry",
+                FillWeight = 11,
+                MinimumWidth = 96,
+                ReadOnly = true,
+                ToolTipText = "Lần thử / tối đa · giờ tạo hoặc giờ thử lại (vd. 1/3 · 17:35)"
+            });
+            dgvWarmupQueue.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = "LastError", HeaderText = "Lỗi cuối", FillWeight = 14, MinimumWidth = 100, ReadOnly = true });
+            ApplyAppGridChrome(dgvWarmupQueue);
+            dgvWarmupQueue.CellBeginEdit += dgvWarmupQueue_CellBeginEdit;
             dgvWarmupQueue.CellEndEdit += dgvWarmupQueue_CellEndEdit;
+            dgvWarmupQueue.DataError += dgvWarmupQueue_DataError;
+            dgvWarmupQueue.CellClick += dgvWarmupQueue_CellClick;
+            dgvWarmupQueue.KeyDown += dgvWarmupQueue_KeyDown;
+            ApplyWarmupQueueProfileComboColumn();
+        }
+
+        private void ApplyWarmupQueueProfileComboColumn()
+        {
+            ApplyGridProfileComboColumn(dgvWarmupQueue, "colWarmupQueueProfile");
         }
 
         private void WireWarmupTooltips()
         {
             var warmupToolTip = new ToolTip { AutoPopDelay = 12000, InitialDelay = 300, ReshowDelay = 150, ShowAlways = true };
             warmupToolTip.SetToolTip(btnQueueWarmup, "Thêm cấu hình hiện tại vào danh sách bên dưới.");
-            warmupToolTip.SetToolTip(btnStartWarmupQueue, "Chạy toàn bộ hàng đợi theo thứ tự.");
-            warmupToolTip.SetToolTip(btnStartWarmup, "Chạy một lần với cấu hình trên. Có phiên dở dang thì đổi thành Tiếp tục.");
-            warmupToolTip.SetToolTip(btnPauseWarmupQueue, "Tạm dừng hoặc tiếp tục hàng đợi sau khi xong job hiện tại.");
-            warmupToolTip.SetToolTip(btnStopWarmupQueue, "Dừng hàng đợi hoặc phiên chạy ngay.");
-            warmupToolTip.SetToolTip(btnRemoveQueueJob, "Xóa dòng đang chọn (dừng hàng đợi trước).");
-            warmupToolTip.SetToolTip(chkEnableWarmupSchedule, "Bật để hẹn giờ khi thêm vào hàng đợi. Tắt = chạy khi bấm Chạy hàng đợi.");
+            warmupToolTip.SetToolTip(btnStartWarmupQueue, "Chọn chạy dòng đã chọn hoặc cả bảng hàng đợi.");
+            warmupToolTip.SetToolTip(btnPauseWarmupQueue, "Tạm dừng ngay job đang chạy. Bấm «Tiếp tục» để chạy lại — hàng đợi không tự chạy khi mở app.");
+            warmupToolTip.SetToolTip(btnStopWarmupQueue, "Dừng hẳn job hoặc hàng đợi đang chạy.");
+            warmupToolTip.SetToolTip(btnMoveQueueJobUp, "Di chuyển dòng đã chọn lên trên (ưu tiên chạy trước).");
+            warmupToolTip.SetToolTip(btnMoveQueueJobDown, "Di chuyển dòng đã chọn xuống dưới.");
+            warmupToolTip.SetToolTip(btnRemoveQueueJob, "Xóa một hoặc nhiều dòng đang chọn (dừng hàng đợi trước).");
+            warmupToolTip.SetToolTip(chkEnableWarmupSchedule, "Bật để hẹn giờ khi thêm vào hàng đợi. Tắt = chạy khi bấm Chạy.");
             warmupToolTip.SetToolTip(dtpWarmupSchedule, "Thời điểm chạy (giờ máy). Đến giờ app tự bắt đầu hàng đợi nếu chưa chạy.");
-            warmupToolTip.SetToolTip(numWatchMin, "Tổng thời gian xem tối thiểu cho cả phiên (cộng tất cả video).");
-            warmupToolTip.SetToolTip(numWatchMax, "Tổng thời gian xem tối đa cho cả phiên (cộng tất cả video).");
-            if (chkAutoResumeQueueOnStartup != null)
-            {
-                warmupToolTip.SetToolTip(chkAutoResumeQueueOnStartup, "Nếu lần trước đóng app khi hàng đợi đang tạm dừng, tự resume khi mở lại.");
-            }
+            warmupToolTip.SetToolTip(numWatchMin, "Tỷ lệ giữ chân tối thiểu (% thời lượng video, ví dụ 80).");
+            warmupToolTip.SetToolTip(numWatchMax, "Tỷ lệ giữ chân tối đa (% — trên 100 = xem lặp một phần).");
+            warmupToolTip.SetToolTip(numLikeProbability, "Số video sẽ tim trong phiên = % × số video. Ví dụ 50% × 5 video → tim khoảng 2–3 video (slot ngẫu nhiên).");
+            warmupToolTip.SetToolTip(numShareProbability, "Số video sẽ share trong phiên = % × số video. Ví dụ 20% × 5 video → share khoảng 1 video (slot ngẫu nhiên).");
+            warmupToolTip.SetToolTip(chkAutoComment, "Bật để bot có thể bình luận AI (cần API key).");
+            warmupToolTip.SetToolTip(numCommentProbability, "Số video sẽ comment trong phiên = % × số video. Ví dụ 50% × 5 video → comment khoảng 2–3 video (slot ngẫu nhiên).");
         }
 
         private static void AddWarmupConfigRow(TableLayoutPanel tbl, int row, string caption, Func<Control> createControl)
@@ -755,19 +988,19 @@ namespace tiktok_Omni
 
         private void ApplyWarmupQueueToolbarState()
         {
-            if (btnPauseWarmupQueue == null)
+            if (btnPauseWarmupQueue == null || btnStopWarmupQueue == null)
             {
                 return;
             }
 
-            var running = _isWarmupQueueRunning;
-            btnPauseWarmupQueue.Enabled = running;
-            if (!running)
-            {
-                btnPauseWarmupQueue.Text = "Tạm dừng";
-                SetWarmupJellyTint(btnPauseWarmupQueue, WarmupTintPause);
-            }
-            else if (_isWarmupQueuePaused)
+            var queueRunning = _isWarmupQueueRunning;
+            var manualRunning = _warmupCancellation != null;
+            var active = queueRunning || manualRunning;
+            var idle = !active;
+
+            btnPauseWarmupQueue.Visible = queueRunning;
+            btnPauseWarmupQueue.Enabled = queueRunning;
+            if (queueRunning && _isWarmupQueuePaused)
             {
                 btnPauseWarmupQueue.Text = "Tiếp tục";
                 SetWarmupJellyTint(btnPauseWarmupQueue, WarmupTintResume);
@@ -778,25 +1011,33 @@ namespace tiktok_Omni
                 SetWarmupJellyTint(btnPauseWarmupQueue, WarmupTintPause);
             }
 
-            if (btnStopWarmupQueue != null)
-            {
-                btnStopWarmupQueue.Enabled = running || _warmupCancellation != null;
-            }
-        }
+            btnStopWarmupQueue.Visible = active;
+            btnStopWarmupQueue.Enabled = active;
+            btnStopWarmupQueue.Text = "Dừng hẳn";
+            SetWarmupJellyTint(btnStopWarmupQueue, WarmupTintStop);
 
-        internal static void ApplyWarmupStartButtonResumeState(Button startButton, bool canResume)
-        {
-            if (startButton == null || startButton.IsDisposed)
+            if (btnStartWarmupQueue != null)
             {
-                return;
+                btnStartWarmupQueue.Enabled = idle;
             }
 
-            startButton.Text = canResume ? "Tiếp tục" : "Chạy ngay";
-            SetWarmupJellyTint(startButton, canResume ? WarmupTintResume : WarmupTintManual);
-            var width = MeasureWarmupButtonTextWidth(startButton.Text, WarmupJellyButtonFont) + 22;
-            startButton.Width = width;
-            startButton.MinimumSize = new Size(width, WarmupToolbarRowHeight);
-            startButton.MaximumSize = new Size(width, WarmupToolbarRowHeight);
+            if (btnQueueWarmup != null)
+            {
+                btnQueueWarmup.Enabled = idle;
+            }
+
+            if (btnMoveQueueJobUp != null)
+            {
+                btnMoveQueueJobUp.Enabled = idle;
+            }
+
+            if (btnMoveQueueJobDown != null)
+            {
+                btnMoveQueueJobDown.Enabled = idle;
+            }
+
+            ResizeAppJellyButton(btnPauseWarmupQueue, WarmupToolbarRowHeight);
+            ResizeAppJellyButton(btnStopWarmupQueue, WarmupToolbarRowHeight);
         }
 
         private static void SetWarmupJellyTint(Button button, Color tint)
@@ -810,33 +1051,7 @@ namespace tiktok_Omni
 
         private static JellyButton CreateWarmupActionButton(string name, string text, Color tint)
         {
-            const int horizontalPad = 22;
-            var width = MeasureWarmupButtonTextWidth(text, WarmupJellyButtonFont) + horizontalPad;
-
-            return new JellyButton
-            {
-                Name = name,
-                Text = text,
-                Font = WarmupJellyButtonFont,
-                JellyTint = tint,
-                JellyFillOpacity = 1f - JellyButton.DefaultTransparency,
-                ForeColor = Color.FromArgb(245, 247, 250),
-                AutoSize = false,
-                Width = width,
-                Height = WarmupToolbarRowHeight,
-                MinimumSize = new Size(width, WarmupToolbarRowHeight),
-                MaximumSize = new Size(width, WarmupToolbarRowHeight),
-                Margin = new Padding(0, 0, 6, 0)
-            };
-        }
-
-        private static int MeasureWarmupButtonTextWidth(string text, Font font)
-        {
-            return TextRenderer.MeasureText(
-                text,
-                font,
-                new Size(int.MaxValue, WarmupToolbarButtonHeight),
-                TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.GlyphOverhangPadding).Width;
+            return CreateAppJellyButton(name, text, tint, heightOverride: WarmupToolbarRowHeight);
         }
 
         private static FlowLayoutPanel CreateWarmupToolbarFlow(string name, params Control[] buttons)
@@ -846,8 +1061,10 @@ namespace tiktok_Omni
                 Name = name,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Fill,
-                WrapContents = true,
+                Dock = DockStyle.Top,
+                // false: PreferredHeight = 1 hàng nút — WrapContents=true dễ tính cao theo
+                // chiều hẹp rồi để khoảng trống lớn dưới nút khi panel rộng.
+                WrapContents = false,
                 FlowDirection = FlowDirection.LeftToRight,
                 Padding = Padding.Empty,
                 Margin = Padding.Empty,

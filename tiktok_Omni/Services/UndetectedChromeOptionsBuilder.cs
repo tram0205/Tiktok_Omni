@@ -12,11 +12,10 @@ namespace tiktok_Omni.Services
             var options = new ChromeOptions();
             options.PageLoadStrategy = PageLoadStrategy.Eager;
             options.AddArgument("--user-data-dir=" + userDataDir);
-            options.AddArgument("--disable-blink-features=AutomationControlled");
+            // Không dùng AutomationControlled — thanh vàng + TikTok dễ bỏ session khi Warmup (Playwright) mở lại.
             options.AddExcludedArgument("enable-automation");
             options.AddAdditionalOption("useAutomationExtension", false);
             options.AddArgument("--disable-dev-shm-usage");
-            options.AddArgument("--no-sandbox");
             options.AddArgument("--disable-infobars");
             options.AddArgument("--disable-extensions");
             options.AddArgument("--start-maximized");

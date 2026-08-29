@@ -52,6 +52,11 @@ namespace tiktok_Omni.Services
 
                     if (!IsTransientStatusCode(lastResponse.StatusCode) || attempt == _maxRetries)
                     {
+                        if ((int)lastResponse.StatusCode == 429)
+                        {
+                            throw new InvalidOperationException(BuildQuotaErrorMessage(lastResponse));
+                        }
+
                         var message = BuildErrorMessage(lastResponse, attempt);
                         throw new InvalidOperationException(message);
                     }
@@ -98,6 +103,32 @@ namespace tiktok_Omni.Services
 
             return $"API request failed after {attempt + 1} attempts. {statusLine} Details: {detail}";
         }
+
+        private static string BuildQuotaErrorMessage(RestResponse response)
+        {
+            var detail = string.IsNullOrWhiteSpace(response?.Content)
+                ? (response?.ErrorMessage ?? string.Empty)
+                : response.Content;
+            if (detail.IndexOf("GenerateRequestsPerDay", StringComparison.OrdinalIgnoreCase) >= 0
+                || detail.IndexOf("free_tier", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Gemini hết quota free tier (429). Đợi reset ngày, đổi model, hoặc bật billing. "
+                       + VideoReupRemixService.FormatGeminiQuotaShortMessage();
+            }
+
+            return "Gemini rate limit (429). Thử lại sau vài giây. "
+                   + TrimApiDetail(detail);
+        }
+
+        private static string TrimApiDetail(string detail)
+        {
+            if (string.IsNullOrWhiteSpace(detail))
+            {
+                return string.Empty;
+            }
+
+            return detail.Length <= 240 ? detail : detail.Substring(0, 237) + "…";
+        }
     }
 }
-
+

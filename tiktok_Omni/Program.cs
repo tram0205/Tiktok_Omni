@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using tiktok_Omni.Services;
 
@@ -8,6 +10,8 @@ namespace tiktok_Omni
 {
     internal static class Program
     {
+        private static int _consoleExitPass;
+
         [STAThread]
         private static void Main(string[] args)
         {
@@ -18,7 +22,90 @@ namespace tiktok_Omni
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new Form1());
+            // Xác nhận DPI awareness từ app.manifest (Output → Debug).
+            System.Diagnostics.Debug.WriteLine(
+                "Startup DPI-aware: " + Form1.IsAppDpiAware());
+            var mainForm = new Form1();
+            TryAttachConsoleCancelHandler(mainForm);
+            Application.Run(mainForm);
+            Environment.Exit(0);
+        }
+
+        /// <summary>dotnet run gắn console — Ctrl+C cần đóng WinForms, không chỉ dừng prompt.</summary>
+        private static void TryAttachConsoleCancelHandler(Form mainForm)
+        {
+            try
+            {
+                Console.CancelKeyPress += (_, e) =>
+                {
+                    e.Cancel = true;
+                    RequestConsoleExit(mainForm);
+                };
+            }
+            catch
+            {
+                // Không có console (chạy .exe trực tiếp) — bỏ qua.
+            }
+        }
+
+        private static void RequestConsoleExit(Form mainForm)
+        {
+            var pass = Interlocked.Increment(ref _consoleExitPass);
+            if (pass > 1)
+            {
+                Environment.Exit(0);
+                return;
+            }
+
+            // UI thread bị kẹt (GetResult/modal/render) → vẫn thoát sau vài giây.
+            Task.Run(async () =>
+            {
+                await Task.Delay(2500).ConfigureAwait(false);
+                Environment.Exit(0);
+            });
+
+            if (mainForm == null || mainForm.IsDisposed)
+            {
+                Environment.Exit(0);
+                return;
+            }
+
+            try
+            {
+                if (mainForm.InvokeRequired)
+                {
+                    mainForm.BeginInvoke(new Action(() => TryGracefulConsoleExit(mainForm)));
+                }
+                else
+                {
+                    TryGracefulConsoleExit(mainForm);
+                }
+            }
+            catch
+            {
+                Environment.Exit(0);
+            }
+        }
+
+        private static void TryGracefulConsoleExit(Form mainForm)
+        {
+            try
+            {
+                if (mainForm is Form1 app && !app.IsDisposed)
+                {
+                    app.ShutdownAndClose(fromConsole: true);
+                    return;
+                }
+
+                if (!mainForm.IsDisposed)
+                {
+                    mainForm.Close();
+                }
+            }
+            catch
+            {
+                Environment.Exit(0);
+            }
         }
 
         private static bool TryRunChromeLoginVerify(string[] args)

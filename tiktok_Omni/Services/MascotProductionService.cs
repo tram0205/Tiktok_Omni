@@ -15,10 +15,10 @@ namespace tiktok_Omni.Services
     /// </summary>
     public sealed class MascotProductionService : IDisposable
     {
-        private const string DefaultElevenLabsVoiceId = "pNInz6obpg8nEmeWscDJ";
         private const double TargetDurationSeconds = 45d;
 
         private readonly HttpClient _httpClient;
+        private readonly VideoService _videoService = new VideoService();
         private readonly LipSyncService _lipSyncService = new LipSyncService();
         private bool _disposed;
 
@@ -79,7 +79,7 @@ Trả lời duy nhất 1 chuỗi kịch bản lời thoại.";
 
             logger("Voice: Đang thổi hồn vào lời thoại (ElevenLabs)...");
             var audioPath = Path.Combine(workDir, "voiceover.mp3");
-            await GenerateElevenLabsVoiceAsync(script, settings.TtsApiKey, audioPath, cancellationToken)
+            await GenerateElevenLabsVoiceAsync(script, settings, audioPath, cancellationToken)
                 .ConfigureAwait(false);
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -161,13 +161,24 @@ Trả lời duy nhất 1 chuỗi kịch bản lời thoại.";
 
         private async Task GenerateElevenLabsVoiceAsync(
             string text,
-            string apiKey,
+            AppSettings settings,
             string outputPath,
             CancellationToken cancellationToken)
         {
-            if (string.IsNullOrWhiteSpace(apiKey))
+            if (string.IsNullOrWhiteSpace(settings?.TtsApiKey))
             {
                 throw new InvalidOperationException("TTS API Key (ElevenLabs) chưa cấu hình trong Cài đặt.");
+            }
+
+            if (string.IsNullOrWhiteSpace(settings.TtsEndpoint))
+            {
+                throw new InvalidOperationException("TTS Endpoint chưa cấu hình trong Cài đặt.");
+            }
+
+            if (!ElevenLabsTtsHelper.EndpointIncludesVoiceId(settings.TtsEndpoint))
+            {
+                throw new InvalidOperationException(
+                    "ElevenLabs: TTS Endpoint phải chứa Voice ID của voice bạn đã tạo (…/text-to-speech/{voice_id}).");
             }
 
             var line = (text ?? string.Empty).Trim();
@@ -178,32 +189,13 @@ Trả lời duy nhất 1 chuỗi kịch bản lời thoại.";
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
 
-            var voiceId = DefaultElevenLabsVoiceId;
-            var url = "https://api.elevenlabs.io/v1/text-to-speech/" + voiceId;
-            var body = JsonConvert.SerializeObject(new
-            {
-                text = line,
-                model_id = "eleven_multilingual_v2",
-                voice_settings = new { stability = 0.5, similarity_boost = 0.8 }
-            });
+            var tempMp3 = await _videoService.GenerateAudioAsync(
+                line,
+                settings,
+                cancellationToken,
+                emphaticHook: false).ConfigureAwait(false);
 
-            using (var request = new HttpRequestMessage(HttpMethod.Post, url))
-            {
-                request.Headers.TryAddWithoutValidation("xi-api-key", apiKey.Trim());
-                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-
-                using (var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false))
-                {
-                    var responseText = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        throw new InvalidOperationException("Lỗi ElevenLabs: " + responseText);
-                    }
-
-                    var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                    File.WriteAllBytes(outputPath, bytes);
-                }
-            }
+            File.Copy(tempMp3, outputPath, overwrite: true);
         }
 
         private static async Task RenderMascotSlideshowVideoAsync(
@@ -268,9 +260,8 @@ Trả lời duy nhất 1 chuỗi kịch bản lời thoại.";
                 return string.Empty;
             }
 
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var candidate = Path.Combine(baseDir, "Music", fileName);
-            return File.Exists(candidate) ? candidate : string.Empty;
+            var resolved = VideoReupRemixService.ResolveMusicFilePath(fileName, settings);
+            return string.IsNullOrWhiteSpace(resolved) ? string.Empty : resolved;
         }
 
         private static string ResolveFfmpegExecutable(AppSettings settings)

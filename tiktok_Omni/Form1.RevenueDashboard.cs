@@ -95,8 +95,6 @@ namespace tiktok_Omni
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 BackgroundColor = Color.FromArgb(20, 22, 28),
                 BorderStyle = BorderStyle.FixedSingle,
-                ColumnHeadersHeight = AppGridHeaderHeight,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
                 DefaultCellStyle =
                 {
                     BackColor = Color.FromArgb(31, 34, 42),
@@ -107,18 +105,16 @@ namespace tiktok_Omni
                 {
                     BackColor = Color.FromArgb(45, 49, 60),
                     ForeColor = Color.WhiteSmoke,
-                    Font = AppGridHeaderFont,
                     Alignment = DataGridViewContentAlignment.MiddleLeft,
-                    Padding = new Padding(6, 8, 6, 8),
                     WrapMode = DataGridViewTriState.False
-                },
-                EnableHeadersVisualStyles = false
+                }
             };
             dgvRevenueReport.Columns.Add("colDate", "Ngày");
             dgvRevenueReport.Columns.Add("colOrders", "Đơn");
             dgvRevenueReport.Columns.Add("colRevenue", "Doanh thu");
             dgvRevenueReport.Columns.Add("colCommission", "Hoa hồng");
             dgvRevenueReport.Columns.Add("colStatus", "Trạng thái");
+            ApplyAppGridChrome(dgvRevenueReport);
 
             var split = new SplitContainer
             {
@@ -128,6 +124,7 @@ namespace tiktok_Omni
             };
             split.Panel1.Controls.Add(chartRevenueCommission);
             split.Panel2.Controls.Add(dgvRevenueReport);
+            ApplyAppGridChrome(dgvRevenueReport);
 
             tabRevenueDashboard.Controls.Add(split);
             tabRevenueDashboard.Controls.Add(pnlTop);
@@ -270,6 +267,8 @@ namespace tiktok_Omni
             {
                 dgvRevenueReport.Rows.Add("(chưa có dữ liệu)", 0, 0, 0, "—");
             }
+
+            EnsureAppGridRowHeights(dgvRevenueReport);
         }
 
         private async Task TryDailyAffiliateRevenueFetchOnStartupAsync()

@@ -47,6 +47,14 @@ namespace tiktok_Omni.Services
                         return false;
                     }
 
+                    // ffmpeg in khá nhiều log phân tích stream ra stderr — nếu không đọc, buffer pipe
+                    // đầy sẽ làm ffmpeg bị chặn khi ghi tiếp, còn WaitForExit() thì chờ mãi (deadlock).
+                    // Đọc bất đồng bộ (Begin*ReadLine) để rút cạn 2 luồng song song trong lúc chờ thoát.
+                    process.OutputDataReceived += (_, __) => { };
+                    process.ErrorDataReceived += (_, __) => { };
+                    process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+
                     process.WaitForExit(120000);
                     return process.ExitCode == 0 && File.Exists(outputJpg);
                 }

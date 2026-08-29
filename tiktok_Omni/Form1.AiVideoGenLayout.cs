@@ -20,11 +20,83 @@ namespace tiktok_Omni
 
         private const int AiModeProgressBandHeight = 50;
 
+        private const int AiModeActionBandMinHeight = 60;
+
         private static readonly Padding AiModeInputPadding = new Padding(8, 6, 8, 6);
 
         private static readonly Padding AiModeLogPadding = new Padding(8, 6, 8, 8);
 
+        /// <summary>
+        /// WinForms dock: thêm Fill → Bottom → Top để hiển thị Top → Fill → Bottom.
+        /// </summary>
+        private static void ApplyTopFillBottomDockLayout(
+            Control host,
+            Control fill,
+            Control bottom = null,
+            Control top = null)
+        {
+            if (host == null)
+            {
+                return;
+            }
 
+            host.SuspendLayout();
+            try
+            {
+                host.Controls.Clear();
+                if (host is ScrollableControl scrollable)
+                {
+                    scrollable.AutoScroll = false;
+                }
+
+                if (fill != null)
+                {
+                    fill.Dock = DockStyle.Fill;
+                    fill.Margin = Padding.Empty;
+                    host.Controls.Add(fill);
+                }
+
+                if (bottom != null)
+                {
+                    bottom.Dock = DockStyle.Bottom;
+                    bottom.Margin = Padding.Empty;
+                    host.Controls.Add(bottom);
+                }
+
+                if (top != null)
+                {
+                    top.Dock = DockStyle.Top;
+                    top.Margin = Padding.Empty;
+                    host.Controls.Add(top);
+                }
+
+                fill?.BringToFront();
+
+                // net472: Controls.Add đè font header — áp lại khi fill là DataGridView.
+                if (fill is DataGridView fillGrid)
+                {
+                    ApplyAppGridChrome(fillGrid);
+                }
+            }
+            finally
+            {
+                host.ResumeLayout(false);
+            }
+        }
+
+        private static void ConfigureAiModeProgressPanel(Panel progressPanel)
+        {
+            if (progressPanel == null)
+            {
+                return;
+            }
+
+            progressPanel.Dock = DockStyle.Bottom;
+            progressPanel.Height = AiModeProgressBandHeight;
+            progressPanel.Padding = new Padding(8, 4, 8, 4);
+            progressPanel.Margin = Padding.Empty;
+            progressPanel.MinimumSize = new Size(0, AiModeProgressBandHeight);
+        }
 
         private static void ConfigureAiModeTabPage(TabPage page)
 
@@ -32,7 +104,7 @@ namespace tiktok_Omni
 
             page.AutoScroll = false;
 
-            page.Padding = new Padding(AiModeChromePadding, 6, AiModeChromePadding, AiModeChromePadding);
+            page.Padding = Padding.Empty;
 
         }
 
@@ -49,11 +121,8 @@ namespace tiktok_Omni
 
 
         /// <summary>
-
-        /// Tab mode: hàng nhập Absolute, hàng log Percent 100%; panel tiến độ (nếu có) Dock Bottom trên TabPage.
-
+        /// Tab mode: toolbar/input (Top trong Fill) + log; progress Dock Bottom trên TabPage.
         /// </summary>
-
         private static void BuildAiModeFillLayout(
 
             TabPage page,
@@ -70,25 +139,10 @@ namespace tiktok_Omni
 
             ConfigureAiModeTabPage(page);
 
-
-
             if (bottomProgressPanel != null)
-
             {
-
-                bottomProgressPanel.Dock = DockStyle.Bottom;
-
-                bottomProgressPanel.Height = AiModeProgressBandHeight;
-
-                bottomProgressPanel.Padding = new Padding(8, 4, 8, 4);
-
-                bottomProgressPanel.Margin = new Padding(0);
-
-                page.Controls.Add(bottomProgressPanel);
-
+                ConfigureAiModeProgressPanel(bottomProgressPanel);
             }
-
-
 
             var tbl = new TableLayoutPanel
 
@@ -158,7 +212,7 @@ namespace tiktok_Omni
 
             tbl.Controls.Add(logPanel, 0, 1);
 
-            page.Controls.Add(tbl);
+            ApplyTopFillBottomDockLayout(page, tbl, bottomProgressPanel, top: null);
 
         }
 
@@ -174,11 +228,7 @@ namespace tiktok_Omni
 
             if (bottomProgressPanel != null)
             {
-                bottomProgressPanel.Dock = DockStyle.Bottom;
-                bottomProgressPanel.Height = AiModeProgressBandHeight;
-                bottomProgressPanel.Padding = new Padding(8, 4, 8, 4);
-                bottomProgressPanel.Margin = new Padding(0);
-                page.Controls.Add(bottomProgressPanel);
+                ConfigureAiModeProgressPanel(bottomProgressPanel);
             }
 
             var pct = Math.Max(32F, Math.Min(52F, inputRowPercent));
@@ -216,7 +266,7 @@ namespace tiktok_Omni
 
             tbl.Controls.Add(inputPanel, 0, 0);
             tbl.Controls.Add(logPanel, 0, 1);
-            page.Controls.Add(tbl);
+            ApplyTopFillBottomDockLayout(page, tbl, bottomProgressPanel, top: null);
         }
 
         private static void BuildAiModeFillLayout(
@@ -236,19 +286,8 @@ namespace tiktok_Omni
             ConfigureAiModeHostPanel(page);
 
             if (bottomProgressPanel != null)
-
             {
-
-                bottomProgressPanel.Dock = DockStyle.Bottom;
-
-                bottomProgressPanel.Height = AiModeProgressBandHeight;
-
-                bottomProgressPanel.Padding = new Padding(8, 4, 8, 4);
-
-                bottomProgressPanel.Margin = new Padding(0);
-
-                page.Controls.Add(bottomProgressPanel);
-
+                ConfigureAiModeProgressPanel(bottomProgressPanel);
             }
 
             var tbl = new TableLayoutPanel
@@ -315,11 +354,11 @@ namespace tiktok_Omni
 
             tbl.Controls.Add(logPanel, 0, 1);
 
-            page.Controls.Add(tbl);
+            ApplyTopFillBottomDockLayout(page, tbl, bottomProgressPanel, top: null);
 
         }
 
-        /// <summary>Chỉ một hàng toolbar (Slideshow / Affiliate khi bảng SP ở tab chính).</summary>
+        /// <summary>Chỉ một hàng toolbar — chiếm Fill (toolbar nằm trong mode host).</summary>
         private static void BuildAiModeToolbarOnlyLayout(Panel page, out Panel toolbarPanel)
         {
             ConfigureAiModeHostPanel(page);
@@ -334,7 +373,7 @@ namespace tiktok_Omni
                 BackColor = page.BackColor
             };
 
-            page.Controls.Add(toolbarPanel);
+            ApplyTopFillBottomDockLayout(page, toolbarPanel, bottom: null, top: null);
         }
 
         /// <summary>Readiness + toolbar trong TableLayout (tránh Location tuyệt đối bị cắt).</summary>
@@ -653,6 +692,174 @@ namespace tiktok_Omni
 
             inputPanel.Resize += (_, __) => Apply();
 
+        }
+
+        /// <summary>
+        /// Tab AI Video Gen: Top (action bar) → Fill (lưới + script) → Bottom (tiến độ render).
+        /// </summary>
+        private void WireAiVideoGenLayout(TabPage tab)
+        {
+            if (tab == null)
+            {
+                return;
+            }
+
+            tab.SuspendLayout();
+            try
+            {
+                ConfigureAiModeTabPage(tab);
+
+                DetachControlFromParent(pnlAiVideoGenRenderStatusHost);
+                DetachControlFromParent(pnlAiVideoGenActionBar);
+                DetachControlFromParent(tblAiVideoGenRoot);
+                DetachControlFromParent(_pnlAiVideoGenGridContainer);
+
+                if (pnlAiVideoGenRenderStatusHost != null)
+                {
+                    ConfigureAiModeProgressPanel(pnlAiVideoGenRenderStatusHost);
+
+                    if (grpAiRenderProgress != null)
+                    {
+                        grpAiRenderProgress.Dock = DockStyle.Fill;
+                        EnsureControlChild(pnlAiVideoGenRenderStatusHost, grpAiRenderProgress);
+                    }
+                }
+
+                if (pnlAiVideoGenActionBar != null)
+                {
+                    pnlAiVideoGenActionBar.Dock = DockStyle.Top;
+                    pnlAiVideoGenActionBar.AutoSize = true;
+                    pnlAiVideoGenActionBar.MinimumSize = new Size(0, AiModeActionBandMinHeight);
+                    pnlAiVideoGenActionBar.Padding = new Padding(8, 4, 8, 4);
+                    pnlAiVideoGenActionBar.Margin = Padding.Empty;
+                }
+
+                if (_pnlAiVideoGenGridContainer == null || _pnlAiVideoGenGridContainer.IsDisposed)
+                {
+                    _pnlAiVideoGenGridContainer = new Panel
+                    {
+                        Name = "pnlAiVideoGenGridContainer",
+                        BackColor = tab.BackColor,
+                        Padding = new Padding(4)
+                    };
+                }
+                else
+                {
+                    _pnlAiVideoGenGridContainer.Controls.Clear();
+                    _pnlAiVideoGenGridContainer.Padding = new Padding(4);
+                }
+
+                if (tblAiVideoGenRoot != null)
+                {
+                    tblAiVideoGenRoot.Dock = DockStyle.Fill;
+                    tblAiVideoGenRoot.Margin = Padding.Empty;
+                    _pnlAiVideoGenGridContainer.Controls.Add(tblAiVideoGenRoot);
+                }
+                else if (dgvAiVideoGenInput != null)
+                {
+                    dgvAiVideoGenInput.Dock = DockStyle.Fill;
+                    dgvAiVideoGenInput.Margin = Padding.Empty;
+                    _pnlAiVideoGenGridContainer.Controls.Add(dgvAiVideoGenInput);
+                }
+
+                ApplyTopFillBottomDockLayout(
+                    tab,
+                    _pnlAiVideoGenGridContainer,
+                    pnlAiVideoGenRenderStatusHost,
+                    pnlAiVideoGenActionBar);
+
+                tblAiVideoGenRoot?.BringToFront();
+                dgvAiVideoGenInput?.BringToFront();
+            }
+            finally
+            {
+                tab.ResumeLayout(true);
+                tab.PerformLayout();
+            }
+        }
+
+        /// <summary>Slideshow grid host: Fill = lưới, Top = nhập link.</summary>
+        private void WireSlideshowProductGridLayout()
+        {
+            if (pnlSlideshowGridHost == null)
+            {
+                return;
+            }
+
+            pnlSlideshowGridHost.Padding = new Padding(0, 4, 0, 0);
+            DetachControlFromParent(dgvAiVideoGenInput);
+            DetachControlFromParent(pnlManualInput);
+
+            if (dgvAiVideoGenInput != null)
+            {
+                dgvAiVideoGenInput.Margin = Padding.Empty;
+            }
+
+            if (pnlManualInput != null)
+            {
+                pnlManualInput.MinimumSize = new Size(0, pnlManualInput.Height > 0 ? pnlManualInput.Height : 40);
+            }
+
+            ApplyTopFillBottomDockLayout(
+                pnlSlideshowGridHost,
+                dgvAiVideoGenInput,
+                bottom: null,
+                pnlManualInput);
+        }
+
+        /// <summary>Affiliate Deep: lưới cảnh chiếm Fill.</summary>
+        private void WireDeepDiveProductGridLayout()
+        {
+            if (pnlDeepDiveGridHost == null || dgvDeepDiveInput == null)
+            {
+                return;
+            }
+
+            DetachControlFromParent(dgvDeepDiveInput);
+            dgvDeepDiveInput.Margin = Padding.Empty;
+            ApplyTopFillBottomDockLayout(pnlDeepDiveGridHost, dgvDeepDiveInput, bottom: null, top: null);
+        }
+
+        /// <summary>Showcase tab: lưới ảnh chiếm full.</summary>
+        private void WireShowcaseProductGridLayout()
+        {
+            if (pnlAffiliateDeepProductGridHost == null || dgvDeepDiveInput == null)
+            {
+                return;
+            }
+
+            DetachControlFromParent(dgvDeepDiveInput);
+            dgvDeepDiveInput.Margin = Padding.Empty;
+
+            ApplyTopFillBottomDockLayout(
+                pnlAffiliateDeepProductGridHost,
+                dgvDeepDiveInput,
+                bottom: null,
+                top: null);
+
+            dgvDeepDiveInput.Visible = true;
+        }
+
+        private static void DetachControlFromParent(Control control)
+        {
+            if (control?.Parent != null)
+            {
+                control.Parent.Controls.Remove(control);
+            }
+        }
+
+        private static void EnsureControlChild(Control parent, Control child)
+        {
+            if (parent == null || child == null)
+            {
+                return;
+            }
+
+            if (child.Parent != parent)
+            {
+                DetachControlFromParent(child);
+                parent.Controls.Add(child);
+            }
         }
     }
 

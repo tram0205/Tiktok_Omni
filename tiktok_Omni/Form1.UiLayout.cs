@@ -18,9 +18,11 @@ namespace tiktok_Omni
                 TextAlign = ContentAlignment.MiddleLeft,
                 ForeColor = UiBannerFore,
                 BackColor = UiBannerBack,
-                Font = new Font("Segoe UI", 9.25F, FontStyle.Regular, GraphicsUnit.Point),
-                Padding = new Padding(12, 0, 8, 0),
-                AutoEllipsis = true
+                Font = AppLabelFont,
+                // Padding dọc để chữ không bị cắt mép trên/dưới khi hàng Absolute thấp.
+                Padding = new Padding(12, 6, 8, 6),
+                AutoEllipsis = true,
+                MinimumSize = new Size(0, 40)
             };
             parent?.Controls.Add(banner);
             return banner;
@@ -34,7 +36,7 @@ namespace tiktok_Omni
                 AutoSize = true,
                 Margin = new Padding(0, 8, 0, 6),
                 ForeColor = Color.FromArgb(120, 200, 255),
-                Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point)
+                Font = AppCaptionFont
             };
         }
 
@@ -49,7 +51,7 @@ namespace tiktok_Omni
                 Dock = DockStyle.Top,
                 Height = height,
                 ForeColor = Color.FromArgb(255, 180, 120),
-                Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point),
+                Font = AppLabelFont,
                 Padding = new Padding(4, 4, 4, 4)
             };
         }

@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using tiktok_Omni.Helpers;
 using tiktok_Omni.Services.Affiliate;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -244,6 +245,7 @@ namespace tiktok_Omni.Services
             string runningProfileName)
         {
             return BrowserLock.WithLockAsync(
+                ProfileScopedPaths.ResolveProfileName(runningProfileName),
                 ct => HuntConsumerShopCoreAsync(
                     keywords,
                     maxResults,
@@ -252,6 +254,19 @@ namespace tiktok_Omni.Services
                     configManager,
                     runningProfileName),
                 cancellationToken);
+        }
+
+        public async Task<List<AffiliateCandidate>> HuntWithCookieAsync(string keyword, string cookie)
+        {
+            var service = new TikTokApiService();
+            try
+            {
+                return await service.SearchProductsAsync(keyword, cookie).ConfigureAwait(false);
+            }
+            catch
+            {
+                throw;
+            }
         }
 
         private const string MobileShopUserAgent =
@@ -703,36 +718,32 @@ namespace tiktok_Omni.Services
                     runningProfileName).ConfigureAwait(false);
             }
 
+            AppSettings huntSettings = null;
             if (configManager != null)
             {
-                var settings = await configManager.LoadAsync().ConfigureAwait(false);
-                var huntMethod = !string.IsNullOrWhiteSpace(overrideHuntMethod) ? overrideHuntMethod : settings.TikTokHuntMethod;
-                var fallbackToBrowser = overrideFallbackToBrowser.HasValue ? overrideFallbackToBrowser.Value : settings.TikTokRapidApiFallbackToBrowser;
+                huntSettings = await configManager.LoadAsync().ConfigureAwait(false);
+            }
 
-                if (TikTokHuntMethods.IsRapidApi(huntMethod))
+            if (ShouldHuntTikTokVideoViaRapidApi(huntSettings, overrideHuntMethod))
+            {
+                try
                 {
-                    try
-                    {
-                        logAction?.Invoke("[Affiliate] Săn Video qua RapidAPI (tiktok-api23) — không mở Chrome.");
-                        var rapid = new TikTokRapidApiService();
-                        return await rapid.SearchVideosAsync(
-                            keywords,
-                            maxResults,
-                            settings.TikTokRapidApiKey,
-                            logAction,
-                            cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        logAction?.Invoke("[RapidAPI] Lỗi: " + ex.Message);
-                        if (!fallbackToBrowser)
-                        {
-                            throw;
-                        }
-
-                        logAction?.Invoke("[RapidAPI] API lỗi → chuyển sang Browser (Playwright) theo cài đặt.");
-                    }
+                    return await HuntVideoViaRapidApiAsync(
+                        keywords,
+                        maxResults,
+                        huntSettings,
+                        cancellationToken,
+                        logAction,
+                        runningProfileName).ConfigureAwait(false);
                 }
+                catch (Exception ex) when (ResolveTikTokFallbackToBrowser(huntSettings, overrideFallbackToBrowser))
+                {
+                    logAction?.Invoke($"[Affiliate] RapidAPI lỗi ({ex.Message}) — chuyển sang Playwright…");
+                }
+            }
+            else if (IsRapidApiHuntMode(huntSettings, overrideHuntMethod) && string.IsNullOrWhiteSpace(huntSettings?.TikTokRapidApiKey))
+            {
+                logAction?.Invoke("[Affiliate] Chế độ RapidAPI nhưng chưa có key — dùng Playwright.");
             }
 
             var browser = new BrowserAutomation();
@@ -885,6 +896,76 @@ namespace tiktok_Omni.Services
             }
         }
 
+        private static bool IsRapidApiHuntMode(AppSettings settings, string overrideHuntMethod = null) =>
+            TikTokHuntMethods.IsRapidApi(ResolveTikTokHuntMethod(settings, overrideHuntMethod));
+
+        private static bool ShouldHuntTikTokVideoViaRapidApi(AppSettings settings, string overrideHuntMethod = null) =>
+            IsRapidApiHuntMode(settings, overrideHuntMethod) && !string.IsNullOrWhiteSpace(settings?.TikTokRapidApiKey);
+
+        private static bool ResolveTikTokFallbackToBrowser(AppSettings settings, bool? overrideFallbackToBrowser) =>
+            overrideFallbackToBrowser
+            ?? settings?.AffiliateTikTokApiFallbackBrowser
+            ?? settings?.TikTokRapidApiFallbackToBrowser
+            ?? true;
+
+        private static string ResolveTikTokHuntMethod(AppSettings settings, string overrideHuntMethod)
+        {
+            if (!string.IsNullOrWhiteSpace(overrideHuntMethod))
+            {
+                return overrideHuntMethod.Trim();
+            }
+
+            if (settings == null)
+            {
+                return TikTokVideoHuntModes.Browser;
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.TikTokHuntMethod))
+            {
+                return settings.TikTokHuntMethod.Trim();
+            }
+
+            return (settings.AffiliateTikTokVideoHuntMode ?? string.Empty).Trim();
+        }
+
+        private async Task<List<AffiliateCandidate>> HuntVideoViaRapidApiAsync(
+            string keywords,
+            int maxResults,
+            AppSettings settings,
+            CancellationToken cancellationToken,
+            Action<string> logAction,
+            string runningProfileName)
+        {
+            var profile = ProfileScopedPaths.ResolveProfileName(runningProfileName);
+            logAction?.Invoke($"[Affiliate] RapidAPI «{keywords}» — thu tối đa {maxResults} video, giữ top view/trend…");
+
+            var service = new TikTokApiService();
+            var results = await service.SearchVideosAsync(
+                keywords,
+                maxResults,
+                settings.TikTokRapidApiKey,
+                settings.TikTokRapidApiHost,
+                logAction,
+                cancellationToken).ConfigureAwait(false);
+
+            foreach (var c in results ?? new List<AffiliateCandidate>())
+            {
+                if (c == null)
+                {
+                    continue;
+                }
+
+                c.ProfileName = profile;
+                if (string.IsNullOrWhiteSpace(c.SourcePlatform))
+                {
+                    c.SourcePlatform = AffiliateSourceIds.TikTok;
+                }
+            }
+
+            logAction?.Invoke($"[Affiliate] RapidAPI hoàn tất: {results?.Count ?? 0} video cho «{keywords}» @ {profile}.");
+            return results ?? new List<AffiliateCandidate>();
+        }
+
         private async Task<List<AffiliateCandidate>> HuntShopViaSeleniumAsync(
             string keywords,
             int maxResults,
@@ -922,6 +1003,7 @@ namespace tiktok_Omni.Services
             logAction?.Invoke("[Shop/Selenium] Đang chờ lượt Chrome (đóng Chrome khác nếu chờ quá 2 phút)…");
 
             return await BrowserLock.WithLockAsync(
+                    ProfileScopedPaths.ResolveProfileName(effectiveProfileName),
                     ct => Task.Run(
                         () => HuntShopViaSeleniumSync(
                             keywords,
@@ -2512,8 +2594,9 @@ return bestScore >= 20 ? best : null;") as IWebElement;
             if (images != null && images.Count > 0)
                 throw new Exception("Video này là định dạng Ảnh trượt (Slideshow). Không thể phát MP4. Vui lòng chọn video khác!");
 
-            var play = data["play"]?.ToString();
-            if (string.IsNullOrWhiteSpace(play)) play = data["hdplay"]?.ToString();
+            // Ưu tiên HD → chất lượng gốc cao nhất; fallback về play chuẩn
+            var play = data["hdplay"]?.ToString();
+            if (string.IsNullOrWhiteSpace(play)) play = data["play"]?.ToString();
             if (string.IsNullOrWhiteSpace(play))
                 throw new Exception("TikWM API không thể bóc tách được video này.");
             if (play.StartsWith("/", StringComparison.Ordinal))
@@ -3076,31 +3159,31 @@ return bestScore >= 20 ? best : null;") as IWebElement;
             foreach (var c in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                sb.Append(EscapeCsv(c.SourceKeyword)).Append(',');
-                sb.Append(EscapeCsv(c.ProductName)).Append(',');
-                sb.Append(EscapeCsv(c.Category)).Append(',');
-                sb.Append(EscapeCsv(c.Price)).Append(',');
-                sb.Append(EscapeCsv(c.ImageUrl)).Append(',');
-                sb.Append(EscapeCsv(c.CommissionRate)).Append(',');
-                sb.Append(EscapeCsv(c.Creator)).Append(',');
-                sb.Append(EscapeCsv(c.VideoUrl)).Append(',');
-                sb.Append(EscapeCsv(c.ProfileUrl)).Append(',');
-                sb.Append(EscapeCsv(c.Hashtags)).Append(',');
-                sb.Append(EscapeCsv(c.LinkedProduct)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.SourceKeyword)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.ProductName)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.Category)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.Price)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.ImageUrl)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.CommissionRate)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.Creator)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.VideoUrl)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.ProfileUrl)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.Hashtags)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.LinkedProduct)).Append(',');
                 sb.Append(c.PlayCount).Append(',');
                 sb.Append(c.LikeCount).Append(',');
                 sb.Append(c.CommentCount).Append(',');
                 sb.Append(c.ShareCount).Append(',');
                 sb.Append(c.CollectCount).Append(',');
                 sb.Append(c.DurationSeconds).Append(',');
-                sb.Append(EscapeCsv(c.CreateTimeUtc == DateTime.MinValue ? string.Empty : c.CreateTimeUtc.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',');
-                sb.Append(EscapeCsv(c.MetricsCapturedAtUtc == DateTime.MinValue ? string.Empty : c.MetricsCapturedAtUtc.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',');
-                sb.Append(EscapeCsv(c.VideoScript)).Append(',');
-                sb.Append(EscapeCsv(c.VoiceoverTranscript)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.CreateTimeUtc == DateTime.MinValue ? string.Empty : c.CreateTimeUtc.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.MetricsCapturedAtUtc == DateTime.MinValue ? string.Empty : c.MetricsCapturedAtUtc.ToString("yyyy-MM-dd HH:mm:ss"))).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.VideoScript)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.VoiceoverTranscript)).Append(',');
                 sb.Append(c.SafetyScore).Append(',');
-                sb.Append(EscapeCsv(c.SafetyRiskSummary)).Append(',');
-                sb.Append(EscapeCsv(c.LastDeepDiveError)).Append(',');
-                sb.Append(EscapeCsv(c.LastMetricsError)).AppendLine();
+                sb.Append(TextHelper.EscapeCsv(c.SafetyRiskSummary)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.LastDeepDiveError)).Append(',');
+                sb.Append(TextHelper.EscapeCsv(c.LastMetricsError)).AppendLine();
             }
 
             using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.Read))
@@ -3343,18 +3426,6 @@ return bestScore >= 20 ? best : null;") as IWebElement;
             }
 
             return url.Substring(start, end - start);
-        }
-
-        private static string EscapeCsv(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return string.Empty;
-            }
-
-            var needsQuotes = value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0;
-            var escaped = value.Replace("\"", "\"\"");
-            return needsQuotes ? "\"" + escaped + "\"" : escaped;
         }
 
         private static async Task LogShopDiagnosticsAsync(BrowserAutomation browserPageWrapper, Action<string> logAction)

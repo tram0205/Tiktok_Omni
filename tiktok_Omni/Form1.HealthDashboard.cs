@@ -27,9 +27,12 @@ namespace tiktok_Omni
             lblHealthSummary = new Label
             {
                 Dock = DockStyle.Top,
-                Height = 48,
+                Height = 36,
+                Padding = new Padding(8, 8, 8, 4),
                 ForeColor = Color.FromArgb(180, 220, 255),
-                Text = "Đang tải số liệu…"
+                Font = AppLabelFont,
+                Text = "Đang tải số liệu…",
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
             var split = new SplitContainer
@@ -43,6 +46,7 @@ namespace tiktok_Omni
             dgvHealthToday.Columns.Add("Pipeline", "Luồng");
             dgvHealthToday.Columns.Add("Count", "Video hôm nay");
             dgvHealthToday.Dock = DockStyle.Fill;
+            ApplyAppGridChrome(dgvHealthToday);
 
             dgvHealthPipeline = CreateHealthGrid();
             dgvHealthPipeline.Columns.Add("Pipeline", "Luồng");
@@ -50,21 +54,28 @@ namespace tiktok_Omni
             dgvHealthPipeline.Columns.Add("Failed", "Thất bại");
             dgvHealthPipeline.Columns.Add("Rate", "Tỉ lệ %");
             dgvHealthPipeline.Dock = DockStyle.Fill;
+            ApplyAppGridChrome(dgvHealthPipeline);
 
             var lblToday = new Label
             {
                 Text = "Video sản xuất hôm nay (theo luồng)",
                 Dock = DockStyle.Fill,
-                Height = 24,
+                AutoSize = false,
+                Height = 30,
+                Margin = new Padding(0, 4, 0, 2),
                 ForeColor = Color.FromArgb(200, 204, 214),
+                Font = AppCaptionFont,
                 TextAlign = ContentAlignment.MiddleLeft
             };
             var lblPipe = new Label
             {
                 Text = "Tỉ lệ thành công / thất bại",
                 Dock = DockStyle.Fill,
-                Height = 24,
+                AutoSize = false,
+                Height = 30,
+                Margin = new Padding(0, 8, 0, 2),
                 ForeColor = Color.FromArgb(200, 204, 214),
+                Font = AppCaptionFont,
                 TextAlign = ContentAlignment.MiddleLeft
             };
 
@@ -84,20 +95,27 @@ namespace tiktok_Omni
             tblHealthGrids.Controls.Add(dgvHealthToday, 0, 1);
             tblHealthGrids.Controls.Add(lblPipe, 0, 2);
             tblHealthGrids.Controls.Add(dgvHealthPipeline, 0, 3);
+            ApplyAppGridChrome(dgvHealthToday);
+            ApplyAppGridChrome(dgvHealthPipeline);
 
             lstHealthApiAlerts = new ListBox
             {
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(20, 22, 28),
                 ForeColor = Color.FromArgb(255, 180, 120),
-                BorderStyle = BorderStyle.FixedSingle
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10F, FontStyle.Regular),
+                IntegralHeight = false
             };
             var lblAlerts = new Label
             {
                 Text = "Cảnh báo API (Veo / Gemini / TTS)",
                 Dock = DockStyle.Top,
-                Height = 22,
-                ForeColor = Color.FromArgb(255, 200, 100)
+                Height = 30,
+                Padding = new Padding(4, 4, 4, 2),
+                ForeColor = Color.FromArgb(255, 200, 100),
+                Font = AppCaptionFont,
+                TextAlign = ContentAlignment.MiddleLeft
             };
             split.Panel1.Controls.Add(tblHealthGrids);
             split.Panel2.Controls.Add(lstHealthApiAlerts);
@@ -108,7 +126,7 @@ namespace tiktok_Omni
                 Name = "btnHealthOpenSettings",
                 Text = "Mở Cài đặt (API Keys)",
                 Dock = DockStyle.Top,
-                Height = 32,
+                Height = 36,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(76, 110, 245),
                 ForeColor = Color.White,
@@ -123,7 +141,7 @@ namespace tiktok_Omni
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(8, 4, 8, 6),
+                Padding = new Padding(8, 8, 8, 10),
                 BackColor = Color.FromArgb(28, 30, 38)
             };
 
@@ -131,9 +149,10 @@ namespace tiktok_Omni
             {
                 Text = "Checklist sẵn sàng hệ thống",
                 Dock = DockStyle.Top,
-                Height = 22,
+                Height = 28,
                 ForeColor = Color.FromArgb(200, 204, 214),
-                Font = new Font("Segoe UI", 9F, FontStyle.Bold)
+                Font = AppCaptionFont,
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
             lblHealthReadiness = new Label
@@ -141,8 +160,10 @@ namespace tiktok_Omni
                 Name = "lblHealthReadiness",
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 180, 120),
+                Font = AppLabelFont,
                 Text = "Checklist s\u1eb5n s\u00e0ng: \u2026",
-                Margin = new Padding(0, 0, 12, 0)
+                Margin = new Padding(0, 6, 12, 4),
+                MinimumSize = new Size(0, 28)
             };
 
             btnHealthRecheck = new Button
@@ -150,11 +171,11 @@ namespace tiktok_Omni
                 Name = "btnHealthRecheck",
                 Text = "Ki\u1ec3m tra l\u1ea1i",
                 AutoSize = true,
-                MinimumSize = new Size(120, 28),
+                MinimumSize = new Size(120, 32),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(60, 64, 77),
                 ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 2, 0, 0)
+                Margin = new Padding(0, 4, 0, 4)
             };
             btnHealthRecheck.FlatAppearance.BorderSize = 0;
             btnHealthRecheck.Click += btnHealthRecheckHealth_Click;
@@ -165,10 +186,12 @@ namespace tiktok_Omni
                 Minimum = 1,
                 Maximum = 16,
                 Value = 2,
-                Width = 48,
+                Width = 56,
+                MinimumSize = new Size(56, 28),
                 BackColor = Color.FromArgb(45, 49, 60),
                 ForeColor = Color.WhiteSmoke,
-                Margin = new Padding(0, 2, 0, 0)
+                Font = AppInputFont,
+                Margin = new Padding(0, 4, 0, 4)
             };
             numMaxConcurrentJobs.ValueChanged += async (_, __) =>
             {
@@ -191,14 +214,16 @@ namespace tiktok_Omni
                 AutoSize = true,
                 WrapContents = true,
                 FlowDirection = FlowDirection.LeftToRight,
-                Padding = new Padding(0, 0, 0, 6)
+                Padding = new Padding(0, 4, 0, 8)
             };
             flpJobConcurrency.Controls.Add(new Label
             {
                 Text = "Max jobs song song",
                 AutoSize = true,
                 ForeColor = Color.FromArgb(200, 204, 214),
-                Margin = new Padding(0, 6, 6, 0)
+                Font = AppLabelFont,
+                Margin = new Padding(0, 8, 8, 4),
+                MinimumSize = new Size(0, 28)
             });
             flpJobConcurrency.Controls.Add(numMaxConcurrentJobs);
 
@@ -208,7 +233,7 @@ namespace tiktok_Omni
                 AutoSize = true,
                 WrapContents = true,
                 FlowDirection = FlowDirection.LeftToRight,
-                Padding = new Padding(0, 2, 0, 0)
+                Padding = new Padding(0, 4, 0, 2)
             };
             flpReadiness.Controls.Add(lblHealthReadiness);
             flpReadiness.Controls.Add(btnHealthRecheck);
@@ -233,29 +258,29 @@ namespace tiktok_Omni
             {
                 ReadOnly = true,
                 AllowUserToAddRows = false,
+                AllowUserToResizeRows = false,
                 RowHeadersVisible = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 BackgroundColor = Color.FromArgb(20, 22, 28),
                 BorderStyle = BorderStyle.FixedSingle,
-                ColumnHeadersHeight = AppGridHeaderHeight,
-                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
-                EnableHeadersVisualStyles = false,
                 DefaultCellStyle =
                 {
                     BackColor = Color.FromArgb(31, 34, 42),
                     ForeColor = Color.Gainsboro,
-                    SelectionBackColor = Color.FromArgb(76, 110, 245)
+                    SelectionBackColor = Color.FromArgb(76, 110, 245),
+                    SelectionForeColor = Color.White,
+                    Padding = new Padding(8, 4, 8, 4),
+                    WrapMode = DataGridViewTriState.False
+                },
+                ColumnHeadersDefaultCellStyle =
+                {
+                    BackColor = Color.FromArgb(36, 39, 48),
+                    ForeColor = Color.Gainsboro,
+                    Alignment = DataGridViewContentAlignment.MiddleLeft,
+                    WrapMode = DataGridViewTriState.False
                 }
             };
-            grid.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle
-            {
-                BackColor = Color.FromArgb(36, 39, 48),
-                ForeColor = Color.Gainsboro,
-                Font = AppGridHeaderFont,
-                Alignment = DataGridViewContentAlignment.MiddleLeft,
-                Padding = new Padding(6, 8, 6, 8),
-                WrapMode = DataGridViewTriState.False
-            };
+            ApplyAppGridChrome(grid);
             return grid;
         }
 
@@ -281,6 +306,8 @@ namespace tiktok_Omni
                 {
                     dgvHealthToday.Rows.Add("(chưa có)", 0);
                 }
+
+                EnsureAppGridRowHeights(dgvHealthToday);
             }
 
             if (dgvHealthPipeline != null)
@@ -296,6 +323,8 @@ namespace tiktok_Omni
                         st.Failed,
                         st.SuccessRatePercent.ToString("0.#") + "%");
                 }
+
+                EnsureAppGridRowHeights(dgvHealthPipeline);
             }
 
             if (lstHealthApiAlerts != null)

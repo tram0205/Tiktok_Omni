@@ -12,7 +12,7 @@ namespace tiktok_Omni.Services
 
         public static string GetVaultRoot()
         {
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? ".", "AvatarVault");
+            return AppDataPaths.ResolveAvatarVaultRoot();
         }
 
         public static string GetProfileDirectory(string profileName)
@@ -62,6 +62,36 @@ namespace tiktok_Omni.Services
             var path = GetPackFilePath(profileName);
             var json = JsonConvert.SerializeObject(config, Formatting.Indented);
             File.WriteAllText(path, json, TextFileEncoding.Utf8NoBom);
+        }
+
+        /// <summary>
+        /// Trả về đường dẫn ảnh linh vật/nhân vật chính của profile (mascot.* trong AvatarVault).
+        /// Dùng cho hook intro AI Video reup.
+        /// </summary>
+        public static bool TryGetMascotImagePath(string profileName, out string mascotPath, out string errorMessage)
+        {
+            mascotPath = string.Empty;
+            errorMessage = string.Empty;
+            var nick = ProfileScopedPaths.ResolveProfileName(profileName);
+            if (string.IsNullOrWhiteSpace(nick))
+            {
+                errorMessage = "Profile chưa có tên — không xác định được AvatarVault.";
+                return false;
+            }
+
+            var dir = GetProfileDirectory(nick);
+            foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".webp" })
+            {
+                var candidate = Path.Combine(dir, "mascot" + ext);
+                if (File.Exists(candidate) && new FileInfo(candidate).Length > 512)
+                {
+                    mascotPath = candidate;
+                    return true;
+                }
+            }
+
+            errorMessage = "Chưa có ảnh profile — bấm «📷 Chọn» trong cột «Ảnh profile» (tab Cài đặt) cho nick «" + nick + "».";
+            return false;
         }
 
         /// <summary>Quét thư mục vault và đồng bộ danh sách ảnh identity_*.jpg|png…</summary>

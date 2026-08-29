@@ -1,4 +1,12 @@
-# --- Build & IDE (đừng đồng bộ / đừng commit) ---
+# --- Scratch / agent tạm ở thư mục gốc repo ---
+/all_entries.csv
+/build_out.txt
+/cs_history.txt
+/history_entries.csv
+/target_entries.csv
+/restore_files.ps1
+/search_history.ps1
+
 [Bb]in/
 # Thư mục output build tạm (tên không phải "bin" nên không bị rule trên)
 bin_temp_verify/
@@ -59,4 +67,12 @@ $RECYCLE.BIN/
 # --- Bảo mật (nếu sau này có file cấu hình cạnh source) ---
 *.pfx
 secrets.json
+appsettings.json
 appsettings.*.local.json
+.env
+.env.*
+
+# --- Dữ liệu media / profile runtime (cạnh .exe, không đưa lên Git) ---
+**/MediaStorage/
+**/browser_profiles/
+**/playwright-profile/
