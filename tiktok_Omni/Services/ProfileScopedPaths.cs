@@ -263,6 +263,35 @@ namespace tiktok_Omni.Services
         /// <summary>Thư mục gốc media săn link sản phẩm: Root\{Profile}\Products\</summary>
         public const string ProductsFolderName = "Products";
 
+        /// <summary>Batch ảnh QC: Root\{Profile}\product_ad_image\</summary>
+        public const string ProductAdImageFolderName = "product_ad_image";
+
+        public const string ProductAdImageRefsFolderName = "refs";
+
+        /// <summary>Root\{Profile}\product_ad_image\</summary>
+        public static string GetProductAdImageDirectory(string storageRoot, string profileName, bool create = true)
+        {
+            var dir = Path.Combine(GetProfileRoot(storageRoot, profileName, create), ProductAdImageFolderName);
+            if (create)
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            return Path.GetFullPath(dir);
+        }
+
+        /// <summary>Root\{Profile}\product_ad_image\refs\</summary>
+        public static string GetProductAdImageRefsDirectory(string storageRoot, string profileName, bool create = true)
+        {
+            var dir = Path.Combine(GetProductAdImageDirectory(storageRoot, profileName, create), ProductAdImageRefsFolderName);
+            if (create)
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            return Path.GetFullPath(dir);
+        }
+
         /// <summary>Root\{Profile}\Products\{keyword}\</summary>
         public static string GetProductHuntKeywordFolder(string profileName, string keyword, string storageRoot = null)
         {

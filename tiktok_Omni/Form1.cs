@@ -433,6 +433,7 @@ namespace tiktok_Omni
                 FlushSlideshowDraftToDisk();
                 FlushShowcaseDraftToDisk();
                 FlushPhilosophyDraftToDisk();
+                FlushProductAdImageDraftToDisk();
                 FlushAffiliateDraftToDisk();
                 FlushHuntProductDraftToDisk();
                 FlushAffiliateHuntResultsOnExit();
@@ -2162,6 +2163,7 @@ namespace tiktok_Omni
             }
 
             UpdateShowcaseRenderButtonState(ffmpegOk, storageOk);
+            RefreshProductAdImageReadinessLabel();
         }
 
         private bool TryGetVideoReupSelectedRow(out VideoReupRowItem row)
@@ -5952,6 +5954,10 @@ namespace tiktok_Omni
                 else if (modeTabIndex == (int)AiVideoGenMode.VideoReup)
                 {
                     LayoutVideoReupShell();
+                }
+                else if (modeTabIndex == (int)AiVideoGenMode.ProductAdImage)
+                {
+                    LayoutProductAdImageShell();
                 }
             }
             finally

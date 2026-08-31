@@ -206,6 +206,48 @@ namespace tiktok_Omni.Services
             return ParsePhilosophyBackgroundSuggestionsJson(raw, profileName);
         }
 
+        public async Task<ProductAdImagePlanningResult> PlanProductAdImagePromptsAsync(
+            ProductAdImageBatchItem item,
+            string apiKey,
+            string model = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (item == null)
+            {
+                throw new ArgumentNullException(nameof(item));
+            }
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("Cần Gemini API key.");
+            }
+
+            if (string.IsNullOrWhiteSpace(item.ProductName))
+            {
+                throw new InvalidOperationException("Nhập tên sản phẩm trước khi lập prompt.");
+            }
+
+            if (!item.HasReferenceImages)
+            {
+                throw new InvalidOperationException("Chọn ảnh mẫu trước khi lập prompt.");
+            }
+
+            if (item.TotalImageCount <= 0)
+            {
+                throw new InvalidOperationException("Số ảnh phải lớn hơn 0.");
+            }
+
+            var prompt = ProductAdImagePromptBuilder.BuildPlanningPrompt(item);
+            var safeModel = ProductAdImagePromptBuilder.ResolveGeminiModel(model);
+            var raw = await SendGeminiJsonWithImageAsync(
+                prompt,
+                item.ModelImagePath,
+                safeModel,
+                apiKey,
+                cancellationToken).ConfigureAwait(false);
+            return ProductAdImagePromptBuilder.ParsePlanningJson(raw, item);
+        }
+
         private static IReadOnlyList<PhilosophyBackgroundGeminiSuggestion> ParsePhilosophyBackgroundSuggestionsJson(
             string raw,
             string profileName)

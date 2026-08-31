@@ -1131,6 +1131,7 @@ namespace tiktok_Omni
             pnlPhilosophyProgress.Controls.Add(lblPhilosophyProgress);
 
             InitializePhilosophyControls(pnlModePhilosophy, pnlPhilosophyProgress);
+            InitializeProductAdImageControls(pnlModeProductAdImage);
 
             lblVideoReupReadiness = new Label
             {

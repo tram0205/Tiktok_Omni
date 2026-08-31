@@ -14,7 +14,8 @@ namespace tiktok_Omni
             AffiliateDeep = 1,
             Mascot = 2,
             Philosophy = 3,
-            VideoReup = 4
+            VideoReup = 4,
+            ProductAdImage = 5
         }
 
         private AiVideoGenMode _selectedAiVideoGenMode = AiVideoGenMode.Slideshow;
@@ -30,6 +31,7 @@ namespace tiktok_Omni
         private Panel pnlModeMascot;
         private Panel pnlModePhilosophy;
         private Panel pnlModeVideoReup;
+        private Panel pnlModeProductAdImage;
         private Panel pnlSlideshowGridHost;
         private Panel pnlDeepDiveGridHost;
         private Button btnModeSlideshow;
@@ -37,6 +39,7 @@ namespace tiktok_Omni
         private Button btnModeMascot;
         private Button btnModePhilosophy;
         private Button btnModeVideoReup;
+        private Button btnModeProductAdImage;
 
         private Panel pnlAiVideoGenTopHeader;
         private Panel pnlAiVideoGenModeIndicator;
@@ -73,6 +76,11 @@ namespace tiktok_Omni
             {
                 BeginInvoke(new Action(() => EnsureProductionQueueGridBandHeight(dgvMascotQueue)));
             }
+            else if (mode == AiVideoGenMode.ProductAdImage)
+            {
+                BeginInvoke(new Action(() => LayoutProductAdImageShell()));
+                _ = HydrateProductAdImageDraftAsync();
+            }
 
             if (!_suppressUiNavigationPersist)
             {
@@ -96,18 +104,22 @@ namespace tiktok_Omni
             pnlModePhilosophy = CreateAiVideoGenModePanel(nameof(pnlModePhilosophy));
             pnlModeVideoReup = CreateAiVideoGenModePanel(nameof(pnlModeVideoReup));
             pnlModeVideoReup.AutoScroll = false;
+            pnlModeProductAdImage = CreateAiVideoGenModePanel(nameof(pnlModeProductAdImage));
+            pnlModeProductAdImage.AutoScroll = false;
 
             pnlAiVideoGenModeHost.Controls.Add(pnlModeSlideshow);
             pnlAiVideoGenModeHost.Controls.Add(pnlModeAffiliateDeep);
             pnlAiVideoGenModeHost.Controls.Add(pnlModeMascot);
             pnlAiVideoGenModeHost.Controls.Add(pnlModePhilosophy);
             pnlAiVideoGenModeHost.Controls.Add(pnlModeVideoReup);
+            pnlAiVideoGenModeHost.Controls.Add(pnlModeProductAdImage);
 
             btnModeSlideshow = CreateAiVideoGenModeNavButton("Slideshow", AiVideoGenMode.Slideshow);
             btnModeAffiliateDeep = CreateAiVideoGenModeNavButton("Showcase SP", AiVideoGenMode.AffiliateDeep);
             btnModeMascot = CreateAiVideoGenModeNavButton("Mascot", AiVideoGenMode.Mascot);
             btnModePhilosophy = CreateAiVideoGenModeNavButton("Quote", AiVideoGenMode.Philosophy);
             btnModeVideoReup = CreateAiVideoGenModeNavButton("Reup", AiVideoGenMode.VideoReup);
+            btnModeProductAdImage = CreateAiVideoGenModeNavButton("Tạo ảnh AI", AiVideoGenMode.ProductAdImage);
         }
 
         /// <summary>Thanh tiêu đề + vạch màu trái — biết đang ở loại video nào.</summary>
@@ -223,6 +235,11 @@ namespace tiktok_Omni
                     hint = "Remix TikTok — hook, voiceover, nhạc/phim";
                     accent = Color.FromArgb(220, 110, 50);
                     return;
+                case AiVideoGenMode.ProductAdImage:
+                    title = "TẠO ẢNH AI";
+                    hint = "Lưới batch · Gemini lập prompt · copy/Excel (không sinh ảnh trong app)";
+                    accent = Color.FromArgb(210, 95, 130);
+                    return;
                 default:
                     title = "Slideshow";
                     hint = "Nhiều ảnh / nhiều sản phẩm — AI render";
@@ -237,7 +254,7 @@ namespace tiktok_Omni
             return accent;
         }
 
-        /// <summary>Gắn 5 nút chế độ video vào sidebar chính, ngay dưới «AI Video Gen».</summary>
+        /// <summary>Gắn nút chế độ video vào sidebar chính, ngay dưới «AI Video Gen».</summary>
         private void WireAiVideoGenModeButtonsToMainSidebar()
         {
             if (pnlSidebarNav == null || btnNavAiVideo == null)
@@ -251,7 +268,8 @@ namespace tiktok_Omni
                 btnModeAffiliateDeep,
                 btnModeMascot,
                 btnModePhilosophy,
-                btnModeVideoReup
+                btnModeVideoReup,
+                btnModeProductAdImage
             };
 
             foreach (var btn in modeButtons.Where(b => b != null))
@@ -328,7 +346,8 @@ namespace tiktok_Omni
                 btnModeAffiliateDeep,
                 btnModeMascot,
                 btnModePhilosophy,
-                btnModeVideoReup
+                btnModeVideoReup,
+                btnModeProductAdImage
             };
         }
 
@@ -408,6 +427,8 @@ namespace tiktok_Omni
                     return btnModePhilosophy;
                 case AiVideoGenMode.VideoReup:
                     return btnModeVideoReup;
+                case AiVideoGenMode.ProductAdImage:
+                    return btnModeProductAdImage;
                 default:
                     return btnModeSlideshow;
             }
@@ -427,6 +448,8 @@ namespace tiktok_Omni
                     return "Quote";
                 case AiVideoGenMode.VideoReup:
                     return "Reup";
+                case AiVideoGenMode.ProductAdImage:
+                    return "Tạo ảnh AI";
                 default:
                     return mode.ToString();
             }
@@ -567,7 +590,8 @@ namespace tiktok_Omni
                 pnlModeAffiliateDeep,
                 pnlModeMascot,
                 pnlModePhilosophy,
-                pnlModeVideoReup
+                pnlModeVideoReup,
+                pnlModeProductAdImage
             };
 
             foreach (var panel in panels)
@@ -602,6 +626,8 @@ namespace tiktok_Omni
                     return pnlModePhilosophy;
                 case AiVideoGenMode.VideoReup:
                     return pnlModeVideoReup;
+                case AiVideoGenMode.ProductAdImage:
+                    return pnlModeProductAdImage;
                 default:
                     return pnlModeSlideshow;
             }

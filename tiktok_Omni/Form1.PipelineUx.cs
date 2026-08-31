@@ -188,6 +188,8 @@ namespace tiktok_Omni
                     return _philosophyBatchBindingList?.Count ?? 0;
                 case AiVideoGenMode.VideoReup:
                     return _videoReupBindingList?.Count ?? 0;
+                case AiVideoGenMode.ProductAdImage:
+                    return _productAdImageBindingList?.Count ?? 0;
                 default:
                     return 0;
             }
@@ -230,6 +232,12 @@ namespace tiktok_Omni
                     _videoReupBindingList?.Clear();
                     _videoReupDraftDirty = true;
                     LogVideoReup("[Grid] Đã làm sạch bảng Video Reup.");
+                    break;
+                case AiVideoGenMode.ProductAdImage:
+                    _productAdImageBindingList?.Clear();
+                    NotifyProductAdImageDraftDirty();
+                    FlushProductAdImageDraftToDisk();
+                    LogProductAdImage("[Grid] Đã làm sạch lưới Tạo ảnh AI.");
                     break;
             }
 
