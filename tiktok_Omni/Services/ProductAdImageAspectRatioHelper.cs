@@ -10,9 +10,11 @@ namespace tiktok_Omni.Services
         public static IReadOnlyList<string> AllIds { get; } = new[]
         {
             Original,
+            "4:5",
             "3:4",
             "9:16",
             "1:1",
+            "5:4",
             "4:3",
             "16:9"
         };
@@ -43,12 +45,16 @@ namespace tiktok_Omni.Services
             {
                 case Original:
                     return "Gốc (original)";
+                case "4:5":
+                    return "4:5";
                 case "3:4":
                     return "3:4";
                 case "9:16":
                     return "9:16";
                 case "1:1":
                     return "1:1";
+                case "5:4":
+                    return "5:4";
                 case "4:3":
                     return "4:3";
                 case "16:9":

@@ -21,14 +21,16 @@ namespace tiktok_Omni
         private static readonly Color ProductAdImageTintCopy = Color.FromArgb(88, 94, 112);
         private static readonly Color ProductAdImageTintDelete = Color.FromArgb(168, 52, 52);
         private static readonly Color ProductAdImageTintTrash = Color.FromArgb(88, 92, 72);
+        private static readonly Color ProductAdImageGridCellBack = Color.FromArgb(20, 22, 28);
+        private static readonly Color ProductAdImageGridSelectBack = Color.FromArgb(76, 110, 245);
         private static readonly Padding ProductAdImageSolidButtonMargin = new Padding(4, 2, 4, 2);
         private const int ProductAdImageCommandButtonHeight = AppJellyButtonHeight;
         private const int ProductAdImageCommandHorizontalPad = AppJellyButtonHorizontalPad;
-        private const int ProductAdImageStatusPanelHeight = 210;
-        private const int ProductAdImageStatusPanelMinHeight = 180;
-        private const int ProductAdImageLogHeaderRowHeight = 40;
+        private const int ProductAdImageStatusPanelHeight = 315;
+        private const int ProductAdImageStatusPanelMinHeight = 270;
+        private const int ProductAdImageLogHeaderRowHeight = 64;
         private const int ProductAdImageClearLogButtonWidth = 120;
-        private const int ProductAdImageReadinessHeight = 52;
+        private const int ProductAdImageReadinessHeight = 68;
         private const float ProductAdImageLogFontSize = 10F;
         private const int ProductAdImageLogLineSpacing = 4;
 
@@ -48,7 +50,7 @@ namespace tiktok_Omni
         private Button btnProductAdImageCopyRow;
         private Button btnProductAdImageDeleteRow;
         private Button btnProductAdImageTrash;
-        private Button btnProductAdImageExportExcel;
+        private Button btnProductAdImageStripWatermark;
         private Button btnProductAdImageClearLog;
         private RichTextBox rtbProductAdImageLog;
         private DataGridView dgvProductAdImage;
@@ -99,6 +101,8 @@ namespace tiktok_Omni
 
             if (IsProductAdImageLayoutOk())
             {
+                ApplyProductAdImageReadinessLabelChrome();
+                ApplyProductAdImageProfileComboColumn();
                 LayoutProductAdImageCommandBar();
                 RefreshProductAdImageReadinessLabel();
                 return;
@@ -150,6 +154,11 @@ namespace tiktok_Omni
                     };
                 }
 
+                if (lblProductAdImageReadiness != null && !lblProductAdImageReadiness.IsDisposed)
+                {
+                    ApplyProductAdImageReadinessLabelChrome();
+                }
+
                 ApplyTopFillBottomDockLayout(
                     pnlProductAdImageMainFill,
                     pnlProductAdImageGridWrap,
@@ -198,7 +207,8 @@ namespace tiktok_Omni
         {
             if (dgvProductAdImage != null && !dgvProductAdImage.IsDisposed)
             {
-                ApplyGridProfileComboColumn(dgvProductAdImage, "colProductAdImageProfile");
+                ApplyProductAdImageProfileComboColumn();
+                ApplyProductAdImageGridSelectionChrome();
                 return;
             }
 
@@ -219,8 +229,10 @@ namespace tiktok_Omni
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = true,
                 EditMode = DataGridViewEditMode.EditOnEnter,
-                BackgroundColor = Color.FromArgb(20, 22, 28),
+                BackgroundColor = ProductAdImageGridCellBack,
                 BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.Single,
+                GridColor = Color.FromArgb(72, 78, 94),
                 EnableHeadersVisualStyles = false,
                 Font = ProductAdImageUiFont,
                 Tag = "SkipSttColumn"
@@ -228,8 +240,10 @@ namespace tiktok_Omni
             ConfigureProductAdImageGridColumns();
             WireProductAdImageGridEvents();
             ApplyGridProfileComboColumn(dgvProductAdImage, "colProductAdImageProfile");
+            ApplyProductAdImageProfileComboColumn();
             ApplyAppComboGridRowHeight(dgvProductAdImage);
             ApplyAppGridChrome(dgvProductAdImage);
+            ApplyProductAdImageGridSelectionChrome();
         }
 
         private void ConfigureProductAdImageGridColumns()
@@ -255,7 +269,8 @@ namespace tiktok_Omni
                 DisplayMember = nameof(ProfileComboEntry.Name),
                 ValueMember = nameof(ProfileComboEntry.Name),
                 FlatStyle = FlatStyle.Flat,
-                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox,
+                DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton,
+                DisplayStyleForCurrentCellOnly = false,
                 FillWeight = 12,
                 MinimumWidth = 96,
                 ReadOnly = false,
@@ -283,12 +298,7 @@ namespace tiktok_Omni
                 "colProductAdImageImages",
                 "Ảnh mẫu",
                 nameof(ProductAdImageBatchItem.ImagesSummary),
-                12);
-            AddProductAdImagePopupColumn(
-                "colProductAdImageShotCounts",
-                "Số ảnh / TL",
-                nameof(ProductAdImageBatchItem.ShotCountSummary),
-                10);
+                14);
             AddProductAdImagePopupColumn(
                 "colProductAdImagePrompts",
                 "Prompt",
@@ -309,9 +319,8 @@ namespace tiktok_Omni
             dgvProductAdImage.Columns["colProductAdImageOrder"].ToolTipText = "Số thứ tự dòng.";
             dgvProductAdImage.Columns["colProductAdImageProfile"].ToolTipText = "Profile lưu ảnh mẫu và file Excel.";
             dgvProductAdImage.Columns["colProductAdImageName"].ToolTipText = "Tên sản phẩm — bắt buộc trước khi lập prompt.";
-            dgvProductAdImage.Columns["colProductAdImagePromptSetup"].ToolTipText = "Bấm để mở thiết lập loại SP / phong cách / khóa mẫu.";
-            dgvProductAdImage.Columns["colProductAdImageImages"].ToolTipText = "Click trái: chọn ảnh mẫu. Click phải: mở folder refs.";
-            dgvProductAdImage.Columns["colProductAdImageShotCounts"].ToolTipText = "Bấm để đặt số ảnh từng loại và tỉ lệ khung hình.";
+            dgvProductAdImage.Columns["colProductAdImagePromptSetup"].ToolTipText = "Bấm để mở loại SP, phong cách, khóa mẫu, số ảnh và tỉ lệ.";
+            dgvProductAdImage.Columns["colProductAdImageImages"].ToolTipText = "➕ chọn ảnh mẫu · 📂 mở folder refs.";
             dgvProductAdImage.Columns["colProductAdImagePrompts"].ToolTipText = "Bấm để sửa prompt, copy hoặc xuất Excel.";
             dgvProductAdImage.Columns["colProductAdImageStatus"].ToolTipText = "Chờ / Đang lập… / Xong / Lỗi.";
         }
@@ -329,7 +338,9 @@ namespace tiktok_Omni
                 SortMode = DataGridViewColumnSortMode.NotSortable,
                 DefaultCellStyle =
                 {
+                    BackColor = ProductAdImageGridCellBack,
                     ForeColor = Color.FromArgb(186, 196, 214),
+                    SelectionBackColor = ProductAdImageGridSelectBack,
                     SelectionForeColor = Color.White
                 }
             });
@@ -339,14 +350,255 @@ namespace tiktok_Omni
         {
             dgvProductAdImage.CellMouseClick -= DgvProductAdImage_CellMouseClick;
             dgvProductAdImage.CellMouseClick += DgvProductAdImage_CellMouseClick;
+            dgvProductAdImage.CellPainting -= DgvProductAdImage_CellPainting;
+            dgvProductAdImage.CellPainting += DgvProductAdImage_CellPainting;
             dgvProductAdImage.DataBindingComplete -= DgvProductAdImage_DataBindingComplete;
             dgvProductAdImage.DataBindingComplete += DgvProductAdImage_DataBindingComplete;
+            dgvProductAdImage.RowPrePaint -= DgvProductAdImage_RowPrePaint;
+            dgvProductAdImage.RowPrePaint += DgvProductAdImage_RowPrePaint;
+            dgvProductAdImage.EditingControlShowing -= DgvProductAdImage_EditingControlShowing;
+            dgvProductAdImage.EditingControlShowing += DgvProductAdImage_EditingControlShowing;
+            dgvProductAdImage.DataError -= DgvProductAdImage_DataError;
+            dgvProductAdImage.DataError += DgvProductAdImage_DataError;
+            dgvProductAdImage.CurrentCellDirtyStateChanged -= DgvProductAdImage_CurrentCellDirtyStateChanged;
+            dgvProductAdImage.CurrentCellDirtyStateChanged += DgvProductAdImage_CurrentCellDirtyStateChanged;
+            dgvProductAdImage.CellBeginEdit -= DgvProductAdImage_CellBeginEdit;
+            dgvProductAdImage.CellBeginEdit += DgvProductAdImage_CellBeginEdit;
+            dgvProductAdImage.CellValueChanged -= DgvProductAdImage_CellValueChanged;
+            dgvProductAdImage.CellValueChanged += DgvProductAdImage_CellValueChanged;
             WireProductAdImageGridContextMenu();
+        }
+
+        private void ApplyProductAdImageProfileComboColumn()
+        {
+            if (dgvProductAdImage == null || dgvProductAdImage.IsDisposed)
+            {
+                return;
+            }
+
+            if (_aiVideoGenProfileComboSource == null || _aiVideoGenProfileComboSource.Count == 0)
+            {
+                RefreshGridProfileComboSource(_productAdImageSettingsSnap);
+            }
+
+            if (_productAdImageBindingList != null)
+            {
+                foreach (var item in _productAdImageBindingList)
+                {
+                    if (item == null)
+                    {
+                        continue;
+                    }
+
+                    if (!IsUsableProductAdImageProfileName(item.ProfileName))
+                    {
+                        item.ProfileName = GetDefaultProductAdImageProfileName();
+                    }
+
+                    EnsureProfileComboIncludes(item.ProfileName);
+                }
+            }
+
+            ApplyGridProfileComboColumn(dgvProductAdImage, "colProductAdImageProfile");
+        }
+
+        private static bool IsUsableProductAdImageProfileName(string name)
+        {
+            var n = (name ?? string.Empty).Trim();
+            if (n.Length == 0)
+            {
+                return false;
+            }
+
+            return n.IndexOf("ProfileComboEntry", StringComparison.OrdinalIgnoreCase) < 0
+                   && n.IndexOf("tiktok_Omni.", StringComparison.OrdinalIgnoreCase) < 0;
+        }
+
+        private void ApplyProductAdImageGridSelectionChrome()
+        {
+            if (dgvProductAdImage == null || dgvProductAdImage.IsDisposed)
+            {
+                return;
+            }
+
+            ApplyProductAdImageCellStyle(dgvProductAdImage.DefaultCellStyle, Color.Gainsboro);
+            ApplyProductAdImageCellStyle(dgvProductAdImage.RowsDefaultCellStyle, Color.Gainsboro);
+            ApplyProductAdImageCellStyle(dgvProductAdImage.AlternatingRowsDefaultCellStyle, Color.Gainsboro);
+            ApplyProductAdImageCellStyle(dgvProductAdImage.RowTemplate.DefaultCellStyle, Color.Gainsboro);
+
+            dgvProductAdImage.CellBorderStyle = DataGridViewCellBorderStyle.Single;
+            dgvProductAdImage.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+            dgvProductAdImage.GridColor = Color.FromArgb(72, 78, 94);
+
+            dgvProductAdImage.ColumnHeadersDefaultCellStyle.SelectionBackColor =
+                dgvProductAdImage.ColumnHeadersDefaultCellStyle.BackColor;
+            dgvProductAdImage.ColumnHeadersDefaultCellStyle.SelectionForeColor =
+                dgvProductAdImage.ColumnHeadersDefaultCellStyle.ForeColor;
+
+            foreach (DataGridViewColumn column in dgvProductAdImage.Columns)
+            {
+                if (column?.DefaultCellStyle == null)
+                {
+                    continue;
+                }
+
+                var fore = column.DefaultCellStyle.ForeColor.IsEmpty
+                    ? Color.Gainsboro
+                    : column.DefaultCellStyle.ForeColor;
+                ApplyProductAdImageCellStyle(column.DefaultCellStyle, fore);
+            }
+        }
+
+        private static void ApplyProductAdImageCellStyle(DataGridViewCellStyle style, Color foreColor)
+        {
+            if (style == null)
+            {
+                return;
+            }
+
+            style.BackColor = ProductAdImageGridCellBack;
+            style.ForeColor = foreColor;
+            style.SelectionBackColor = ProductAdImageGridSelectBack;
+            style.SelectionForeColor = Color.White;
+        }
+
+        private void DgvProductAdImage_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (dgvProductAdImage == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (!string.Equals(
+                    dgvProductAdImage.Columns[e.ColumnIndex]?.Name,
+                    "colProductAdImageImages",
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var item = dgvProductAdImage.Rows[e.RowIndex].DataBoundItem as ProductAdImageBatchItem;
+            e.Handled = true;
+            e.Paint(
+                e.CellBounds,
+                DataGridViewPaintParts.Background
+                | DataGridViewPaintParts.SelectionBackground
+                | DataGridViewPaintParts.Border);
+
+            GetShowcaseImagesCellLayout(e.CellBounds.Width, e.CellBounds.Height, out var addLocal, out var folderLocal);
+            var selected = (e.State & DataGridViewElementStates.Selected) != 0;
+            var addIcon = item != null && item.HasReferenceImages ? "✓" : "➕";
+
+            var graphics = e.Graphics;
+            graphics.SetClip(e.CellBounds);
+            PaintShowcaseImagesActionButton(
+                graphics,
+                OffsetRect(e.CellBounds, addLocal),
+                addIcon,
+                Color.FromArgb(90, 235, 150),
+                Color.FromArgb(32, 58, 46),
+                Color.FromArgb(70, 130, 95),
+                selected);
+            PaintShowcaseImagesActionButton(
+                graphics,
+                OffsetRect(e.CellBounds, folderLocal),
+                "📂",
+                Color.FromArgb(255, 205, 90),
+                Color.FromArgb(58, 50, 32),
+                Color.FromArgb(140, 110, 55),
+                selected);
+            graphics.ResetClip();
+        }
+
+        private void DgvProductAdImage_RowPrePaint(object sender, DataGridViewRowPrePaintEventArgs e)
+        {
+            if (dgvProductAdImage == null || e.RowIndex < 0 || e.RowIndex >= dgvProductAdImage.Rows.Count)
+            {
+                return;
+            }
+
+            var row = dgvProductAdImage.Rows[e.RowIndex];
+            if (row == null)
+            {
+                return;
+            }
+
+            if (row.DefaultCellStyle.BackColor != ProductAdImageGridCellBack
+                || row.DefaultCellStyle.SelectionBackColor != ProductAdImageGridSelectBack)
+            {
+                ApplyProductAdImageCellStyle(row.DefaultCellStyle, Color.Gainsboro);
+            }
+
+            foreach (DataGridViewCell cell in row.Cells)
+            {
+                if (!(cell is DataGridViewComboBoxCell))
+                {
+                    continue;
+                }
+
+                if (cell.Style.BackColor != ProductAdImageGridCellBack
+                    || cell.Style.SelectionBackColor != ProductAdImageGridSelectBack)
+                {
+                    ApplyProductAdImageCellStyle(cell.Style, Color.Gainsboro);
+                }
+            }
+        }
+
+        private void DgvProductAdImage_EditingControlShowing(object sender, DataGridViewEditingControlShowingEventArgs e)
+        {
+            var combo = e.Control as ComboBox;
+            if (combo == null)
+            {
+                return;
+            }
+
+            combo.FlatStyle = FlatStyle.Flat;
+            combo.BackColor = ProductAdImageGridSelectBack;
+            combo.ForeColor = Color.White;
+            combo.DropDownStyle = ComboBoxStyle.DropDownList;
+            combo.IntegralHeight = false;
+
+            if (dgvProductAdImage?.CurrentCell == null
+                || !(dgvProductAdImage.Columns[dgvProductAdImage.CurrentCell.ColumnIndex] is DataGridViewComboBoxColumn col)
+                || !string.Equals(col.Name, "colProductAdImageProfile", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            combo.FormattingEnabled = true;
+            combo.DisplayMember = nameof(ProfileComboEntry.Name);
+            combo.ValueMember = nameof(ProfileComboEntry.Name);
+            var count = combo.Items.Count > 0
+                ? combo.Items.Count
+                : (_aiVideoGenProfileComboSource?.Count ?? 1);
+            combo.MaxDropDownItems = Math.Max(8, Math.Min(20, Math.Max(1, count)));
+            combo.DropDownHeight = Math.Min(
+                520,
+                Math.Max(160, (combo.ItemHeight <= 0 ? 28 : combo.ItemHeight) * Math.Max(count, 1) + 8));
+        }
+
+        private void DgvProductAdImage_DataError(object sender, DataGridViewDataErrorEventArgs e)
+        {
+            e.ThrowException = false;
+        }
+
+        private void DgvProductAdImage_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            if (dgvProductAdImage == null || !dgvProductAdImage.IsCurrentCellDirty)
+            {
+                return;
+            }
+
+            if (dgvProductAdImage.CurrentCell is DataGridViewComboBoxCell)
+            {
+                dgvProductAdImage.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
         }
 
         private void DgvProductAdImage_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
         {
-            ApplyGridProfileComboColumn(dgvProductAdImage, "colProductAdImageProfile");
+            ApplyProductAdImageProfileComboColumn();
+            ApplyProductAdImageGridSelectionChrome();
         }
 
         private void WireProductAdImageCommandButtons()
@@ -381,40 +633,51 @@ namespace tiktok_Omni
                 btnProductAdImageStop.Click += BtnProductAdImageStop_Click;
             }
 
-            if (btnProductAdImageExportExcel != null)
-            {
-                btnProductAdImageExportExcel.Click -= BtnProductAdImageExportExcel_Click;
-                btnProductAdImageExportExcel.Click += BtnProductAdImageExportExcel_Click;
-            }
-
             if (btnProductAdImageTrash != null)
             {
                 btnProductAdImageTrash.Click -= BtnProductAdImageTrash_Click;
                 btnProductAdImageTrash.Click += BtnProductAdImageTrash_Click;
             }
+
+            if (btnProductAdImageStripWatermark != null)
+            {
+                btnProductAdImageStripWatermark.Click -= BtnProductAdImageStripWatermark_Click;
+                btnProductAdImageStripWatermark.Click += BtnProductAdImageStripWatermark_Click;
+            }
         }
 
         private void BuildProductAdImageReadinessLabel()
         {
-            if (lblProductAdImageReadiness != null && !lblProductAdImageReadiness.IsDisposed)
+            if (lblProductAdImageReadiness == null || lblProductAdImageReadiness.IsDisposed)
+            {
+                lblProductAdImageReadiness = new Label
+                {
+                    Name = "lblProductAdImageReadiness",
+                    Text = "Đang kiểm tra Gemini API key…"
+                };
+            }
+
+            ApplyProductAdImageReadinessLabelChrome();
+        }
+
+        private void ApplyProductAdImageReadinessLabelChrome()
+        {
+            if (lblProductAdImageReadiness == null || lblProductAdImageReadiness.IsDisposed)
             {
                 return;
             }
 
-            lblProductAdImageReadiness = new Label
-            {
-                Name = "lblProductAdImageReadiness",
-                Text = "Đang kiểm tra Gemini API key…",
-                Dock = DockStyle.Top,
-                AutoSize = false,
-                Height = ProductAdImageReadinessHeight,
-                AutoEllipsis = true,
-                ForeColor = Color.FromArgb(165, 172, 188),
-                Padding = new Padding(8, 8, 8, 8),
-                Font = ProductAdImageUiFont,
-                BackColor = ProductAdImagePanelBack,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
+            lblProductAdImageReadiness.AutoSize = false;
+            lblProductAdImageReadiness.AutoEllipsis = true;
+            lblProductAdImageReadiness.UseCompatibleTextRendering = true;
+            lblProductAdImageReadiness.Dock = DockStyle.Top;
+            lblProductAdImageReadiness.ForeColor = Color.FromArgb(165, 172, 188);
+            lblProductAdImageReadiness.Padding = new Padding(8, 10, 8, 14);
+            lblProductAdImageReadiness.Font = ProductAdImageUiFont;
+            lblProductAdImageReadiness.BackColor = ProductAdImagePanelBack;
+            lblProductAdImageReadiness.TextAlign = ContentAlignment.MiddleLeft;
+            lblProductAdImageReadiness.MinimumSize = new Size(0, ProductAdImageReadinessHeight);
+            lblProductAdImageReadiness.Height = ProductAdImageReadinessHeight;
         }
 
         private void BuildProductAdImageTopChrome()
@@ -514,8 +777,11 @@ namespace tiktok_Omni
                 "btnProductAdImageDeleteRow", "🗑 Xoá dòng", ProductAdImageTintDelete, 128);
             btnProductAdImageTrash = CreateProductAdImageSolidRectButton(
                 "btnProductAdImageTrash", "♻ Thùng rác", ProductAdImageTintTrash, 128);
-            btnProductAdImageExportExcel = CreateProductAdImageSolidRectButton(
-                "btnProductAdImageExportExcel", "📊 Excel", Color.FromArgb(52, 92, 158), 110);
+            btnProductAdImageStripWatermark = CreateProductAdImageJellyButton(
+                "btnProductAdImageStripWatermark",
+                "Xoá logo Gemini",
+                Color.FromArgb(118, 72, 140),
+                180);
 
             _productAdImageTip.SetToolTip(btnProductAdImagePlanPrompt, "Gemini lập prompt cho các dòng đang chọn (tuần tự).");
             _productAdImageTip.SetToolTip(btnProductAdImageStop, "Dừng lập prompt.");
@@ -523,16 +789,18 @@ namespace tiktok_Omni
             _productAdImageTip.SetToolTip(btnProductAdImageCopyRow, "Clone dòng đã chọn và copy ảnh mẫu sang folder profile.");
             _productAdImageTip.SetToolTip(btnProductAdImageDeleteRow, "Chuyển dòng đã chọn vào thùng rác.");
             _productAdImageTip.SetToolTip(btnProductAdImageTrash, "Mở thùng rác — khôi phục hoặc xoá vĩnh viễn.");
-            _productAdImageTip.SetToolTip(btnProductAdImageExportExcel, "Xuất Excel prompt của dòng đang chọn.");
+            _productAdImageTip.SetToolTip(
+                btnProductAdImageStripWatermark,
+                "Xoá ngôi sao 4 cánh góc phải dưới trên ảnh đã tải từ Gemini. Lưu file mới, không ghi đè gốc.");
 
             flpProductAdImagePlanCenter.Controls.Add(btnProductAdImagePlanPrompt);
             flpProductAdImagePlanCenter.Controls.Add(btnProductAdImageStop);
+            flpProductAdImagePlanCenter.Controls.Add(btnProductAdImageStripWatermark);
 
             flpProductAdImageRowManage.Controls.Add(btnProductAdImageAddRow);
             flpProductAdImageRowManage.Controls.Add(btnProductAdImageCopyRow);
             flpProductAdImageRowManage.Controls.Add(btnProductAdImageDeleteRow);
             flpProductAdImageRowManage.Controls.Add(btnProductAdImageTrash);
-            flpProductAdImageRowManage.Controls.Add(btnProductAdImageExportExcel);
 
             pnlProductAdImageCommandBar.Controls.Add(flpProductAdImagePlanCenter);
             pnlProductAdImageCommandBar.Controls.Add(flpProductAdImageRowManage);
@@ -612,7 +880,7 @@ namespace tiktok_Omni
             tblLog.RowStyles.Add(new RowStyle(SizeType.Absolute, ProductAdImageLogHeaderRowHeight));
             tblLog.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
 
-            var header = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 4, 4, 4) };
+            var header = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 6, 4, 8) };
             var lblLog = new Label
             {
                 Text = "Nhật ký",
@@ -623,7 +891,7 @@ namespace tiktok_Omni
                 TextAlign = ContentAlignment.MiddleLeft,
                 Font = ProductAdImageUiFont,
                 UseCompatibleTextRendering = true,
-                Padding = new Padding(0, 2, 0, 2)
+                Padding = new Padding(0, 4, 0, 8)
             };
             btnProductAdImageClearLog.Dock = DockStyle.Right;
             btnProductAdImageClearLog.Width = ProductAdImageClearLogButtonWidth;

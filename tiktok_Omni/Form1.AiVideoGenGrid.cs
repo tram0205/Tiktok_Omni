@@ -1458,10 +1458,9 @@ namespace tiktok_Omni
 
 
 
+            profileColumn.DataSource = null;
             profileColumn.DisplayMember = nameof(ProfileComboEntry.Name);
-
             profileColumn.ValueMember = nameof(ProfileComboEntry.Name);
-
             profileColumn.DataSource = _aiVideoGenProfileComboSource;
 
         }

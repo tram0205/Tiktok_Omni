@@ -98,7 +98,7 @@ namespace tiktok_Omni
             if (dgvProductAdImage != null && !dgvProductAdImage.IsDisposed)
             {
                 dgvProductAdImage.DataSource = _productAdImageBindingList;
-                ApplyGridProfileComboColumn(dgvProductAdImage, "colProductAdImageProfile");
+                ApplyProductAdImageProfileComboColumn();
             }
 
             RenumberProductAdImageRows();

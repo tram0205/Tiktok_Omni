@@ -6786,6 +6786,7 @@ namespace tiktok_Omni
             RefreshMascotProfileCombo(settings);
             ApplyVideoReupProfileComboColumn();
             ApplyGridProfileComboColumn(dgvPhilosophyScripts, "colPhilosophyProfile");
+            ApplyGridProfileComboColumn(dgvProductAdImage, "colProductAdImageProfile");
             ApplyWarmupQueueProfileComboColumn();
             ApplyAutoPostScheduleProfileComboColumns();
             SelectRunningProfileInUi(previous);

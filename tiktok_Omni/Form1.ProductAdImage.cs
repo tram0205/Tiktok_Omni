@@ -20,6 +20,7 @@ namespace tiktok_Omni
         private CancellationTokenSource _productAdImagePlanCts;
         private bool _productAdImagePlanRunning;
         private ContextMenuStrip _cmsProductAdImageGrid;
+        private string _productAdImageProfileBeforeEdit;
 
         private void InitializeProductAdImageLogFlush()
         {
@@ -187,7 +188,7 @@ namespace tiktok_Omni
             if (_productAdImageSettingsSnap != null)
             {
                 RefreshGridProfileComboSource(_productAdImageSettingsSnap);
-                ApplyGridProfileComboColumn(dgvProductAdImage, "colProductAdImageProfile");
+                ApplyProductAdImageProfileComboColumn();
             }
         }
 
@@ -254,6 +255,102 @@ namespace tiktok_Omni
             LogProductAdImage("Đã chuyển " + selected.Count + " dòng vào thùng rác.");
         }
 
+        private void DgvProductAdImage_CellBeginEdit(object sender, DataGridViewCellCancelEventArgs e)
+        {
+            _productAdImageProfileBeforeEdit = null;
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || dgvProductAdImage == null)
+            {
+                return;
+            }
+
+            if (!string.Equals(
+                    dgvProductAdImage.Columns[e.ColumnIndex]?.Name,
+                    "colProductAdImageProfile",
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var item = dgvProductAdImage.Rows[e.RowIndex].DataBoundItem as ProductAdImageBatchItem;
+            _productAdImageProfileBeforeEdit = item?.ProfileName;
+        }
+
+        private void DgvProductAdImage_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || dgvProductAdImage == null)
+            {
+                return;
+            }
+
+            if (!string.Equals(
+                    dgvProductAdImage.Columns[e.ColumnIndex]?.Name,
+                    "colProductAdImageProfile",
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var item = dgvProductAdImage.Rows[e.RowIndex].DataBoundItem as ProductAdImageBatchItem;
+            var oldProfile = _productAdImageProfileBeforeEdit;
+            _productAdImageProfileBeforeEdit = null;
+            if (oldProfile == null)
+            {
+                return;
+            }
+
+            RelocateProductAdImageAfterProfileChange(item, oldProfile);
+        }
+
+        private void RelocateProductAdImageAfterProfileChange(ProductAdImageBatchItem item, string oldProfile)
+        {
+            if (item == null)
+            {
+                return;
+            }
+
+            var newProfile = (item.ProfileName ?? string.Empty).Trim();
+            var previous = (oldProfile ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(newProfile)
+                || string.Equals(previous, newProfile, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(item.ModelImagePath) || !System.IO.File.Exists(item.ModelImagePath))
+            {
+                return;
+            }
+
+            var oldFile = System.IO.Path.GetFileName(item.ModelImagePath);
+            try
+            {
+                var dest = ProductAdImageReferenceHelper.RelocateMasterImage(item.ModelImagePath, newProfile);
+                item.ModelImagePath = dest;
+                NotifyProductAdImageDraftDirty();
+                var destFolder = ProductAdImageReferenceHelper.GetRefsDirectory(newProfile);
+                var msg = "Đã chuyển ảnh mẫu «" + oldFile + "» từ profile «"
+                          + (string.IsNullOrEmpty(previous) ? "(trống)" : previous)
+                          + "» sang «" + newProfile + "».";
+                LogProductAdImage(msg);
+                MessageBox.Show(
+                    this,
+                    msg + Environment.NewLine + Environment.NewLine + destFolder,
+                    "Đã chuyển ảnh mẫu",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                LogProductAdImage("Chuyển ảnh mẫu sang profile mới lỗi: " + ex.Message);
+                MessageBox.Show(
+                    this,
+                    "Không chuyển được ảnh mẫu sang profile «" + newProfile + "».\r\n" + ex.Message,
+                    "Ảnh mẫu",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
         private void DgvProductAdImage_CellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
         {
             if (e.RowIndex < 0 || e.ColumnIndex < 0 || dgvProductAdImage == null)
@@ -293,13 +390,6 @@ namespace tiktok_Omni
                     }
 
                     break;
-                case "colProductAdImageShotCounts":
-                    using (var dlg = new ProductAdImageShotCountDialog(item))
-                    {
-                        dlg.ShowDialog(this);
-                    }
-
-                    break;
                 case "colProductAdImagePrompts":
                     using (var dlg = new ProductAdImagePromptListDialog(item))
                     {
@@ -317,7 +407,14 @@ namespace tiktok_Omni
                 return;
             }
 
-            if (e.Button == MouseButtons.Right)
+            var action = ShowcaseDualActionCellAction.None;
+            if (dgvProductAdImage != null && e.RowIndex >= 0 && e.ColumnIndex >= 0)
+            {
+                var display = dgvProductAdImage.GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+                action = HitTestShowcaseDualActionCell(display.Width, display.Height, new Point(e.X, e.Y));
+            }
+
+            if (e.Button == MouseButtons.Right || action == ShowcaseDualActionCellAction.OpenFolder)
             {
                 try
                 {
@@ -684,9 +781,17 @@ namespace tiktok_Omni
             }
         }
 
-        private void BtnProductAdImageExportExcel_Click(object sender, EventArgs e)
+        private void BtnProductAdImageStripWatermark_Click(object sender, EventArgs e)
         {
-            ExportProductAdImageSelectedToExcel();
+            using (var dlg = new ProductAdImageGeminiWatermarkDialog())
+            {
+                dlg.ShowDialog(this);
+                if (dlg.ProcessedCount > 0)
+                {
+                    LogProductAdImage(
+                        "Đã xoá logo Gemini trên " + dlg.ProcessedCount + " ảnh (file _nologo.png).");
+                }
+            }
         }
 
         private void ExportProductAdImageSelectedToExcel()

@@ -29,6 +29,7 @@ namespace tiktok_Omni.Models
         private string _productTypePrompt = string.Empty;
         private string _shootStylePrompt = string.Empty;
         private string _identityLockPrompt = string.Empty;
+        private string _themePrompt = string.Empty;
         private string _productLockDescription = string.Empty;
         private List<ProductAdImageShotPlan> _generatedShots = new List<ProductAdImageShotPlan>();
         private string _status = "Chờ";
@@ -167,6 +168,18 @@ namespace tiktok_Omni.Models
             }
         }
 
+        public string ThemePrompt
+        {
+            get => _themePrompt;
+            set
+            {
+                if (SetField(ref _themePrompt, value ?? string.Empty, nameof(ThemePrompt)))
+                {
+                    Notify(nameof(PromptSetupSummary));
+                }
+            }
+        }
+
         public string ProductLockDescription
         {
             get => _productLockDescription;
@@ -238,11 +251,12 @@ namespace tiktok_Omni.Models
             {
                 var typeLabel = ShowcaseProductTypePresets.GetDisplayLabel(ProductTypePrompt);
                 var styleLabel = ProductAdImageShootStylePresets.GetDisplayLabel(ShootStylePrompt);
+                var themeLabel = ProductAdImageThemePresets.GetDisplayLabel(ThemePrompt);
                 var lockLabel = ProductAdImageIdentityLockPresets.GetDisplayLabel(IdentityLockPrompt);
                 var lockNote = string.IsNullOrWhiteSpace(ProductLockDescription)
                     ? string.Empty
                     : " · khóa SP";
-                return typeLabel + " · " + styleLabel + " · " + lockLabel + lockNote;
+                return typeLabel + " · " + styleLabel + " · " + themeLabel + " · " + lockLabel + lockNote;
             }
         }
 

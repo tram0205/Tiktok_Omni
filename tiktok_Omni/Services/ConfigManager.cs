@@ -1066,6 +1066,8 @@ namespace tiktok_Omni.Services
     public sealed class ProfileComboEntry
     {
         public string Name { get; set; } = string.Empty;
+
+        public override string ToString() => Name ?? string.Empty;
     }
 
     public static class TikTokHuntMethods

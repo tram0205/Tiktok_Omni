@@ -74,7 +74,7 @@ namespace tiktok_Omni.Models
                 case "fabric_closeup":
                     return "Cận vải";
                 case "detail_highlight":
-                    return "Cận điểm nhấn";
+                    return "Điểm nhấn";
                 default:
                     return string.IsNullOrWhiteSpace(shotType) ? "—" : shotType.Trim();
             }

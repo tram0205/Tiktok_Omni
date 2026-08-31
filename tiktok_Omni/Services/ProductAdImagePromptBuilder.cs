@@ -13,6 +13,10 @@ namespace tiktok_Omni.Services
     public static class ProductAdImagePromptBuilder
     {
         public const string DefaultGeminiModel = "gemini-2.5-flash";
+        public const string ImagePromptPrefix = "tạo ảnh";
+
+        private const string ProductLockSentence =
+            "Use the attached reference photo. Keep the garment/product IDENTICAL to the reference: color, print/pattern, logo, silhouette, fabric, stitching, and hardware as shown. Do NOT invent embroidery, zipper, extra logos, or restyle the product. Change ONLY pose, gesture, camera angle, framing, background, and lighting.";
 
         public static string ResolveGeminiModel(string settingsModel)
         {
@@ -32,17 +36,20 @@ namespace tiktok_Omni.Services
             var productType = ShowcaseProductTypePresets.ResolvePromptForGemini(item.ProductTypePrompt);
             var shootStyle = ProductAdImageShootStylePresets.ResolvePromptForGemini(item.ShootStylePrompt);
             var identityLock = ProductAdImageIdentityLockPresets.ResolvePromptForGemini(item.IdentityLockPrompt);
+            var theme = ProductAdImageThemePresets.ResolvePromptForGemini(item.ThemePrompt);
             var productLock = (item.ProductLockDescription ?? string.Empty).Trim();
             var slug = Slugify(productName);
 
             var sb = new StringBuilder();
             sb.AppendLine("You are a fashion e-commerce photo director. Study the attached master reference photo (the person AND the garment/product).");
+            sb.AppendLine("The JSON prompts you write will later be pasted into Gemini Chat or ChatGPT TOGETHER with this same reference photo to generate image variants. They must not let the image model invent product details.");
             sb.AppendLine("Return ONLY a JSON array of shot plans. No markdown, no commentary.");
             sb.AppendLine();
             sb.AppendLine("PRODUCT NAME: " + productName);
             sb.AppendLine("ASPECT RATIO for every shot: " + aspect);
             sb.AppendLine("PRODUCT TYPE HINT: " + (string.IsNullOrEmpty(productType) ? "(auto from photo)" : productType));
             sb.AppendLine("SHOOT STYLE: " + (string.IsNullOrEmpty(shootStyle) ? "(choose a coherent style from the photo)" : shootStyle));
+            sb.AppendLine("SET THEME (background/location mood for the whole batch — do NOT print the theme onto the garment): " + (string.IsNullOrEmpty(theme) ? "(choose a coherent location from the photo, still product-first)" : theme));
             sb.AppendLine("IDENTITY LOCK: " + (string.IsNullOrEmpty(identityLock) ? "(keep face + garment unless shot is flatlay/macro)" : identityLock));
             sb.AppendLine("PRODUCT LOCK (user notes — color, print, logo, form): " + (string.IsNullOrEmpty(productLock) ? "(use only what is visible in the photo)" : productLock));
             sb.AppendLine();
@@ -61,7 +68,11 @@ namespace tiktok_Omni.Services
             sb.AppendLine("- For on-model shots (solo_female, solo_male, couple, group): lock the model's identity (face, hair, skin, body type) from the reference. Do not change ethnicity, age, or beauty-filter the face.");
             sb.AppendLine("- For flatlay / fabric_closeup / detail_highlight: no face required; still lock garment identity.");
             sb.AppendLine("- You MAY change ONLY: pose, gesture, camera angle, framing, background, lighting, and small accessories that do not hide the product.");
-            sb.AppendLine("- Each prompt must be in English, detailed, ready for an image model. Do not mention TikTok, UI, or JSON in the prompt text.");
+            sb.AppendLine("- SET THEME is location/mood only. Never print the theme onto the garment (no invented floral, neon, or festival motifs on the product).");
+            sb.AppendLine("- Forbidden in every prompt: inspired by, similar to, reinterpret, redesign, stylized version, new print, extra logo, invented zipper/embroidery.");
+            sb.AppendLine("- Every prompt MUST start with exactly these two Vietnamese words then a space: " + ImagePromptPrefix);
+            sb.AppendLine("- After that prefix, write English for an image model that receives THIS SAME photo as reference. Include this lock (or equivalent, same strength): " + ProductLockSentence);
+            sb.AppendLine("- Then add the shot-specific English: pose, camera, background, lighting — still naming visible product details from the photo (color, print, logo, form). Do not mention TikTok, UI, or JSON.");
             sb.AppendLine("- Vary pose/camera across shots of the same type so they are not duplicates.");
             sb.AppendLine();
             sb.AppendLine("JSON SCHEMA — array of objects:");
@@ -69,7 +80,7 @@ namespace tiktok_Omni.Services
             sb.AppendLine("  {");
             sb.AppendLine("    \"shotType\": \"solo_female|solo_male|couple|group|flatlay|fabric_closeup|detail_highlight\",");
             sb.AppendLine("    \"title\": \"short Vietnamese label\",");
-            sb.AppendLine("    \"prompt\": \"English image prompt\",");
+            sb.AppendLine("    \"prompt\": \"" + ImagePromptPrefix + " " + ProductLockSentence + " Standing three-quarter view, natural pose, ...\",");
             sb.AppendLine("    \"aspectRatio\": \"" + aspect + "\",");
             sb.AppendLine("    \"outputFileName\": \"" + slug + "_solo_female_01.png\"");
             sb.AppendLine("  }");
@@ -143,7 +154,8 @@ namespace tiktok_Omni.Services
                     title = ProductAdImageShotPlan.FormatShotType(shotType);
                 }
 
-                var prompt = (shotObj.Value<string>("prompt") ?? shotObj.Value<string>("Prompt") ?? string.Empty).Trim();
+                var prompt = EnsureVariantImagePrompt(
+                    shotObj.Value<string>("prompt") ?? shotObj.Value<string>("Prompt"));
                 if (string.IsNullOrEmpty(prompt))
                 {
                     continue;
@@ -174,6 +186,32 @@ namespace tiktok_Omni.Services
             }
 
             return new ProductAdImagePlanningResult(shots);
+        }
+
+        public static string EnsureVariantImagePrompt(string prompt)
+        {
+            var text = (prompt ?? string.Empty).Trim();
+            if (text.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            if (text.StartsWith(ImagePromptPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                text = text.Substring(ImagePromptPrefix.Length).TrimStart();
+                if (text.StartsWith(".", StringComparison.Ordinal) || text.StartsWith(":", StringComparison.Ordinal))
+                {
+                    text = text.Substring(1).TrimStart();
+                }
+            }
+
+            if (text.IndexOf("IDENTICAL", StringComparison.OrdinalIgnoreCase) < 0
+                && text.IndexOf("attached reference", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                text = ProductLockSentence + " " + text;
+            }
+
+            return ImagePromptPrefix + " " + text;
         }
 
         public static string Slugify(string text)
